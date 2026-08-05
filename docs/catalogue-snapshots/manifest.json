@@ -1,0 +1,95 @@
+{
+  "captured": "2026-08-05",
+  "purpose": "Evidence for Table 4 of the MSE907 Assessment 1 proposal: rule coverage across production analysers.",
+  "verify": "shasum -a 256 -c SHA256SUMS",
+  "snapshots": [
+    {
+      "tool": "axe-core",
+      "version": "4.12.1",
+      "released": "2026-06-10",
+      "file": "axe-core-v4.12.1-rule-descriptions.md",
+      "url": "https://raw.githubusercontent.com/dequelabs/axe-core/v4.12.1/doc/rule-descriptions.md",
+      "captured": "2026-08-05",
+      "sha256": "7de9a1ffa7da794377a58058a60be60d4abc62371f4caccf6f251dad192eb738",
+      "size": 73028,
+      "note": "Rule catalogue at release tag v4.12.1."
+    },
+    {
+      "tool": "Lighthouse",
+      "version": "13.4.1",
+      "released": "2026-07-20",
+      "file": "lighthouse-accessibility-scoring.html",
+      "url": "https://developer.chrome.com/docs/lighthouse/accessibility/scoring",
+      "captured": "2026-08-05",
+      "sha256": "9f419012a7e09d9ad4972b6c8e9de1f9832e06896aa7c20a1b5e923a62ac28a6",
+      "size": 120995,
+      "note": "Accessibility scoring documentation. Audits delegate to axe-core."
+    },
+    {
+      "tool": "WAVE",
+      "version": "API 3.1",
+      "released": "2020-09-22",
+      "file": "wave-api-changelog.html",
+      "url": "https://wave.webaim.org/api/changelog",
+      "captured": "2026-08-05",
+      "sha256": "77ca773b29743c5459e226ea75fc64e3150700662acd6c0a278dfbcdc29fff06",
+      "size": 8858,
+      "note": "API changelog establishing 3.1 as current. Hosted evaluation tool publishes no version."
+    },
+    {
+      "tool": "WAVE",
+      "version": "API 3.1",
+      "released": "2020-09-22",
+      "file": "wave-api-index.html",
+      "url": "https://wave.webaim.org/api/",
+      "captured": "2026-08-05",
+      "sha256": "daf4c1207562e08b4eab299de03ed883fab824336d2d80a74ca6abe283370933",
+      "size": 5038,
+      "note": "API landing page captured alongside the changelog."
+    },
+    {
+      "tool": "eslint-plugin-jsx-a11y",
+      "version": "6.10.2",
+      "released": "npm 2024-10-26; GitHub release 2025-01-05",
+      "file": "eslint-plugin-jsx-a11y-v6.10.2-README.md",
+      "url": "https://raw.githubusercontent.com/jsx-eslint/eslint-plugin-jsx-a11y/v6.10.2/README.md",
+      "captured": "2026-08-05",
+      "sha256": "f62ec4262e1adf8dd8c36a7ac1d8f3a582ad4a57590c046928c6aaec96002ccb",
+      "size": 23712,
+      "note": "Supported rule list at release tag v6.10.2."
+    },
+    {
+      "tool": "SonarQube Server",
+      "version": "26.7.0.124771",
+      "released": "2026-07-08",
+      "file": "sonarqube-rules-overview.html",
+      "url": "https://docs.sonarsource.com/sonarqube-server/latest/user-guide/rules/overview/",
+      "captured": "2026-08-05",
+      "sha256": "c7ae3b058a82704ea28e4d1551e4d543f01a02936e4046bc314e5debc420280c",
+      "size": 1577290,
+      "note": "Rules overview. Catalogue is specific to the server release; page itself is unversioned."
+    },
+    {
+      "tool": "eslint-plugin-i18next",
+      "version": "6.1.5",
+      "released": "2026-06-28",
+      "file": "eslint-plugin-i18next-v6.1.5-README.md",
+      "url": "https://raw.githubusercontent.com/edvardchen/eslint-plugin-i18next/v6.1.5/README.md",
+      "captured": "2026-08-05",
+      "sha256": "6c47ce27715ef44890ae6538f423dfcb4010c85c82d75dba82d4aa19b41f6c00",
+      "size": 1269,
+      "note": "Rule documentation at release tag v6.1.5."
+    },
+    {
+      "tool": "eslint-plugin-formatjs",
+      "version": "6.4.20",
+      "released": "npm 2026-07-31",
+      "file": "eslint-plugin-formatjs-linter.html",
+      "url": "https://formatjs.github.io/docs/tooling/linter/",
+      "captured": "2026-08-05",
+      "sha256": "02d13c6516d4e1e0ba5b23c12d108a6eb85c5f12390444ec88c9b7d9f7711c25",
+      "size": 171501,
+      "note": "Linter rule documentation. Documentation site is unversioned; npm release recorded."
+    }
+  ]
+}

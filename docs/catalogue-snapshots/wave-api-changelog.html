@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<title>WAVE Changelog</title>
+	<script src="/js/index.js"></script>
+	<link rel="preconnect" href="https://fonts.googleapis.com">
+	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+	<link href="https://fonts.googleapis.com/css2?family=Open+Sans:ital,wght@0,300..800;1,300..800&display=swap" rel="stylesheet">
+	<link rel="stylesheet" href="/styles/index.css?ver=3.2" type="text/css">
+	<link rel="shortcut icon" href="/favicon.ico">
+</head>
+<body>
+<header>
+<nav>
+<ul>
+	<li><a href="/extension">Browser Extensions</a></li>
+	<li><a href="/standalone">Stand-alone API/Testing Engine</a></li>
+	<li><a href="/api">Subscription API</a></li>
+	<li><a href="/aim">AIM Report</a></li>
+	<li><a href="/help">Help</a></li>
+</ul>
+<a href="/"><img src="/img/wavelogo.svg" alt="WAVE Web Accessibility Evaluation Tool" height="120"></a>
+</nav>
+<div id="main_form" class="controls">
+<form id="waveform" novalidate>
+<label for="input_url">Web page address:</label><br><input id="input_url" type="url" class="control url"><input class="control" type="submit" id="button_wave" value="WAVE">
+</form>
+</div>
+</header>
+<main>
+
+
+	<span style="float:right;">
+		<a href="/api/register">Register</a>&nbsp;|&nbsp;
+		<a href="/api/login">Login</a>
+	</span>
+	<div style="clear:both;"></div>
+
+<h1>WAVE Changelog</h1>
+
+<h2>Version 3.0 -> 3.1 Changes</h2>
+
+<h3>API Specification Changes</h3>
+
+<p>Below are changes to the <a href="details">WAVE API Specification</a> for v3.1 (released September 22, 2020).</p>
+
+<ul>
+	<li>The WAVE API provides item text contrast data.
+	<ul>
+		<li>When reporttype is set to 3 or 4, the WAVE API now returns a <i>contrastdata</i> item which includes the WCAG contrast ratio, foreground hex color, background hex color, and true/false indicator if the evaluated text is "large" text (per the WCAG definition) for each instance of Low Contrast Text.</li>
+	</ul>
+	</li>
+	<li>The following are new WAVE items (with categories):
+	<ul>
+		</li>
+		<li>Figure
+		<ul>
+			<li><i>figure</i> (Feature) - Indicates the presence of <code>&lt;figure&gt;</code>.</li>
+		</ul>
+		</li>
+		<li>Generic region
+		<ul>
+			<li><i>region</i> (Structural element) - Indicates the presence of any <code>role="region"</code> that is properly labeled with <code>aria-label</code> or <code>aria-labelledby</code>. Generic regions are identified in the "Structure" tab in the WAVE visual interface.</li>
+		</ul>
+		</li>
+		<li>YouTube video 
+		<ul>
+			<li><i>youtube_video</i> (Alert) - An embedded or linked YouTube video is present.</li>
+		</ul>
+		</li>
+		<li>Possible list
+		<ul>
+			<li><i>list_possible</i> (Alert) - Indicates when text is used to generated a visual list that lacks proper list semantics.</li>
+		</ul>
+		</li>
+		<li>Select missing label
+		<ul>
+			<li><i>select_missing_label</i> (Alert) - Indicates when a <code>&lt;select&gt;</code> element is present but does not have an associated label. In this case, the default select option will define the accessible name for the select label. Overrides <i>label_missing</i>.</li>
+		</ul>
+		</li>
+		<li>Image with title
+		<ul>
+			<li><i>image_title</i> (Alert) - An image does not have an alt value but does have a title attribute value. Overrides <i>alt_missing</i> and <i>alt_link_missing</i>.</li>
+		</ul>
+		</li>
+	</ul>
+</ul>
+
+<h3>Functionality Changes</h3>
+
+<ul>
+	<li>New accessibility tests as described above.</li>
+	<li>Low contrast text is now detected on most HTML input types and <code>&lt;select&gt;</code> elements.</li>
+	<li>The visual interface provides more clear identification of WAVE items that are associated to page elements that are visually hidden. Users are prompted to disable Styles or view the Code panel to analyze these hidden items.</li>
+	<li>The "Language missing or invalid" (<i>lang</i>) test has been extended to identify valid <code>lang</code> attribute values for the document and page elements. The visual interface presents the <code>lang</code> attribute value.</li>
+	<li>Empty links and empty buttons are not identified if a non-empty <code>title</code> attribute value is present. Title is now broadly supported as defining the link/button accessible name.</li>
+	<li>Missing alternative text is not identified for images that have a non-empty <code>title</code> attribute value. These will instead present the "Image with title" alert indicating that alt is typically optimal.</li>
+	<li>Numerous other bug fixes, testing refinements, and performance optimizations have been made.</li>
+</ul>
+
+<h2>Version 2.1 -> 3.0 Changes</h2>
+
+<p>Below are changes to the <a href="details">WAVE API Specification</a> for v3.0 (released October 30, 2019).</p>
+
+<h3>API Specification Changes</h3>
+<ul>
+	<li>The <i>html5</i> category of WAVE items (which previously included HTML5 and ARIA items) has been removed and a new <i>aria</i> category replaces it. The new <i>aria</i> category includes existing ARIA items, plus new ones as documented below.</li>
+	<li>The following WAVE items have been renamed and moved from the defunct <i>html5</i> category to the <i>structure</i> category:
+	<ul>
+		<li>html5_header -> header
+		<li>html5_nav -> nav
+		<li>html5_main -> main
+		<li>html5_aside -> aside
+		<li>html5_footer -> footer
+		<li>aria_search -> search
+	</ul>
+	</li>
+	<li>The following WAVE items have moved to new output categories:
+	<ul>
+		<li>table_layout - from  <i>structure</i> to <i>alert</i>. This better encourages the disuse of layout tables.</li>
+		<li>longdesc - from  <i>feature</i> to <i>alert</i>. Due to poor support.</li>
+	</ul>
+	<li>The following are new WAVE items (with categories):
+	<ul>
+		<li>aria_menu_broken (<i>error</i>) - Indicates an ARIA menu lacking required menuitem children.
+		<li>region_missing (<i>alert</i>) - Indicates the lack of regions/landmarks in the page.
+		<li>aria_describedby (<i>aria</i>) - Indicates the presence of <code>aria-describedby</code> attribute. The existing aria_label item will identify elements with <code>aria_label</code> and <code>aria_labelledby</code>.
+		<li>aria_button (<i>aria</i>) - Indicates the presence of <code>role="button"</code>.
+		<li>aria_live_region (<i>aria</i>) - Indicates the presence of <code>role="alert"</code>, <code>role="alertdialog"</code>, or <code>aria-live</code> attributes.
+		<li>aria_menu (<i>aria</i>) - Indicates the presence of <code>role="menu"</code> attribute.
+		<li>aria_hidden (<i>aria</i>) - Indicates the presence of <code>aria-hidden="true"</code> attribute.
+		<li>aria_expanded (<i>aria</i>) - Indicates the presence of <code>aria-expanded</code> attribute.
+		<li>aria_haspopup (<i>aria</i>) - Indicates the presence of <code>aria-haspopup</code> attribute.
+	</ul>
+	</li>
+	<li>The server_image_map <i>error</i> item has been removed. These are generally non-existent on the web.</li>
+</ul>
+
+<h3>Functionality Changes</h3>
+<ul>
+	<li><strong>Chrome rendering engine</strong><br>The API will feature a Chrome rendering engine for back-end analysis. This supports faster and more accurate accessibility evaluation.</li>
+	<li><strong>User agent string customization</strong><br>
+	You can pass a <code>&useragent=</code> parameter to override the default up-to-date Chrome on Mac user agent string. This, along with setting viewport sizes, can allow better analysis of mobile web content.</li>
+	<li><strong>New evaluation rules as documented above</strong></li>
+	<li><strong>CSS selector outputs</strong><br>
+	Get details/counts for WAVE items, plus CSS selector values for each item with <code>&reporttype=4</code>. CSS selectors can be used to associate WAVE items/errors with specific page elements.</li>
+	<li><strong>Numerous bug and performance fixes</strong><br>
+	The API is now faster, more accurate, and has fewer false positives than ever before. The contrast checking logic has been entirely rewritten to avoid the majority of false positives.
+</ul>
+		
+
+
+
+<h2>Feedback</h2>
+
+<p>If you have feedback or recommendations on the WAVE API Specification, please <a href="/feedback">contact us</a>.</p>
+
+</main>
+<footer>
+	<div class="footerblock"><a href="https://usu.edu/"><img src="/img/web/usu-logo.svg" alt="Utah State University" style="width:70%;"></a></div>
+	<div class="footerblock middle"><a href="https://webaim.org/"><img src="/img/web/WebAIM-logo.svg" alt="WebAIM - Web Accessibility in Mind"></a><br>
+		Utah State University<br>
+		6807 Old Main Hill<br>
+		Logan, UT 84322-6807<br>
+		435.797.7024</div>
+	<div class="footerblock" id="footerlinks">
+		<ul>
+			<li id="contact"><a href="/feedback">Contact Us</a></li>
+			<li id="sitewide"><a href="/sitewide">Site-wide WAVE Tools</a></li>
+			<li id="about"><a href="/about">About</a></li>
+			<li id="terms"><a href="/terms">Terms of Use</a></li>		
+		</ul>
+	</div>
+	
+	<div id="copyright">
+		WAVE is &copy; and &reg; 2026	</div>
+	
+	
+</footer>
+
+
+</body>
+</html>
+	

@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<title>WAVE API</title>
+	<script src="/js/index.js"></script>
+	<link rel="preconnect" href="https://fonts.googleapis.com">
+	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+	<link href="https://fonts.googleapis.com/css2?family=Open+Sans:ital,wght@0,300..800;1,300..800&display=swap" rel="stylesheet">
+	<link rel="stylesheet" href="/styles/index.css?ver=3.2" type="text/css">
+	<link rel="shortcut icon" href="/favicon.ico">
+</head>
+<body>
+<header>
+<nav>
+<ul>
+	<li><a href="/extension">Browser Extensions</a></li>
+	<li><a href="/standalone">Stand-alone API/Testing Engine</a></li>
+	<li><a href="/api">Subscription API</a></li>
+	<li><a href="/aim">AIM Report</a></li>
+	<li><a href="/help">Help</a></li>
+</ul>
+<a href="/"><img src="/img/wavelogo.svg" alt="WAVE Web Accessibility Evaluation Tool" height="120"></a>
+</nav>
+<div id="main_form" class="controls">
+<form id="waveform" novalidate>
+<label for="input_url">Web page address:</label><br><input id="input_url" type="url" class="control url"><input class="control" type="submit" id="button_wave" value="WAVE">
+</form>
+</div>
+</header>
+<main>
+
+
+	<span style="float:right;">
+		<a href="/api/register">Register</a>&nbsp;|&nbsp;
+		<a href="/api/login">Login</a>
+	</span>
+	<div style="clear:both;"></div>
+<h1>WAVE API</h1>
+
+<div style="float:right;border:1px solid #4977B5;border-radius:5px;padding:0 4px;margin:8px;width:35%;text-align: center;">
+<h2>Stand-alone API</h2>
+<p>The WAVE API can be licensed as a stand-alone, installable product. <a href="/standalone">Learn more about the WAVE stand-alone API</a>.</p>
+</div>
+
+<h2 id="what">What is the WAVE API?</h2>
+
+<p>The WAVE API allows automated and remote accessibility analysis of web pages using the WAVE processing engine. You submit the URL of the page to be analyzed and the API returns back useful data about how accessible it is. The API engine evaluates your web page after CSS and JavaScript has been applied resulting in a very accurate evaluation of end user accessibility.</p>
+
+<h2 id="getstarted">How do I get started?</h2>
+
+<p>Simply <a href="register">register for a new API key</a> and purchase WAVE API credits. <em>All new accounts get 100 free credits.</em> If you already have an account, <a href="login">log in to the account manager</a>. You can purchase additional credits for as little as $.025 each. The more you purchase, the less expensive credits become.</p>
+
+<p>If you're familiar with APIs, using the WAVE API will be very easy. You perform a simple GET request that contains your API key and the URL of the page to check, we'll send you back results data in either JSON or XML format. You can customize the request to get more or less data. Additional details are available in the <a href="details">API Specification</a>.</p>
+
+<h2 id="pricing">Pricing</h2>
+
+<p>A balance of WAVE API credits is necessary to use the API. <em>All new accounts get 100 free credits.</em> Basic analysis of one web page costs you 1 credit. If you use advanced features of the WAVE API, it might cost you 2 or 3 credits per request.</p>
+
+<table>
+<tr><th># of Credits</th><th>Price</th></tr>
+<tr><td>250-999</td><td>$.04/credit. 250 credit ($10) minimum purchase.</td></tr>
+<tr><td>1000-9999</td><td>$.03/credit</td></tr>
+<tr><td>10000+</td><td>$.025/credit</td></tr>
+</table>
+
+<p>Payment can be made instantly via credit credit card or via check. Please <a href="register">register</a> to get started.</p>
+
+<h2 id="using">Using the API</h2>
+
+<p>API requests are made by sending a request to http://wave.webaim.org/api/request?key=<i>{yourAPIkey}</i>&url=<i>{url}</i> (https can be used for secure connections). You can generate your unique key by registering. Several additional parameters are available to customize the request and data you receive - from basic overview data to full WAVE report details including XPath data for detailed accessibility analysis.</p>
+
+<p><a href="details"><strong>Read the API Specification Details</strong></a></p>
+
+
+<h2>Support</h2>
+
+<p>We're always striving to make WAVE and the WAVE API better. If you have recommendations or encounter an issue, <a href="/feedback">please contact us</a>.</p>
+</main>
+<footer>
+	<div class="footerblock"><a href="https://usu.edu/"><img src="/img/web/usu-logo.svg" alt="Utah State University" style="width:70%;"></a></div>
+	<div class="footerblock middle"><a href="https://webaim.org/"><img src="/img/web/WebAIM-logo.svg" alt="WebAIM - Web Accessibility in Mind"></a><br>
+		Utah State University<br>
+		6807 Old Main Hill<br>
+		Logan, UT 84322-6807<br>
+		435.797.7024</div>
+	<div class="footerblock" id="footerlinks">
+		<ul>
+			<li id="contact"><a href="/feedback">Contact Us</a></li>
+			<li id="sitewide"><a href="/sitewide">Site-wide WAVE Tools</a></li>
+			<li id="about"><a href="/about">About</a></li>
+			<li id="terms"><a href="/terms">Terms of Use</a></li>		
+		</ul>
+	</div>
+	
+	<div id="copyright">
+		WAVE is &copy; and &reg; 2026	</div>
+	
+	
+</footer>
+
+
+</body>
+</html>
+	
