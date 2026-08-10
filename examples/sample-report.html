@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FormFair report</title>
+<style>
+:root { color-scheme: light dark; }
+body { font: 15px/1.55 system-ui, -apple-system, Segoe UI, sans-serif; margin: 0; padding: 2rem;
+       max-width: 60rem; background: Canvas; color: CanvasText; }
+h1 { font-size: 1.35rem; margin: 0 0 .25rem; }
+.meta { color: GrayText; font-size: .85rem; margin-bottom: 1.75rem; }
+.tally { display: flex; gap: 1.5rem; flex-wrap: wrap; padding: .9rem 1.1rem; margin-bottom: 2rem;
+         border: 1px solid color-mix(in srgb, CanvasText 15%, transparent); border-radius: 6px; }
+.tally div { font-size: .85rem; color: GrayText; }
+.tally strong { display: block; font-size: 1.4rem; color: CanvasText; font-weight: 600; }
+.finding { border-left: 3px solid var(--c); padding: .1rem 0 .1rem 1rem; margin-bottom: 1.75rem; }
+.head { display: flex; gap: .6rem; align-items: baseline; flex-wrap: wrap; }
+.sev { color: var(--c); font-weight: 600; font-size: .78rem; letter-spacing: .06em; }
+.rule { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .8rem; color: GrayText; }
+.msg { margin: .35rem 0 .6rem; font-weight: 500; }
+dl { margin: 0; display: grid; grid-template-columns: max-content 1fr; gap: .3rem .9rem; font-size: .9rem; }
+dt { color: GrayText; }
+dd { margin: 0; }
+code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .82rem; }
+pre { overflow-x: auto; padding: .55rem .7rem; border-radius: 4px;
+      background: color-mix(in srgb, CanvasText 6%, transparent); margin: .3rem 0 0; }
+table { border-collapse: collapse; font-size: .88rem; margin-top: .5rem; }
+th, td { text-align: left; padding: .35rem 1.2rem .35rem 0; }
+th { font-weight: 600; color: GrayText; font-size: .8rem; }
+h2 { font-size: .95rem; margin: 2.5rem 0 .3rem; }
+.note { color: GrayText; font-size: .85rem; }
+</style>
+</head>
+<body>
+<h1>FormFair report</h1>
+<p class="meta">Rule catalogue 0.1.0</p>
+<div class="tally">
+  <div><strong>2</strong>name controls</div>
+  <div><strong>4</strong>findings</div>
+  <div><strong>1</strong>critical</div>
+  <div><strong>2</strong>high</div>
+  <div><strong>1</strong>medium</div>
+</div>
+<div class="finding" style="--c:#b3261e">
+  <div class="head">
+    <span class="sev">CRITICAL</span>
+    <span class="rule">FF-01</span>
+    <span class="rule">line 3</span>
+  </div>
+  <p class="msg">This field declares a constraint that rejects names outside the Basic Latin (ASCII) range.</p>
+  <dl>
+    <dt>Evidence</dt><dd>pattern=&quot;[A-Za-z]{2,40}&quot; accepts &quot;Smith&quot; but rejects every tested name containing a letter outside U+0041–U+005A and U+0061–U+007A.</dd>
+    <dt>Remediation</dt><dd>Draw the permitted characters from the CLDR exemplar sets for the languages the form serves, or use a Unicode-aware class such as \p{L} with the punctuation names require.</dd>
+  </dl>
+  <pre>&lt;input id=&quot;fn&quot; name=&quot;firstName&quot; pattern=&quot;[A-Za-z]{2,40}&quot; required&gt;</pre>
+</div>
+<div class="finding" style="--c:#8a5a00">
+  <div class="head">
+    <span class="sev">HIGH</span>
+    <span class="rule">FF-04</span>
+    <span class="rule">line 3</span>
+  </div>
+  <p class="msg">Legitimate name punctuation is rejected.</p>
+  <dl>
+    <dt>Evidence</dt><dd>pattern=&quot;[A-Za-z]{2,40}&quot; rejects: apostrophe U+0027 — &quot;O'Brien&quot;; right single quotation mark U+2019 — &quot;O’Brien&quot;; hyphen-minus U+002D — &quot;Anne-Marie&quot;; space U+0020 — &quot;van der Berg&quot;.</dd>
+    <dt>Remediation</dt><dd>Admit apostrophes, hyphens and internal spaces. Escaping on output is the defence against injection; input restriction is not.</dd>
+  </dl>
+  <pre>&lt;input id=&quot;fn&quot; name=&quot;firstName&quot; pattern=&quot;[A-Za-z]{2,40}&quot; required&gt;</pre>
+</div>
+<div class="finding" style="--c:#8a5a00">
+  <div class="head">
+    <span class="sev">HIGH</span>
+    <span class="rule">FF-03</span>
+    <span class="rule">line 5</span>
+  </div>
+  <p class="msg">The constraint treats two identical-looking encodings of the same name differently.</p>
+  <dl>
+    <dt>Evidence</dt><dd>&quot;Tāwhiao&quot; accepted but its decomposed form rejected; &quot;Émile&quot; accepted but its decomposed form rejected; &quot;Müller&quot; accepted but its decomposed form rejected. The forms are canonically equivalent under UAX #15.</dd>
+    <dt>Remediation</dt><dd>Normalise the value before validating it, typically to NFC, so that canonically equivalent inputs are treated alike.</dd>
+  </dl>
+  <pre>&lt;input id=&quot;ln&quot; name=&quot;lastName&quot; pattern=&quot;[\p{L}\u0027\u2019 -]+&quot;&gt;</pre>
+</div>
+<div class="finding" style="--c:#3b5d78">
+  <div class="head">
+    <span class="sev">MEDIUM</span>
+    <span class="rule">FF-05</span>
+    <span class="rule">line 3</span>
+  </div>
+  <p class="msg">The field declares a minimum length that excludes short legitimate names.</p>
+  <dl>
+    <dt>Evidence</dt><dd>pattern=&quot;[A-Za-z]{2,40}&quot; accepts nothing shorter than 2 characters.</dd>
+    <dt>Remediation</dt><dd>Allow a single character, or remove the lower bound from the pattern.</dd>
+  </dl>
+  <pre>&lt;input id=&quot;fn&quot; name=&quot;firstName&quot; pattern=&quot;[A-Za-z]{2,40}&quot; required&gt;</pre>
+</div>
+<h2>Decision coverage</h2>
+<p class="note">The proportion of controls each rule reached a decision on. A declined control was not analysed, which is not the same as clean.</p>
+<table>
+  <tr><th>Rule</th><th>Coverage</th><th>Findings</th><th>Declined</th></tr>
+  <tr><td><code>FF-01</code></td><td>100%</td><td>1</td><td></td></tr>
+<tr><td><code>FF-02</code></td><td>100%</td><td>0</td><td></td></tr>
+<tr><td><code>FF-03</code></td><td>100%</td><td>1</td><td></td></tr>
+<tr><td><code>FF-04</code></td><td>100%</td><td>1</td><td></td></tr>
+<tr><td><code>FF-05</code></td><td>50%</td><td>1</td><td>1</td></tr>
+</table>
+</body>
+</html>

@@ -61,17 +61,37 @@ declined for the length-dependent rules.
 
 ```bash
 npm install
-npm test          # 42 tests
+npm test          # 63 tests
 npm run typecheck
 ```
 
 ```ts
-import { analyse, decisionCoverage } from './src/index.js';
+import { analyse, toText, toHtml, toJsonString } from './src/index.js';
 
 const result = analyse('<input name="firstName" pattern="[A-Za-z]+">');
-console.log(result.findings);
-console.log(decisionCoverage(result));
+
+console.log(toText(result));      // plain text, for a terminal or CI log
+toHtml(result);                   // self-contained HTML, no external assets
+toJsonString(result);             // machine-readable, schema formfair/report@1
 ```
+
+Every finding carries the source evidence that triggered it, an explanation, and a
+concrete remediation. Declines are reported alongside findings rather than omitted,
+so a consumer can distinguish "no anti-pattern" from "not analysed".
+
+`examples/sample-report.html` is generated output.
+
+### A worked example
+
+The Unicode-aware pattern a careful developer reaches for is not sufficient on its own:
+
+```
+pattern="[\p{L}' -]+"     FF-03 — accepts "Tāwhiao" but rejects its decomposed form
+pattern="[\p{L}\p{M}' -]+"   clean
+```
+
+`\p{L}` matches letters but not combining marks, so the precomposed and decomposed
+forms of the same name are treated differently. This is the case FF-03 exists for.
 
 ## Catalogue snapshots
 

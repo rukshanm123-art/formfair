@@ -23,22 +23,14 @@ export function analyse(html: string): AnalysisResult {
   };
 }
 
-/**
- * Decision coverage per rule: the proportion of controls on which a rule reached a
- * decision rather than declining. Reported alongside accuracy so that silence is
- * never read as a clean result.
- */
-export function decisionCoverage(result: AnalysisResult): Record<RuleId, number> {
-  const coverage = {} as Record<RuleId, number>;
-  for (const rule of RULES) {
-    const declines = result.declined.filter((d) => d.rule === rule.id).length;
-    coverage[rule.id] = result.controls === 0 ? 1 : (result.controls - declines) / result.controls;
-  }
-  return coverage;
-}
-
 export { findNameControls } from './parse/controls.js';
 export { analysePattern } from './parse/pattern.js';
 export { utf16Bounds } from './parse/length.js';
 export { RULES, CATALOGUE_VERSION } from './rules/index.js';
+export { toJson, toJsonString } from './report/json.js';
+export { toText } from './report/text.js';
+export { toHtml } from './report/html.js';
+export { summarise, sortFindings, decisionCoverage } from './report/summary.js';
+export type { Summary, RuleSummary } from './report/summary.js';
+export type { JsonReport } from './report/json.js';
 export type * from './types.js';
