@@ -92,12 +92,17 @@ Requires Node 20 or later: the analyser compiles patterns with the regular-expre
 
 ```bash
 npm install
-npm test              # 86 tests, the rule catalogue and reports
-npm run test:delegated  # the axe-core suite, which boots a DOM and is much slower
+npm test                # 86 tests, the rule catalogue and reports
 npm run typecheck
-npm run build         # dist/index.js with type declarations
-npm run example       # regenerates examples/sample-report.html
+npm run build           # dist/index.js with type declarations
+npm run example         # regenerates examples/sample-report.html
+npm run test:delegated  # the axe-core suite; needs Node 22, see below
 ```
+
+The delegated suite runs axe-core inside jsdom, whose bundled undici calls a Node
+internal that Node 20 does not provide, so it needs Node 22. That constrains the test
+harness only; the analyser itself runs on Node 20. CI verifies the package on both
+versions and runs the delegated suite on 22.
 
 ```ts
 import { analyse, toText, toHtml, toJsonString } from './src/index.js';

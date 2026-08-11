@@ -8,12 +8,19 @@ on:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 20 is the lowest version the package claims to support: the analyser
+        # compiles patterns with the regular-expression `v` flag, which lands there.
+        node: [20, 22]
+
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: ${{ matrix.node }}
           cache: npm
 
       - run: npm ci
@@ -27,12 +34,28 @@ jobs:
       - name: Test
         run: npm run coverage
 
-      - name: Delegated accessibility suite
-        run: npm run test:delegated
-
       - name: Build
         run: npm run build
 
       - name: Verify catalogue snapshot integrity
         working-directory: docs/catalogue-snapshots
         run: shasum -a 256 -c SHA256SUMS
+
+  delegated:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Node 22, not 20: jsdom's bundled undici calls webidl.util.markAsUncloneable,
+      # which Node 20 does not provide. This constrains the test harness only — the
+      # published analyser still runs on Node 20.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Delegated accessibility suite
+        run: npm run test:delegated
