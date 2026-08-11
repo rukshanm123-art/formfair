@@ -9,19 +9,49 @@
           "controlId": "synthetic-001#12:4",
           "isNameControl": true,
           "detected": true,
-          "rules": { "FF-01": "positive", "FF-02": "negative", "FF-03": "negative", "FF-04": "positive", "FF-05": "positive" },
-          "outcomes": { "FF-01": "finding", "FF-02": "clean", "FF-03": "clean", "FF-04": "finding", "FF-05": "finding" }
+          "rules": {
+            "FF-01": "positive",
+            "FF-02": "negative",
+            "FF-03": "negative",
+            "FF-04": "positive",
+            "FF-05": "positive"
+          },
+          "outcomes": {
+            "FF-01": "finding",
+            "FF-02": "clean",
+            "FF-03": "clean",
+            "FF-04": "finding",
+            "FF-05": "finding"
+          }
         },
         {
           "controlId": "synthetic-001#20:4",
           "isNameControl": true,
           "detected": false,
-          "rules": { "FF-01": "positive", "FF-02": "negative", "FF-03": "negative", "FF-04": "negative", "FF-05": "negative" }
+          "rules": {
+            "FF-01": "positive",
+            "FF-02": "negative",
+            "FF-03": "negative",
+            "FF-04": "negative",
+            "FF-05": "negative"
+          }
         },
-        { "controlId": "synthetic-001#28:4", "isNameControl": false, "detected": false }
+        {
+          "controlId": "synthetic-001#28:4",
+          "isNameControl": false,
+          "detected": false
+        }
       ],
-      "advisories": [{ "code": "ADV-NORM-BOUNDARY" }],
-      "delegatedFindings": [{ "ruleId": "label" }]
+      "advisories": [
+        {
+          "code": "ADV-NORM-BOUNDARY"
+        }
+      ],
+      "delegatedFindings": [
+        {
+          "ruleId": "label"
+        }
+      ]
     },
     {
       "pageId": "synthetic-002",
@@ -30,11 +60,28 @@
           "controlId": "synthetic-002#8:2",
           "isNameControl": true,
           "detected": true,
-          "rules": { "FF-01": "negative", "FF-02": "positive", "FF-03": "positive", "FF-04": "negative", "FF-05": "negative" },
-          "outcomes": { "FF-01": "clean", "FF-02": "finding", "FF-03": "declined", "FF-04": "finding", "FF-05": "declined" }
+          "rules": {
+            "FF-01": "negative",
+            "FF-02": "positive",
+            "FF-03": "positive",
+            "FF-04": "negative",
+            "FF-05": "negative"
+          },
+          "outcomes": {
+            "FF-01": "clean",
+            "FF-02": "finding",
+            "FF-03": "declined",
+            "FF-04": "finding",
+            "FF-05": "declined"
+          }
         },
-        { "controlId": "synthetic-002#15:2", "isNameControl": false, "detected": true }
+        {
+          "controlId": "synthetic-002#15:2",
+          "isNameControl": false,
+          "detected": true
+        }
       ]
     }
-  ]
+  ],
+  "synthetic": true
 }

@@ -34,7 +34,20 @@ export function wilson(successes, total, z = Z_95) {
   const halfWidth =
     (z / denominator) * Math.sqrt((p * (1 - p)) / total + z2 / (4 * total * total));
 
-  const result = {
+  // Below the threshold the caller gets the counts and the reason, and nothing that
+  // could be mistaken for an estimate. Returning a point alongside estimable: false
+  // leaves the misleading number one property access away, which is the situation this
+  // guard exists to prevent.
+  if (total < MIN_DENOMINATOR) {
+    return {
+      estimable: false,
+      reason: `denominator ${total} is below ${MIN_DENOMINATOR}`,
+      successes,
+      total,
+    };
+  }
+
+  return {
     estimable: true,
     point: p,
     lower: Math.max(0, centre - halfWidth),
@@ -42,10 +55,6 @@ export function wilson(successes, total, z = Z_95) {
     successes,
     total,
   };
-  if (total < MIN_DENOMINATOR) {
-    return { ...result, estimable: false, reason: `denominator ${total} is below ${MIN_DENOMINATOR}` };
-  }
-  return result;
 }
 
 /**
@@ -143,7 +152,13 @@ export function bootstrapF1(clusters, { resamples = 2000, seed = 'evaluation-v1.
   if (point === null) return notEstimable('precision and recall are both undefined');
 
   if (total < MIN_DENOMINATOR) {
-    return { estimable: false, reason: `denominator ${total} is below ${MIN_DENOMINATOR}`, point };
+    // Counts only. No point estimate and no interval, for the same reason as wilson().
+    return {
+      estimable: false,
+      reason: `denominator ${total} is below ${MIN_DENOMINATOR}`,
+      scoredPairs: total,
+      clusters: usable.length,
+    };
   }
 
   const random = mulberry32(seedFromString(seed));

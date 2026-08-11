@@ -114,7 +114,7 @@ describe('cli-draw-order', () => {
 
 describe('cli-metrics', () => {
   test('computes a report from the synthetic dataset', () => {
-    const r = run('cli-metrics.mjs', [fixture('dataset.valid.json')]);
+    const r = run('cli-metrics.mjs', [fixture('dataset.valid.json'), '--synthetic']);
     assert.equal(r.code, 0, r.stderr);
     const report = JSON.parse(r.stdout);
     assert.equal(report.protocol, 'FormFair Held-Out Evaluation Protocol v1.0');
@@ -127,23 +127,47 @@ describe('cli-metrics', () => {
   test('writes to a file when asked', () =>
     withTempDir((dir) => {
       const out = join(dir, 'report.json');
-      const r = run('cli-metrics.mjs', [fixture('dataset.valid.json'), '--out', out]);
+      const r = run('cli-metrics.mjs', [fixture('dataset.valid.json'), '--synthetic', '--out', out]);
       assert.equal(r.code, 0, r.stderr);
       assert.ok(JSON.parse(readFileSync(out, 'utf8')).stageOne);
     }));
 
   test('refuses a dataset that does not match the frozen schema', () => {
     // Scoring a malformed dataset would produce numbers that look like results.
-    const r = run('cli-metrics.mjs', [fixture('dataset.invalid.json')]);
+    const r = run('cli-metrics.mjs', [fixture('dataset.invalid.json'), '--synthetic']);
     assert.equal(r.code, 1);
     assert.match(r.stderr, /does not match the frozen schema/);
     assert.match(r.stderr, /detected must be a boolean/);
   });
 
   test('fails on a missing dataset rather than reporting nothing', () => {
-    const r = run('cli-metrics.mjs', ['does-not-exist.json']);
+    const r = run('cli-metrics.mjs', ['does-not-exist.json', '--synthetic']);
     assert.equal(r.code, 1);
     assert.match(r.stderr, /cannot read the dataset/);
+  });
+
+  test('refuses to score anything without a closed seal', () => {
+    // Official figures must name the run that produced them.
+    const r = run('cli-metrics.mjs', [fixture('dataset.valid.json')]);
+    assert.equal(r.code, 1);
+    assert.match(r.stderr, /refusing to compute metrics without --seal/);
+  });
+
+  test('the synthetic bypass refuses a dataset that is not marked synthetic', () =>
+    withTempDir((dir) => {
+      const file = JSON.parse(readFileSync(fixture('dataset.valid.json'), 'utf8'));
+      delete file.synthetic;
+      const path = join(dir, 'unmarked.json');
+      writeFileSync(path, JSON.stringify(file));
+      const r = run('cli-metrics.mjs', [path, '--synthetic']);
+      assert.equal(r.code, 1);
+      assert.match(r.stderr, /must not be used to score real data/);
+    }));
+
+  test('rejects the bypass and a seal together', () => {
+    const r = run('cli-metrics.mjs', [fixture('dataset.valid.json'), '--synthetic', '--seal', 'x.json']);
+    assert.equal(r.code, 1);
+    assert.match(r.stderr, /mutually exclusive/);
   });
 
   test('prints usage when given no dataset', () => {
@@ -153,7 +177,7 @@ describe('cli-metrics', () => {
   });
 
   test('the synthetic dataset exercises every end-to-end case in the protocol', () => {
-    const report = JSON.parse(run('cli-metrics.mjs', [fixture('dataset.valid.json')]).stdout);
+    const report = JSON.parse(run('cli-metrics.mjs', [fixture('dataset.valid.json'), '--synthetic']).stdout);
     const counts = Object.values(report.perRule).map((r) => r.endToEnd.counts);
     const total = counts.reduce(
       (a, c) => ({

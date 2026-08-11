@@ -96,13 +96,53 @@ describe('dataset schema', () => {
   });
 
   test('requires a ground-truth label for every rule on a name control', () => {
-    assert.match(validateDataset(fixture('dataset.invalid.json')).problems.join(' '), /FF-02 must be positive or negative/);
+    assert.match(validateDataset(fixture('dataset.invalid.json')).problems.join(' '), /missing the ground-truth label for FF-02/);
+  });
+
+  test('rejects a duplicate page, which would count it twice', () => {
+    const file = fixture('dataset.valid.json');
+    file.pages.push(structuredClone(file.pages[0]));
+    const r = validateDataset(file);
+    assert.equal(r.valid, false);
+    assert.match(r.problems.join(' '), /duplicate pageId .* count that page twice/);
+  });
+
+  test('rejects a duplicate control, even across different pages', () => {
+    const file = fixture('dataset.valid.json');
+    file.pages[1].controls.push(structuredClone(file.pages[0].controls[0]));
+    assert.match(validateDataset(file).problems.join(' '), /duplicate controlId/);
+  });
+
+  test('requires exactly five outcomes on a detected name control', () => {
+    const file = fixture('dataset.valid.json');
+    delete file.pages[0].controls[0].outcomes['FF-03'];
+    const r = validateDataset(file);
+    assert.equal(r.valid, false);
+    assert.match(r.problems.join(' '), /outcomes: missing the outcome for FF-03/);
+  });
+
+  test('requires exactly five ground-truth labels', () => {
+    const file = fixture('dataset.valid.json');
+    delete file.pages[0].controls[0].rules['FF-05'];
+    assert.match(validateDataset(file).problems.join(' '), /rules: missing the ground-truth label for FF-05/);
+  });
+
+  test('rejects an extra rule that would double-count', () => {
+    const file = fixture('dataset.valid.json');
+    file.pages[0].controls[0].outcomes['FF-06'] = 'finding';
+    assert.match(validateDataset(file).problems.join(' '), /unknown rules FF-06/);
+  });
+
+  test('rejects outcomes on a control that was never detected', () => {
+    const file = fixture('dataset.valid.json');
+    file.pages[0].controls[1].outcomes = { 'FF-01': 'clean' };
+    assert.match(validateDataset(file).problems.join(' '), /not detected cannot carry outcomes/);
   });
 
   test('rejects an unknown outcome', () => {
     const file = fixture('dataset.valid.json');
     file.pages[0].controls[0].outcomes['FF-01'] = 'maybe';
-    assert.match(validateDataset(file).problems.join(' '), /outcome must be finding, clean or declined/);
+    assert.match(validateDataset(file).problems.join(' '), /outcome must be one of finding, clean, declined/);
   });
 });
 

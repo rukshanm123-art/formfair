@@ -106,8 +106,13 @@ jobs:
         with:
           node-version: 22
 
-      # The harness has no dependencies, by design: building evaluation tooling must not
-      # be able to change the instrument the evaluation is run with. No npm ci here.
+      # The harness declares no dependencies of its own, so building evaluation tooling
+      # cannot change the instrument. It does need the instrument itself: the control
+      # inventory must be parsed by the same pinned parse5 the analyser uses, or the
+      # source positions the join relies on could differ.
+      - run: npm ci
+      - run: npm run build
+
       - name: Evaluation harness tests
         working-directory: evaluation
         run: npm test

@@ -56,3 +56,59 @@ export function verifySeal(manifest, resolve = (p) => p) {
 
   return { sealed: failures.length === 0, failures };
 }
+
+/**
+ * Protocol section 10, after the run.
+ *
+ * A pre-run seal says annotation was finished before FormFair was seen. It does not say
+ * which run the metrics describe. Official figures need both, so this additionally
+ * requires the run record and the hashes of what it produced: without them, a report
+ * could be swapped for another and the seal would still verify.
+ */
+export function verifyClosedSeal(manifest, resolve = (p) => p) {
+  const failures = [];
+
+  for (const { key, description } of REQUIRED) {
+    const entry = manifest?.files?.[key];
+    if (!entry) {
+      failures.push(`missing from the manifest: ${key} (${description})`);
+      continue;
+    }
+    const path = resolve(entry.path);
+    if (!existsSync(path)) {
+      failures.push(`${key}: file not found at ${entry.path}`);
+      continue;
+    }
+    if (hashFile(path) !== entry.sha256) {
+      failures.push(`${key}: hash mismatch, a sealed file must not change after sealing`);
+    }
+  }
+
+  if (manifest?.instrument !== 'evaluation-v1.0.0') {
+    failures.push(`instrument must be evaluation-v1.0.0, found ${manifest?.instrument ?? 'nothing'}`);
+  }
+
+  const run = manifest?.formfairRun;
+  if (!run) {
+    failures.push(
+      'formfairRun is absent: this seal has not been closed, so no official metrics can ' +
+        'be computed from it. FormFair must be run once, at evaluation-v1.0.0, and the ' +
+        'run recorded here.'
+    );
+    return { sealed: false, failures };
+  }
+
+  if (!/^\d{4}-\d{2}-\d{2}T/.test(run.runAt ?? '')) {
+    failures.push('formfairRun.runAt must be an ISO 8601 UTC timestamp');
+  }
+  if (run.instrument !== 'evaluation-v1.0.0') {
+    failures.push(`formfairRun.instrument must be evaluation-v1.0.0, found ${run.instrument ?? 'nothing'}`);
+  }
+  for (const key of ['reportsSha256', 'datasetSha256', 'inventorySha256']) {
+    if (!/^[0-9a-f]{64}$/.test(run[key] ?? '')) {
+      failures.push(`formfairRun.${key} must be a 64-character hex digest of what the run produced`);
+    }
+  }
+
+  return { sealed: failures.length === 0, failures };
+}

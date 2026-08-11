@@ -204,16 +204,33 @@ export function validateDataset(file) {
     return { valid: false, problems };
   }
 
+  // Uniqueness is checked across the whole file, not per page. A repeated page or
+  // control does not fail anywhere else: it simply contributes its counts twice, moving
+  // every figure that rests on them.
+  const seenPages = new Set();
+  const seenControls = new Set();
+
   for (const [p, page] of file.pages.entries()) {
     const at = `page[${p}]`;
     if (!isNonEmptyString(page?.pageId)) problems.push(`${at}: pageId is required`);
+    else if (seenPages.has(page.pageId)) {
+      problems.push(`${at}: duplicate pageId ${page.pageId}, which would count that page twice`);
+    } else seenPages.add(page.pageId);
+
     if (!Array.isArray(page?.controls)) {
       problems.push(`${at}: controls must be an array`);
       continue;
     }
+
     for (const [c, control] of page.controls.entries()) {
       const where = `${at}.control[${c}]`;
       if (!isNonEmptyString(control?.controlId)) problems.push(`${where}: controlId is required`);
+      else if (seenControls.has(control.controlId)) {
+        problems.push(
+          `${where}: duplicate controlId ${control.controlId}, which would count that control twice`
+        );
+      } else seenControls.add(control.controlId);
+
       if (typeof control?.isNameControl !== 'boolean') {
         problems.push(`${where}: isNameControl must be a boolean from the adjudicated ground truth`);
       }
@@ -224,24 +241,46 @@ export function validateDataset(file) {
             'identified and found nothing on.'
         );
       }
-      if (control?.isNameControl === true) {
-        for (const rule of RULES) {
-          if (!LABELS.includes(control?.rules?.[rule])) {
-            problems.push(`${where}: ground-truth label for ${rule} must be positive or negative`);
-          }
-        }
-        if (control?.detected === true) {
-          for (const [rule, outcome] of Object.entries(control?.outcomes ?? {})) {
-            if (!['finding', 'clean', 'declined'].includes(outcome)) {
-              problems.push(`${where}.${rule}: outcome must be finding, clean or declined`);
-            }
-          }
-        }
+
+      if (control?.isNameControl !== true) continue;
+
+      problems.push(...exactlyTheRules(control?.rules, `${where}.rules`, 'ground-truth label', LABELS));
+
+      if (control?.detected === true) {
+        problems.push(
+          ...exactlyTheRules(control?.outcomes, `${where}.outcomes`, 'outcome', OUTCOMES)
+        );
+      } else if (control?.outcomes !== undefined) {
+        problems.push(`${where}: a control that was not detected cannot carry outcomes`);
       }
     }
   }
 
   return { valid: problems.length === 0, problems };
+}
+
+export const OUTCOMES = ['finding', 'clean', 'declined'];
+
+/**
+ * Every rule, exactly once, with an allowed value. A missing rule silently shrinks the
+ * denominator; an extra one double-counts; an unrecognised value would be scored as
+ * though it meant something.
+ */
+function exactlyTheRules(record, where, what, allowed) {
+  const problems = [];
+  if (record === null || typeof record !== 'object') {
+    return [`${where}: must be an object carrying one ${what} per rule`];
+  }
+  for (const rule of RULES) {
+    if (!(rule in record)) {
+      problems.push(`${where}: missing the ${what} for ${rule}`);
+    } else if (!allowed.includes(record[rule])) {
+      problems.push(`${where}.${rule}: ${what} must be one of ${allowed.join(', ')}`);
+    }
+  }
+  const extra = Object.keys(record).filter((r) => !RULES.includes(r));
+  if (extra.length) problems.push(`${where}: unknown rules ${extra.join(', ')}`);
+  return problems;
 }
 
 export const VALIDATORS = {

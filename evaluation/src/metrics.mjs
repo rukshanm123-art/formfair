@@ -21,16 +21,20 @@ export const RULES = ['FF-01', 'FF-02', 'FF-03', 'FF-04', 'FF-05'];
 
 const emptyCounts = () => ({ tp: 0, fp: 0, fn: 0, tn: 0, declinedOnNegative: 0, notReached: 0 });
 
+/**
+ * Precision, recall and F1 for one set of counts.
+ *
+ * No bare point estimate is emitted. `f1` carries its own estimability, and a caller
+ * that wants the raw number for a set of counts calls `f1From` deliberately rather than
+ * reading a field that is present whether or not it means anything.
+ */
 function score(counts, clusters, label) {
-  const precision = wilson(counts.tp, counts.tp + counts.fp);
-  const recall = wilson(counts.tp, counts.tp + counts.fn);
   return {
     label,
     counts: { ...counts },
-    precision,
-    recall,
+    precision: wilson(counts.tp, counts.tp + counts.fp),
+    recall: wilson(counts.tp, counts.tp + counts.fn),
     f1: bootstrapF1(clusters),
-    pointF1: f1From(counts),
   };
 }
 

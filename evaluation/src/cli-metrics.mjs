@@ -2,7 +2,7 @@
 /**
  * Protocol section 9. Computes the metrics from a joined dataset.
  *
- *   node src/cli-metrics.mjs <dataset.json> [--out report.json] [--seal data/seal.json]
+ *   node src/cli-metrics.mjs <dataset.json> [--out report.json] --seal data/seal.json | --synthetic
  *
  * The dataset is validated before anything is computed. Scoring a malformed dataset
  * would produce numbers that look like results, and a figure that is wrong is worse
@@ -17,7 +17,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { report } from './metrics.mjs';
 import { validateDataset } from './schema.mjs';
-import { verifySeal } from './seal.mjs';
+import { verifyClosedSeal } from './seal.mjs';
 
 function fail(message, details = []) {
   console.error(message);
@@ -33,11 +33,26 @@ const flag = (name) => {
 const datasetPath = args.find((a) => !a.startsWith('--') && args[args.indexOf(a) - 1]?.startsWith('--') !== true);
 
 if (!datasetPath) {
-  fail('usage: node src/cli-metrics.mjs <dataset.json> [--out report.json] [--seal data/seal.json]');
+  fail('usage: node src/cli-metrics.mjs <dataset.json> [--out report.json] --seal data/seal.json | --synthetic');
 }
 
 const sealPath = flag('--seal');
-if (sealPath) {
+const synthetic = args.includes('--synthetic');
+
+/**
+ * Official figures require a closed seal. The bypass exists so the harness can be tested
+ * against synthetic fixtures, and it refuses to run on anything not marked synthetic, so
+ * it cannot be used to score real data by mistake.
+ */
+if (synthetic) {
+  if (sealPath) fail('--synthetic and --seal are mutually exclusive');
+} else if (!sealPath) {
+  fail(
+    'refusing to compute metrics without --seal.\n' +
+      'Official figures require a closed seal naming the run that produced them.\n' +
+      'For a synthetic fixture, pass --synthetic instead.'
+  );
+} else {
   let manifest;
   try {
     manifest = JSON.parse(readFileSync(sealPath, 'utf8'));
@@ -45,11 +60,8 @@ if (sealPath) {
     fail(`cannot read the seal manifest at ${sealPath}: ${error.message}`);
   }
   const base = dirname(sealPath);
-  const { sealed, failures } = verifySeal(manifest, (p) => resolve(base, p));
-  // A closed seal records the run, which verifySeal reports as a failure when sealing.
-  // Here that is the expected state, so only the other faults matter.
-  const real = failures.filter((f) => !f.includes('seal is closed'));
-  if (!sealed && real.length > 0) fail('seal is not valid, so these metrics would not be trustworthy:', real);
+  const { sealed, failures } = verifyClosedSeal(manifest, (p) => resolve(base, p));
+  if (!sealed) fail('the seal is not closed, so these metrics would not be trustworthy:', failures);
 }
 
 let dataset;
@@ -57,6 +69,13 @@ try {
   dataset = JSON.parse(readFileSync(datasetPath, 'utf8'));
 } catch (error) {
   fail(`cannot read the dataset at ${datasetPath}: ${error.message}`);
+}
+
+if (synthetic && dataset?.synthetic !== true) {
+  fail(
+    `--synthetic was passed but ${datasetPath} does not declare "synthetic": true.\n` +
+      'The bypass exists for fixtures, and must not be used to score real data.'
+  );
 }
 
 const { valid, problems } = validateDataset(dataset);
