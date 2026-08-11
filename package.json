@@ -14,7 +14,12 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
-    }
+    },
+    "./node": {
+      "types": "./dist/node.d.ts",
+      "import": "./dist/node.js"
+    },
+    "./package.json": "./package.json"
   },
   "files": [
     "dist",
@@ -26,8 +31,9 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "coverage": "vitest run --coverage",
-    "example": "vite-node scripts/generate-example.ts",
-    "test:delegated": "vitest run --config vitest.delegated.config.ts"
+    "example": "npm run build && node scripts/generate-example.mjs",
+    "test:delegated": "vitest run --config vitest.delegated.config.ts",
+    "verify:package": "bash scripts/verify-packed-consumer.sh"
   },
   "dependencies": {
     "axe-core": "4.12.1",
@@ -41,5 +47,13 @@
     "typescript": "^5.7.2",
     "vite": "^7.3.6",
     "vitest": "^4.1.10"
+  },
+  "peerDependencies": {
+    "jsdom": "^30.0.1"
+  },
+  "peerDependenciesMeta": {
+    "jsdom": {
+      "optional": true
+    }
   }
 }

@@ -5,7 +5,7 @@ import { utf16Bounds } from '../parse/length.js';
 import { accepts, compile } from './accepts.js';
 import { DIACRITIC_NAMES, NORMALISATION_PAIRS, PUNCTUATED_NAMES } from './fixtures.js';
 
-export const CATALOGUE_VERSION = '0.1.0';
+export const CATALOGUE_VERSION = '1.0.0';
 
 function finding(
   rule: RuleId,
@@ -148,6 +148,17 @@ function refusedBy(control: NameControl, re: RegExp | null, value: string): stri
   return null;
 }
 
+/**
+ * FF-03 fires when the complete set of statically observable constraints yields
+ * different accept/reject outcomes for at least one canonically equivalent pair in the
+ * frozen, versioned NFC/NFD fixture set. A clean result means no asymmetry was
+ * witnessed within that set; it does not prove that arbitrary input is
+ * normalisation-safe.
+ *
+ * The rule is deliberately not generalised to every finite `maxlength`, though the
+ * argument that one could always be crossed is valid. See ADV-NORM-BOUNDARY in
+ * ./advisories.ts, which reports that condition without scoring it.
+ */
 const NORMALISATION_ASYMMETRY: Rule = {
   id: 'FF-03',
   severity: 'high',

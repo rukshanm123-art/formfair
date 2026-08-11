@@ -26,6 +26,19 @@ export interface Finding {
  */
 export type RuleFinding = Omit<Finding, 'basis'>;
 
+/**
+ * An observation reported alongside the findings but deliberately not scored. An
+ * advisory records a constraint that *could* exclude a name without witnessing that it
+ * does; it is excluded from precision and recall, and its prevalence is reported
+ * separately, so the accuracy figures continue to measure observed exclusion.
+ */
+export interface Advisory {
+  readonly code: string;
+  readonly message: string;
+  readonly basis: string;
+  readonly source: SourceRef;
+}
+
 /** A control a rule could not decide, recorded with the location it was declined at. */
 export interface Decline {
   readonly rule: RuleId;
@@ -70,5 +83,7 @@ export interface AnalysisResult {
   readonly controls: number;
   readonly findings: readonly Finding[];
   readonly declined: readonly Decline[];
+  /** Not scored. See Advisory. */
+  readonly advisories: readonly Advisory[];
   readonly catalogueVersion: string;
 }

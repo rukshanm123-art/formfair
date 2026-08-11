@@ -1,11 +1,11 @@
 /**
- * Regenerates examples/sample-report.html from the current rule catalogue, so the
- * committed example cannot drift from what the analyser actually emits.
+ * Regenerates examples/sample-report.html from the built package, so the committed
+ * example cannot drift from what the analyser actually emits — and so generating it
+ * exercises dist/ rather than the sources.
  */
 
 import { writeFileSync } from 'node:fs';
-import { analyse } from '../src/index.js';
-import { toHtml } from '../src/report/html.js';
+import { analyse, toHtml } from '../dist/index.js';
 
 const SAMPLE = `<form>
   <label for="fn">First name</label>

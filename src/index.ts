@@ -1,6 +1,7 @@
 import { findNameControls } from './parse/controls.js';
+import { ADVISORIES } from './rules/advisories.js';
 import { CATALOGUE_VERSION, RULES } from './rules/index.js';
-import type { AnalysisResult, Decline, Finding } from './types.js';
+import type { Advisory, AnalysisResult, Decline, Finding } from './types.js';
 import type { AccessibilityProvider } from './delegated/types.js';
 import { merge, withoutDelegation, type MergedResult } from './delegated/merge.js';
 
@@ -8,8 +9,13 @@ export function analyse(html: string): AnalysisResult {
   const controls = findNameControls(html);
   const findings: Finding[] = [];
   const declined: Decline[] = [];
+  const advisories: Advisory[] = [];
 
   for (const control of controls) {
+    for (const check of ADVISORIES) {
+      const advisory = check.evaluate(control);
+      if (advisory) advisories.push(advisory);
+    }
     for (const rule of RULES) {
       const outcome = rule.evaluate(control);
       // The rule reports what it found; the catalogue entry supplies the basis, and
@@ -24,6 +30,7 @@ export function analyse(html: string): AnalysisResult {
     controls: controls.length,
     findings,
     declined,
+    advisories,
     catalogueVersion: CATALOGUE_VERSION,
   };
 }
@@ -52,7 +59,7 @@ export { toHtml } from './report/html.js';
 export { summarise, sortFindings, decisionCoverage } from './report/summary.js';
 export type { Summary, RuleSummary } from './report/summary.js';
 export type { JsonReport } from './report/json.js';
-export { axeProvider, runAxeOnDocument, DELEGATED_RULES } from './delegated/axe.js';
+export { runAxeOnDocument, DELEGATED_RULES } from './delegated/axe.js';
 export { merge, withoutDelegation, totalReportedFindings } from './delegated/merge.js';
 export type { MergedResult } from './delegated/merge.js';
 export type { AccessibilityProvider, DelegatedFinding, DelegatedResult } from './delegated/types.js';

@@ -25,8 +25,10 @@ jobs:
 
       - run: npm ci
 
+      # Plain audit, not --audit-level=high: the README states the audit is clean, and
+      # that claim should fail here the moment it stops being true at any severity.
       - name: Audit dependencies
-        run: npm audit --audit-level=high
+        run: npm audit
 
       - name: Typecheck
         run: npm run typecheck
@@ -59,3 +61,26 @@ jobs:
 
       - name: Delegated accessibility suite
         run: npm run test:delegated
+
+  package:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [20, 22]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - run: npm ci
+
+      # Installs the packed tarball into a clean project. The test suite resolves from
+      # this repository's node_modules and so cannot see a runtime import of a package
+      # that was only ever a development dependency; this can.
+      - name: Verify the published package from a consumer's position
+        run: npm run verify:package

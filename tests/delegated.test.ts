@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { analyse, analyseWith } from '../src/index.js';
-import { axeProvider, DELEGATED_RULES } from '../src/delegated/axe.js';
+import { axeProvider, createAnalysisWindow, DELEGATED_RULES } from '../src/node.js';
 import { merge, withoutDelegation, totalReportedFindings } from '../src/delegated/merge.js';
 import { EMPTY_DELEGATED } from '../src/delegated/types.js';
 import { toTextWithDelegated } from '../src/report/text.js';
@@ -68,7 +68,7 @@ describe('axe-core delegation', () => {
   it('requests only the rules bearing on name controls', () => {
     expect(DELEGATED_RULES).toContain('label');
     expect(DELEGATED_RULES).toContain('autocomplete-valid');
-    // FF-10 has no axe equivalent and stays a FormFair rule.
+    // Pattern semantics are FormFair's own concern and are never delegated.
     expect(DELEGATED_RULES).not.toContain('pattern');
   });
 
@@ -108,4 +108,36 @@ describe('delegated findings in reports', () => {
     const out = toTextWithDelegated(await analyseWith(UNLABELLED));
     expect(out).not.toContain('Delegated accessibility findings');
   });
+});
+
+describe('analysed markup is never executed', () => {
+  const HOSTILE = `<form>
+    <input name="firstName" pattern="[A-Za-z]+">
+    <script>window.__formfairScriptRan = true; throw new Error('this must not run');</script>
+    <img src="does-not-exist.png" onerror="window.__formfairHandlerRan = true">
+    <input name="lastName" pattern="[A-Za-z]+" onfocus="window.__formfairInlineRan = true">
+  </form>`;
+
+  it('does not run a script tag or an inline handler in the analysis window', async () => {
+    // Asserted against the window the provider actually builds, not the outer realm:
+    // a script that did run would set these on its own window, where the outer
+    // globalThis would never see it and the check would pass while broken.
+    const dom = await createAnalysisWindow(HOSTILE);
+    try {
+      const w = dom.window as unknown as Record<string, unknown>;
+      expect(w['__formfairScriptRan']).toBeUndefined();
+      expect(w['__formfairHandlerRan']).toBeUndefined();
+      expect(w['__formfairInlineRan']).toBeUndefined();
+      // The script element is present in the tree — parsed, but inert.
+      expect(dom.window.document.querySelectorAll('script')).toHaveLength(1);
+    } finally {
+      dom.window.close();
+    }
+  }, 30_000);
+
+  it('completes the analysis and still reports the real findings', async () => {
+    const r = await analyseWith(HOSTILE, axeProvider());
+    expect(r.findings.map((f) => f.rule)).toContain('FF-01');
+    expect((globalThis as unknown as Record<string, unknown>)['__formfairScriptRan']).toBeUndefined();
+  }, 60_000);
 });

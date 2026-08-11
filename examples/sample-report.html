@@ -34,7 +34,7 @@ h2 { font-size: .95rem; margin: 2.5rem 0 .3rem; }
 </head>
 <body>
 <h1>FormFair report</h1>
-<p class="meta">Rule catalogue 0.1.0</p>
+<p class="meta">Rule catalogue 1.0.0</p>
 <div class="tally">
   <div><strong>3</strong>name controls</div>
   <div><strong>4</strong>findings</div>
@@ -108,5 +108,10 @@ h2 { font-size: .95rem; margin: 2.5rem 0 .3rem; }
 <tr><td><code>FF-04</code></td><td>100%</td><td>1</td><td></td></tr>
 <tr><td><code>FF-05</code></td><td>33%</td><td>1</td><td>2</td></tr>
 </table>
+<h2>Advisories</h2>
+<p class="note">Reported, not scored. An advisory records a constraint that could exclude a name without any fixture witnessing that it does; advisories are excluded from the accuracy figures.</p>
+<ul>
+  <li><code>ADV-NORM-BOUNDARY</code> Potential normalisation boundary: maxlength=&quot;40&quot; can distinguish some canonically equivalent NFC and NFD inputs unless the value is normalised before validation. Not scored: no fixture witnessed this on this control.</li>
+</ul>
 </body>
 </html>

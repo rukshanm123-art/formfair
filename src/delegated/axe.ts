@@ -6,8 +6,10 @@ import type { Severity } from '../types.js';
  * requested: the engine has a large catalogue and running all of it would bury
  * the findings this tool is about under unrelated page-level results.
  *
- * These are the checks FF-06 to FF-09 delegate to. FF-10 has no axe-core
- * equivalent and remains a FormFair rule.
+ * These cover whether a name control is labelled and named. They are reported but
+ * never scored: the accuracy figures belong to FF-01 to FF-05, which are about what a
+ * control accepts rather than how it is announced. Nothing here checks error-message
+ * association, and no FormFair rule delegates to axe-core.
  */
 export const DELEGATED_RULES = [
   'label',
@@ -82,23 +84,45 @@ export async function runAxeOnDocument(
   };
 }
 
+type JsdomConstructor = new (html: string, options: { runScripts: 'outside-only' }) => JsdomInstance;
+
+interface JsdomInstance {
+  window: Window & typeof globalThis & { eval(code: string): unknown; close(): void };
+}
+
+/**
+ * Builds the window a document is analysed in.
+ *
+ * `runScripts: 'outside-only'` supplies the `eval` needed to load the accessibility
+ * engine while leaving every script carried by the analysed markup unexecuted. This
+ * tool reads other people's pages, and it must not run them.
+ */
+function buildWindow(JSDOM: JsdomConstructor, html: string): JsdomInstance {
+  return new JSDOM(`<!doctype html><html><body>${html}</body></html>`, {
+    runScripts: 'outside-only',
+  });
+}
+
+/** Exposed so the no-script-execution guarantee can be tested directly. */
+export async function createAnalysisWindow(html: string): Promise<JsdomInstance> {
+  const { JSDOM } = await import('jsdom');
+  return buildWindow(JSDOM as unknown as JsdomConstructor, html);
+}
+
 interface AxeGlobal {
   version: string;
   run(context: unknown, options: unknown): Promise<AxeResults>;
 }
 
 /**
- * Node-side provider. jsdom is a development dependency, so it is imported lazily:
- * a browser build that supplies its own Document never loads it.
+ * Node-side provider, reached through the `formfair/node` entry point. jsdom is an
+ * optional peer dependency and is imported lazily, so the core package neither carries
+ * it nor requires the newer Node it needs.
  *
  * axe-core is evaluated inside the jsdom window rather than imported into this one.
  * The bundle binds `window` when it loads, so importing it here and then assigning
  * globalThis.window gave it the wrong realm and axe.run rejected its own arguments.
  * Loading it into the window it will inspect avoids the question.
- *
- * `runScripts: 'outside-only'` supplies the `eval` needed to do that while leaving any
- * script carried by the analysed markup unexecuted — this tool reads other people's
- * pages, and it must not run them.
  */
 export function axeProvider(rules: readonly string[] = DELEGATED_RULES): AccessibilityProvider {
   return {
@@ -112,9 +136,7 @@ export function axeProvider(rules: readonly string[] = DELEGATED_RULES): Accessi
       ]);
       const source = readFileSync(createRequire(import.meta.url).resolve('axe-core'), 'utf8');
 
-      const dom = new JSDOM(`<!doctype html><html><body>${html}</body></html>`, {
-        runScripts: 'outside-only',
-      });
+      const dom = buildWindow(JSDOM as unknown as JsdomConstructor, html);
       try {
         dom.window.eval(source);
         const axe = (dom.window as unknown as { axe: AxeGlobal }).axe;

@@ -79,6 +79,20 @@ export function toHtml(result: AnalysisResult): string {
     )
     .join('\n');
 
+  const advisories =
+    result.advisories.length === 0
+      ? ''
+      : `<h2>Advisories</h2>
+<p class="note">Reported, not scored. An advisory records a constraint that could exclude a name without any fixture witnessing that it does; advisories are excluded from the accuracy figures.</p>
+<ul>
+  ${[...new Set(result.advisories.map((a) => `${a.code}|${a.message}`))]
+    .map((entry) => {
+      const [code, message] = entry.split('|');
+      return `<li><code>${escapeHtml(code ?? '')}</code> ${escapeHtml(message ?? '')}</li>`;
+    })
+    .join('\n  ')}
+</ul>`;
+
   const body =
     s.controls === 0
       ? '<p class="note">No personal-name controls identified in this markup.</p>'
@@ -95,7 +109,8 @@ ${cards}
 <table>
   <tr><th>Rule</th><th>Coverage</th><th>Findings</th><th>Declined</th></tr>
   ${coverage}
-</table>`;
+</table>
+${advisories}`;
 
   return `<!doctype html>
 <html lang="en">

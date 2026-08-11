@@ -56,6 +56,18 @@ export function toText(result: AnalysisResult): string {
     out.push(`  ${r.rule}  ${pct(r.decisionCoverage).padStart(4)}${note}`);
   }
 
+  if (result.advisories.length > 0) {
+    out.push('');
+    out.push('Advisory — reported, not scored, and excluded from accuracy figures:');
+    const seen = new Map<string, number[]>();
+    for (const a of result.advisories) {
+      seen.set(a.message, [...(seen.get(a.message) ?? []), a.source.line]);
+    }
+    for (const [message, lines] of seen) {
+      out.push(`  line${lines.length === 1 ? '' : 's'} ${[...new Set(lines)].join(', ')}: ${message}`);
+    }
+  }
+
   if (result.declined.length > 0) {
     out.push('');
     out.push('Declined — not analysed, which is not the same as clean:');

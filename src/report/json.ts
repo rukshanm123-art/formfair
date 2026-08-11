@@ -17,6 +17,15 @@ export interface JsonReport {
     readonly column: number;
     readonly snippet: string;
   }[];
+  /** Reported, never scored. Excluded from precision and recall by construction. */
+  readonly advisories: readonly {
+    readonly code: string;
+    readonly message: string;
+    readonly basis: string;
+    readonly scored: false;
+    readonly line: number;
+    readonly column: number;
+  }[];
   readonly declined: readonly {
     readonly rule: string;
     readonly reason: string;
@@ -45,6 +54,14 @@ export function toJson(result: AnalysisResult): JsonReport {
       line: f.source.line,
       column: f.source.column,
       snippet: f.source.snippet,
+    })),
+    advisories: result.advisories.map((a) => ({
+      code: a.code,
+      message: a.message,
+      basis: a.basis,
+      scored: false as const,
+      line: a.source.line,
+      column: a.source.column,
     })),
     declined: result.declined.map((d) => ({
       rule: d.rule,

@@ -8,9 +8,11 @@ import { defineConfig } from 'vite';
 export default defineConfig({
   build: {
     lib: {
-      entry: 'src/index.ts',
+      // Two entries: the core analyser, and the Node provider that needs jsdom. A
+      // consumer of the core package must never pull jsdom in transitively.
+      entry: { index: 'src/index.ts', node: 'src/node.ts' },
       formats: ['es'],
-      fileName: () => 'index.js',
+      fileName: (_format, name) => `${name}.js`,
     },
     rollupOptions: {
       external: ['parse5', 'axe-core', 'jsdom', /^node:/],
