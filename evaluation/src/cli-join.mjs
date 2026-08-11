@@ -26,6 +26,8 @@ import { buildDataset } from './join.mjs';
 import { loadInstrument, instrumentDirFromEnv } from './instrument-ref.mjs';
 import { validateDataset } from './schema.mjs';
 import { verifySeal, sealedFileMatches } from './seal.mjs';
+import { buildGroundTruth } from './ground-truth.mjs';
+import { claimRun, completeRun, failRun, describeRefusal } from './run-lock.mjs';
 
 function fail(message, details = []) {
   console.error(message);
@@ -47,12 +49,24 @@ const outPath = flag('--out');
 const reportsOut = flag('--reports');
 const closedSealOut = flag('--closed-seal');
 const noDelegated = args.includes('--no-delegated');
+const synthetic = args.includes('--synthetic');
 
 if (!sealPath || !capturesDir || !inventoryPath || !truthPath || !outPath || !reportsOut || !closedSealOut) {
   fail(
     'usage: node src/cli-join.mjs --seal <pre-run-seal> --captures <dir> --inventory <file>\n' +
       '         --truth <file> --out <dataset> --reports <file> --closed-seal <file>\n\n' +
       'The seal is required. FormFair must not run before the annotations are sealed.'
+  );
+}
+
+// A run without the delegated engine is not the evaluation the protocol describes, so it
+// cannot produce official output. The bypass exists to keep the synthetic fixtures fast.
+if (noDelegated && !synthetic) {
+  fail(
+    '--no-delegated would skip the delegated accessibility checks the protocol reports\n' +
+      'separately, so the run would not be the evaluation the protocol describes.\n' +
+      'It is available only together with --synthetic, which marks everything it produces\n' +
+      'as synthetic and unusable for official figures.'
   );
 }
 
@@ -111,13 +125,43 @@ if (!noDelegated) {
 const inventoryFile = JSON.parse(readFileSync(inventoryPath, 'utf8'));
 const truthFile = JSON.parse(readFileSync(truthPath, 'utf8'));
 
-const reports = {};
-const pages = [];
+const hashOf = (path) => createHash('sha256').update(readFileSync(path)).digest('hex');
+const sealedPath = (key) => resolve(sealBase, manifest.files[key].path);
+
+// PREFLIGHT. Everything checkable is checked before the analyser is touched, so a fault
+// in the material cannot be discovered halfway through a run that has already written
+// reports. Nothing below this point writes anything until the join has succeeded.
+
+// The sealed ground truth must be exactly what the sealed annotations and adjudication
+// produce. Sealing a file does not make it derived: without regenerating it, an arbitrary
+// ground truth could be sealed alongside annotations that do not imply it.
+const regenerated = buildGroundTruth({
+  annotationA: JSON.parse(readFileSync(sealedPath('annotatorA'), 'utf8')),
+  annotationB: JSON.parse(readFileSync(sealedPath('annotatorB'), 'utf8')),
+  adjudication: JSON.parse(readFileSync(sealedPath('adjudication'), 'utf8')),
+  inventory: inventoryFile,
+});
+if (!regenerated.groundTruth) {
+  fail('the sealed annotations and adjudication do not derive a ground truth:', regenerated.problems);
+}
+if (regenerated.text !== readFileSync(truthPath, 'utf8')) {
+  fail(
+    'the sealed ground truth is not what the sealed annotations and adjudication derive.',
+    [
+      `derived:  ${regenerated.sha256}`,
+      `sealed:   ${truthCheck.sha256}`,
+      'A ground truth must be produced by cli-ground-truth from the sealed inputs, not ' +
+        'written by hand and sealed alongside them.',
+    ]
+  );
+}
+
+// Every capture must exist and be the bytes the inventory records.
+const capturesFor = [];
 for (const inventory of inventoryFile.pages) {
   const capture = join(capturesDir, `${inventory.pageId}.html`);
   if (!existsSync(capture)) fail(`${inventory.pageId}: no capture at ${capture}`);
   const html = readFileSync(capture, 'utf8');
-
   const actual = createHash('sha256').update(Buffer.from(html, 'utf8')).digest('hex');
   if (actual !== inventory.htmlSha256) {
     fail(
@@ -125,22 +169,56 @@ for (const inventory of inventoryFile.pages) {
         `records ${inventory.htmlSha256}. The bytes analysed are not the bytes annotated.`
     );
   }
+  capturesFor.push({ inventory, html });
+}
 
+// The ground truth must cover exactly the inventory.
+for (const { inventory } of capturesFor) {
+  const truthPage = truthFile.pages?.[inventory.pageId];
+  if (!truthPage) fail(`${inventory.pageId}: the sealed ground truth has no entry for this page`);
+  for (const control of inventory.controls) {
+    if (!(control.controlId in truthPage)) {
+      fail(`${inventory.pageId}/${control.controlId}: in the inventory but not in the ground truth`);
+    }
+  }
+  for (const controlId of Object.keys(truthPage)) {
+    if (!inventory.controls.some((c) => c.controlId === controlId)) {
+      fail(`${inventory.pageId}/${controlId}: in the ground truth but not in the inventory`);
+    }
+  }
+}
+
+// CLAIM. Exclusive and durable, written before the analyser runs.
+const claim = claimRun(sealPath, {
+  startedAt: new Date().toISOString().replace(/\.\d+Z$/, 'Z'),
+  instrument: instrument.tag,
+  instrumentCommit: instrument.commit,
+  preRunSealSha256: hashOf(sealPath),
+  synthetic,
+  outputs: { reports: reportsOut, dataset: outPath, closedSeal: closedSealOut },
+});
+if (!claim.claimed) fail(describeRefusal(claim.path, claim.existing));
+
+const abort = (message, details = []) => {
+  failRun(claim.path, message, { details, failedAt: new Date().toISOString().replace(/\.\d+Z$/, 'Z') });
+  fail(`${message}\nThe run is recorded as failed at ${claim.path} and will not repeat silently.`, details);
+};
+
+// ANALYSE.
+const reports = {};
+const pages = [];
+for (const { inventory, html } of capturesFor) {
   const detected = instrument.formfair.findNameControls(html);
   const report = provider
     ? instrument.formfair.toJsonWithDelegated(await instrument.formfair.analyseWith(html, provider))
     : instrument.formfair.toJson(instrument.formfair.analyse(html));
-
   reports[inventory.pageId] = report;
   pages.push({ inventory, truth: truthFile.pages?.[inventory.pageId] ?? {}, detected, report });
 }
 
 const reportsText = JSON.stringify(reports, null, 2) + '\n';
-writeFileSync(reportsOut, reportsText);
 
-// 4. Hashes come from the sealed files themselves, never from a caller-supplied list.
-const hashOf = (path) => createHash('sha256').update(readFileSync(path)).digest('hex');
-const sealedPath = (key) => resolve(sealBase, manifest.files[key].path);
+// Hashes come from the sealed files themselves, never from a caller-supplied list.
 const hashes = {
   inventory: inventoryCheck.sha256,
   groundTruth: truthCheck.sha256,
@@ -152,11 +230,14 @@ const hashes = {
 };
 
 const { dataset, problems } = buildDataset({ pages, hashes });
-if (problems.length > 0) fail('the join found inconsistencies and produced no dataset:', problems);
+if (problems.length > 0) abort('the join found inconsistencies, so nothing was written:', problems);
+if (synthetic) dataset.synthetic = true;
 
 const { valid, problems: schemaProblems } = validateDataset(dataset);
-if (!valid) fail('the joined dataset does not match the frozen schema:', schemaProblems);
+if (!valid) abort('the joined dataset does not match the frozen schema, so nothing was written:', schemaProblems);
 
+// Only now is anything written.
+writeFileSync(reportsOut, reportsText);
 const datasetText = JSON.stringify(dataset, null, 2) + '\n';
 writeFileSync(outPath, datasetText);
 const datasetSha256 = createHash('sha256').update(Buffer.from(datasetText, 'utf8')).digest('hex');
@@ -177,6 +258,7 @@ const closed = {
     instrument: instrument.tag,
     instrumentCommit: instrument.commit,
     delegatedEngine: provider ? 'axe-core' : null,
+    synthetic,
     inventorySha256: hashes.inventory,
     groundTruthSha256: hashes.groundTruth,
     reportsSha256,
@@ -187,7 +269,19 @@ const closed = {
 if (existsSync(closedSealOut) && resolve(closedSealOut) === resolve(sealPath)) {
   fail('the closed seal must be a separate file; overwriting the pre-run seal would destroy it');
 }
+if (synthetic) closed.synthetic = true;
 writeFileSync(closedSealOut, JSON.stringify(closed, null, 2) + '\n');
+
+completeRun(claim.path, {
+  startedAt: JSON.parse(readFileSync(claim.path, 'utf8')).startedAt,
+  completedAt: new Date().toISOString().replace(/\.\d+Z$/, 'Z'),
+  instrument: instrument.tag,
+  instrumentCommit: instrument.commit,
+  synthetic,
+  reportsSha256,
+  datasetSha256,
+  closedSealSha256: hashOf(closedSealOut),
+});
 
 const delegatedCount = Object.values(reports).reduce((n, r) => n + (r.delegated?.findings?.length ?? 0), 0);
 console.log(`instrument:  ${instrument.tag} (${instrument.commit.slice(0, 12)})`);

@@ -160,7 +160,11 @@ describe('ground truth is derived, not assembled', () => {
       const p = prepare(dir);
       assert.equal(p.groundTruth.code, 0, p.groundTruth.stderr);
       const first = readFileSync(p.truthPath, 'utf8');
-      cli('cli-ground-truth.mjs', ['--a', p.aPath, '--b', p.bPath, '--adjudication', p.adjPath, '--out', p.truthPath]);
+      const again = cli('cli-ground-truth.mjs', [
+        '--a', p.aPath, '--b', p.bPath, '--adjudication', p.adjPath,
+        '--inventory', p.inventoryPath, '--out', p.truthPath,
+      ]);
+      assert.equal(again.code, 0, again.stderr);
       assert.equal(readFileSync(p.truthPath, 'utf8'), first, 'the same inputs must give byte-identical output');
     }));
 
@@ -179,7 +183,8 @@ describe('ground truth is derived, not assembled', () => {
       const p = prepare(dir, { disagree: true });
       writeFileSync(p.adjPath, JSON.stringify({ adjudicator: 'adjudicator-c', decisions: [] }, null, 2));
       const r = cli('cli-ground-truth.mjs', [
-        '--a', p.aPath, '--b', p.bPath, '--adjudication', p.adjPath, '--out', join(dir, 'x.json'),
+        '--a', p.aPath, '--b', p.bPath, '--adjudication', p.adjPath,
+        '--inventory', p.inventoryPath, '--out', join(dir, 'x.json'),
       ]);
       assert.equal(r.code, 1);
       assert.match(r.stderr, /no adjudicated decision/);
@@ -197,6 +202,7 @@ describe('ground truth is derived, not assembled', () => {
       ]);
       assert.equal(r.code, 1);
       assert.match(r.stderr, /not labelled by both/);
+      assert.equal(existsSync(join(dir, 'x.json')), false, 'nothing is written on refusal');
     }));
 });
 
@@ -365,5 +371,160 @@ describe('a sealed run, end to end', () => {
       assert.ok(report.unscored.delegated.total > 0, 'they are reported');
       const scored = report.stageOne.counts;
       assert.equal(scored.tp + scored.fp + scored.fn + scored.tn, 4, 'four supported inputs, none added');
+    }));
+});
+
+describe('a pre-run seal is good for exactly one run', () => {
+  const args = (p, sealPath, suffix = '') => [
+    '--seal', sealPath, '--captures', p.captures, '--inventory', p.inventoryPath, '--truth', p.truthPath,
+    '--out', join(p.dir, `dataset${suffix}.json`),
+    '--reports', join(p.dir, `reports${suffix}.json`),
+    '--closed-seal', join(p.dir, `seal.closed${suffix}.json`),
+  ];
+
+  test('a second run against the same seal is refused', () =>
+    withDir((dir) => {
+      const p = prepare(dir);
+      const sealPath = seal(p);
+      assert.equal(cli('cli-join.mjs', args(p, sealPath)).code, 0);
+
+      const second = cli('cli-join.mjs', args(p, sealPath, '-2'));
+      assert.equal(second.code, 1, 'the seal must not be reusable');
+      assert.match(second.stderr, /already been used for a run/);
+      assert.equal(existsSync(join(dir, 'dataset-2.json')), false, 'no second dataset');
+      assert.equal(existsSync(join(dir, 'seal.closed-2.json')), false, 'no second closed seal');
+    }));
+
+  test('the claim is written before the analyser runs', () =>
+    withDir((dir) => {
+      const p = prepare(dir);
+      const sealPath = seal(p);
+      cli('cli-join.mjs', args(p, sealPath));
+      const lock = JSON.parse(readFileSync(`${sealPath}.run`, 'utf8'));
+      assert.equal(lock.status, 'completed');
+      assert.equal(lock.instrumentCommit.length, 40);
+      assert.ok(lock.startedAt && lock.completedAt);
+    }));
+
+  test('a failed run is preserved, and blocks a silent retry', () =>
+    withDir((dir) => {
+      const p = prepare(dir);
+      const sealPath = seal(p);
+      // Break the ground truth after sealing so the join fails after claiming.
+      const lockPath = `${sealPath}.run`;
+      writeFileSync(lockPath, JSON.stringify({ status: 'failed', reason: 'synthetic failure', startedAt: '2026-09-01T00:00:00Z' }, null, 2));
+
+      const r = cli('cli-join.mjs', args(p, sealPath));
+      assert.equal(r.code, 1);
+      assert.match(r.stderr, /That run failed/);
+      assert.match(r.stderr, /Delete the lock deliberately/);
+    }));
+});
+
+describe('delegated analysis cannot be skipped in an official run', () => {
+  test('--no-delegated alone is refused', () =>
+    withDir((dir) => {
+      const p = prepare(dir);
+      const sealPath = seal(p);
+      const r = cli('cli-join.mjs', [
+        '--seal', sealPath, '--captures', p.captures, '--inventory', p.inventoryPath, '--truth', p.truthPath,
+        '--out', join(dir, 'd.json'), '--reports', join(dir, 'r.json'), '--closed-seal', join(dir, 'c.json'),
+        '--no-delegated',
+      ]);
+      assert.equal(r.code, 1);
+      assert.match(r.stderr, /available only together with --synthetic/);
+      assert.equal(existsSync(join(dir, 'c.json')), false, 'no closed seal may be produced');
+    }));
+
+  test('--no-delegated with --synthetic marks everything it produces', () =>
+    withDir((dir) => {
+      const p = prepare(dir);
+      const sealPath = seal(p);
+      const datasetPath = join(dir, 'd.json');
+      const closedPath = join(dir, 'c.json');
+      const r = cli('cli-join.mjs', [
+        '--seal', sealPath, '--captures', p.captures, '--inventory', p.inventoryPath, '--truth', p.truthPath,
+        '--out', datasetPath, '--reports', join(dir, 'r.json'), '--closed-seal', closedPath,
+        '--no-delegated', '--synthetic',
+      ]);
+      assert.equal(r.code, 0, r.stderr);
+      assert.equal(JSON.parse(readFileSync(datasetPath, 'utf8')).synthetic, true);
+      assert.equal(JSON.parse(readFileSync(closedPath, 'utf8')).synthetic, true);
+
+      // And the metrics refuse it through the sealed path, so it cannot become a figure.
+      const m = cli('cli-metrics.mjs', [datasetPath, '--seal', closedPath]);
+      assert.equal(m.code, 1);
+      assert.match(m.stderr, /marked synthetic cannot be scored through the sealed path/);
+    }));
+});
+
+describe('the ground truth must be derived from the sealed inputs', () => {
+  test('a hand-written ground truth sealed alongside the annotations is refused', () =>
+    withDir((dir) => {
+      const p = prepare(dir);
+      // Flip a label, then seal that file as if it were derived.
+      const truth = JSON.parse(readFileSync(p.truthPath, 'utf8'));
+      const page = truth.pages['synthetic-a'];
+      const first = Object.keys(page)[0];
+      page[first].isNameControl = !page[first].isNameControl;
+      delete page[first].rules;
+      writeFileSync(p.truthPath, JSON.stringify(truth, null, 2) + '\n');
+      const sealPath = seal(p);
+
+      const r = cli('cli-join.mjs', [
+        '--seal', sealPath, '--captures', p.captures, '--inventory', p.inventoryPath, '--truth', p.truthPath,
+        '--out', join(dir, 'd.json'), '--reports', join(dir, 'r.json'), '--closed-seal', join(dir, 'c.json'),
+      ]);
+      assert.equal(r.code, 1);
+      assert.match(r.stderr, /not what the sealed annotations and adjudication derive/);
+      assert.equal(existsSync(join(dir, 'r.json')), false, 'no report written');
+      assert.equal(existsSync(`${sealPath}.run`), false, 'and no run was claimed');
+    }));
+
+  test('a page in the inventory that neither annotator opened is refused', () =>
+    withDir((dir) => {
+      const p = prepare(dir);
+      for (const path of [p.aPath, p.bPath]) {
+        const file = JSON.parse(readFileSync(path, 'utf8'));
+        file.pages = file.pages.filter((page) => page.pageId !== 'synthetic-b');
+        writeFileSync(path, JSON.stringify(file, null, 2));
+      }
+      const r = cli('cli-ground-truth.mjs', [
+        '--a', p.aPath, '--b', p.bPath, '--adjudication', p.adjPath,
+        '--inventory', p.inventoryPath, '--out', join(dir, 'x.json'),
+      ]);
+      assert.equal(r.code, 1);
+      assert.match(r.stderr, /not annotated by both annotators/);
+    }));
+
+  test('a control labelled that is not in the inventory is refused', () =>
+    withDir((dir) => {
+      const p = prepare(dir);
+      for (const path of [p.aPath, p.bPath]) {
+        const file = JSON.parse(readFileSync(path, 'utf8'));
+        file.pages[0].controls.push({
+          controlId: 'invented#c999',
+          inputType: 'text',
+          stageOne: { label: 'positive', reason: 'r', evidence: 'e' },
+          rules: Object.fromEntries(['FF-01', 'FF-02', 'FF-03', 'FF-04', 'FF-05'].map((r) => [r, { label: 'negative', reason: 'r', evidence: 'e' }])),
+        });
+        writeFileSync(path, JSON.stringify(file, null, 2));
+      }
+      const r = cli('cli-ground-truth.mjs', [
+        '--a', p.aPath, '--b', p.bPath, '--adjudication', p.adjPath,
+        '--inventory', p.inventoryPath, '--out', join(dir, 'x.json'),
+      ]);
+      assert.equal(r.code, 1);
+      assert.match(r.stderr, /absent from the frozen inventory/);
+    }));
+
+  test('the inventory is not optional', () =>
+    withDir((dir) => {
+      const p = prepare(dir);
+      const r = cli('cli-ground-truth.mjs', [
+        '--a', p.aPath, '--b', p.bPath, '--adjudication', p.adjPath, '--out', join(dir, 'x.json'),
+      ]);
+      assert.equal(r.code, 1);
+      assert.match(r.stderr, /inventory is required/);
     }));
 });

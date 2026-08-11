@@ -32,10 +32,11 @@ const adjPath = flag('--adjudication');
 const invPath = flag('--inventory');
 const outPath = flag('--out');
 
-if (!aPath || !bPath || !adjPath || !outPath) {
+if (!aPath || !bPath || !adjPath || !invPath || !outPath) {
   fail(
     'usage: node src/cli-ground-truth.mjs --a <file> --b <file> --adjudication <file>\n' +
-      '         [--inventory <file>] --out <file>'
+      '         --inventory <file> --out <file>\n\n' +
+      'The inventory is required: it is the authority on what exists to be labelled.'
   );
 }
 
@@ -50,7 +51,7 @@ const read = (path, what) => {
 const annotationA = read(aPath, 'first annotation');
 const annotationB = read(bPath, 'second annotation');
 const adjudication = read(adjPath, 'adjudication');
-const inventory = invPath ? read(invPath, 'inventory') : null;
+const inventory = read(invPath, 'inventory');
 
 for (const [file, path] of [[annotationA, aPath], [annotationB, bPath]]) {
   const { valid, problems } = validateAnnotation(file);

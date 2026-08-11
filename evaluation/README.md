@@ -9,7 +9,7 @@ evaluation is run with. Tests use `node:test`.
 
 ```bash
 cd evaluation
-npm test              # 160 tests, on synthetic fixtures only
+npm test              # 169 tests, on synthetic fixtures only
 npm run draw-order    # verify the frozen order still matches the frame
 npm run build-frame   # rebuild frame.csv from the archived page and re-assert its counts
 npm run metrics -- fixtures/synthetic/dataset.valid.json --synthetic
@@ -52,6 +52,7 @@ the one thing that artefact exists to prevent. Creating it takes an explicit `--
 | `src/cli-inventory.mjs` | build the inventory from captured pages |
 | `src/cli-join.mjs` | run the instrument under the seal and join into the dataset |
 | `src/ground-truth.mjs` | derive final ground truth from both annotations plus adjudication |
+| `src/run-lock.mjs` | exclusive, durable record that a run has started |
 | `src/cli-ground-truth.mjs` | the same, from the command line |
 | `src/metrics.mjs` | protocol section 9 - stage one, stage two, end to end |
 | `src/draw-order.mjs` | protocol section 2 - deterministic agency ordering |
@@ -167,11 +168,30 @@ would be post hoc.
 evidence that annotation finished before the tool was seen. All hashes in it are computed
 from the sealed files; there is no caller-supplied hash list to trust.
 
+**A pre-run seal is good for exactly one run.** The seal is deliberately unchanged by a
+run, so on its own it could be presented again and again, producing a second dataset and a
+choice between them. Before the analyser is touched, `cli-join` claims the run by creating
+`<seal>.run` exclusively and flushing it to disk. A second attempt against the same seal is
+refused. A run that fails after claiming leaves the record behind marked `failed`, so it
+cannot be quietly repeated: running again means deleting the lock deliberately.
+
+**Everything checkable is checked before the analyser starts.** The sealed ground truth is
+**regenerated** from the sealed annotations, adjudication and inventory and must match byte
+for byte, so a hand-written ground truth cannot simply be sealed alongside annotations that
+do not imply it. Every capture is verified against the sealed inventory, and the ground
+truth must cover exactly the inventory. Nothing is written until the join and the schema
+validation have both succeeded, so a fault cannot leave a half-finished run on disk.
+
 **Delegated findings are actually collected.** The join runs the frozen instrument's
 pinned axe-core 4.12.1 provider and emits `toJsonWithDelegated` reports. A count of zero
 would otherwise be indistinguishable from never having asked, so a synthetic page carries
 an unlabelled input and a test asserts the joined dataset contains a non-zero delegated
 count that never enters the accuracy figures.
+
+`--no-delegated` exists only to keep the synthetic fixtures fast, and is refused unless
+`--synthetic` is passed with it. A synthetic run marks its dataset and closed seal
+`synthetic: true`, which the metrics then refuse through the sealed path, so a run without
+the delegated engine cannot become an official figure.
 
 ## Official metrics require a closed seal
 
