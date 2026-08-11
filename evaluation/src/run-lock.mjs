@@ -11,18 +11,28 @@
  * anything else happens. A run that fails after that point leaves the lock behind marked
  * failed: rerunning then requires deleting it by hand, which is a deliberate act and
  * leaves the failed record visible until someone does.
+ *
+ * The record is keyed by the SHA-256 of the seal's contents, in one fixed directory, not
+ * by the seal's filename. Keying on the filename secured nothing: copying the identical
+ * seal to another name produced a different lock path and a second run of the same
+ * evaluation.
  */
 
-import { openSync, writeSync, fsyncSync, closeSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
+import {
+  openSync, writeSync, fsyncSync, closeSync, readFileSync, writeFileSync, existsSync, mkdirSync,
+} from 'node:fs';
+import { join } from 'node:path';
 
-export const lockPathFor = (sealPath) => `${sealPath}.run`;
+/** One fixed place, so a seal cannot escape its record by being moved or renamed. */
+export const lockPathFor = (runRecordsDir, sealSha256) => join(runRecordsDir, `${sealSha256}.json`);
 
 /**
  * Claims the right to run. Returns { claimed: false, existing } when a run has already
  * been started against this seal, whatever its outcome.
  */
-export function claimRun(sealPath, record) {
-  const path = lockPathFor(sealPath);
+export function claimRun(runRecordsDir, sealSha256, record) {
+  mkdirSync(runRecordsDir, { recursive: true });
+  const path = lockPathFor(runRecordsDir, sealSha256);
 
   if (existsSync(path)) {
     let existing = null;
@@ -34,7 +44,7 @@ export function claimRun(sealPath, record) {
     return { claimed: false, path, existing };
   }
 
-  const contents = JSON.stringify({ status: 'started', ...record }, null, 2) + '\n';
+  const contents = JSON.stringify({ status: 'started', sealSha256, ...record }, null, 2) + '\n';
   let fd;
   try {
     // 'wx' fails if the file appeared between the check above and here.
@@ -53,15 +63,23 @@ export function claimRun(sealPath, record) {
   return { claimed: true, path };
 }
 
+/** Reads what the claim recorded, so an outcome never discards it. */
+function claimed(path) {
+  try {
+    return JSON.parse(readFileSync(path, 'utf8'));
+  } catch {
+    return {};
+  }
+}
+
 export function completeRun(path, record) {
-  writeFileSync(path, JSON.stringify({ status: 'completed', ...record }, null, 2) + '\n');
+  const previous = claimed(path);
+  writeFileSync(path, JSON.stringify({ ...previous, ...record, status: 'completed' }, null, 2) + '\n');
 }
 
 export function failRun(path, reason, record = {}) {
-  writeFileSync(
-    path,
-    JSON.stringify({ status: 'failed', reason, ...record }, null, 2) + '\n'
-  );
+  const previous = claimed(path);
+  writeFileSync(path, JSON.stringify({ ...previous, ...record, status: 'failed', reason }, null, 2) + '\n');
 }
 
 /** Human-readable explanation of a refused claim. */
@@ -69,7 +87,9 @@ export function describeRefusal(path, existing) {
   const started = existing?.startedAt ? ` started ${existing.startedAt}` : '';
   const base =
     `this pre-run seal has already been used for a run${started} (status: ` +
-    `${existing?.status ?? 'unknown'}). Recorded at ${path}.`;
+    `${existing?.status ?? 'unknown'}). Recorded at ${path}.\n` +
+    'The record is keyed by the seal\'s contents, so renaming or copying it does not ' +
+    'produce a fresh one.';
 
   if (existing?.status === 'failed') {
     return (

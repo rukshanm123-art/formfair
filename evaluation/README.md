@@ -9,7 +9,7 @@ evaluation is run with. Tests use `node:test`.
 
 ```bash
 cd evaluation
-npm test              # 169 tests, on synthetic fixtures only
+npm test              # 180 tests, on synthetic fixtures only
 npm run draw-order    # verify the frozen order still matches the frame
 npm run build-frame   # rebuild frame.csv from the archived page and re-assert its counts
 npm run metrics -- fixtures/synthetic/dataset.valid.json --synthetic
@@ -53,6 +53,8 @@ the one thing that artefact exists to prevent. Creating it takes an explicit `--
 | `src/cli-join.mjs` | run the instrument under the seal and join into the dataset |
 | `src/ground-truth.mjs` | derive final ground truth from both annotations plus adjudication |
 | `src/run-lock.mjs` | exclusive, durable record that a run has started |
+| `src/agreement.mjs` | protocol section 8 step 1 - kappa from the original labels |
+| `src/cli-agreement.mjs` | the same, from the command line |
 | `src/cli-ground-truth.mjs` | the same, from the command line |
 | `src/metrics.mjs` | protocol section 9 - stage one, stage two, end to end |
 | `src/draw-order.mjs` | protocol section 2 - deterministic agency ordering |
@@ -139,7 +141,7 @@ the missing identities without changing the frozen analyser.
 ## Order of the sealed pipeline
 
 ```
-inventory -> annotate (x2) -> ground truth -> PRE-RUN SEAL -> join -> CLOSED SEAL -> metrics
+inventory -> annotate (x2) -> agreement -> ground truth -> PRE-RUN SEAL -> join -> CLOSED SEAL -> metrics
                                                               ^
                                                      FormFair runs here, and
                                                      only here, and only with
@@ -168,12 +170,34 @@ would be post hoc.
 evidence that annotation finished before the tool was seen. All hashes in it are computed
 from the sealed files; there is no caller-supplied hash list to trust.
 
+**Agreement is derived, and regenerated at the join.** `cli-agreement.mjs` computes
+stage-one kappa, one kappa per rule, the pooled figure, percentage agreement and label
+counts from both annotators' original independent labels, before adjudication. The join
+regenerates it from the sealed annotations and requires a byte-for-byte match, so a kappa
+file cannot be written by hand and sealed alongside annotations that do not produce it.
+
+Per-rule kappa is computed over **controls both annotators independently labelled as
+personal-name controls**. That decision is frozen in
+[the protocol](../docs/evaluation/PROTOCOL.md) with the reasoning; the short version is
+that treating an absent rule label as negative would invent labels that mostly agree, and
+using the adjudicated stage-one outcome would leak a later decision into a
+pre-adjudication measure. Stage-one disagreements are therefore excluded from per-rule
+agreement and reported as `stageOneDisagreements` beside it.
+
 **A pre-run seal is good for exactly one run.** The seal is deliberately unchanged by a
 run, so on its own it could be presented again and again, producing a second dataset and a
-choice between them. Before the analyser is touched, `cli-join` claims the run by creating
-`<seal>.run` exclusively and flushing it to disk. A second attempt against the same seal is
+choice between them. Before the analyser is touched, `cli-join` claims the run by exclusively creating a record
+keyed by the **seal's SHA-256** in one fixed directory, and flushing it to disk. Keying on
+the filename secured nothing: a copy under another name produced a different lock path and
+a second run of the same evaluation. A second attempt against the same seal is
 refused. A run that fails after claiming leaves the record behind marked `failed`, so it
 cannot be quietly repeated: running again means deleting the lock deliberately.
+
+**Output paths cannot destroy the evidence.** Every input and output path is resolved and
+compared before anything runs: `--out` or `--reports` pointing at the seal, the inventory,
+the ground truth, an annotation, the captures directory, or at each other is refused, as is
+any output that already exists. All three outputs are written with an exclusive flag, so a
+race cannot overwrite one either.
 
 **Everything checkable is checked before the analyser starts.** The sealed ground truth is
 **regenerated** from the sealed annotations, adjudication and inventory and must match byte

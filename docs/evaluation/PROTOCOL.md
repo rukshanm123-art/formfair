@@ -228,6 +228,23 @@ Compute held-out Cohen's kappa for stage one, every rule, and the pooled rule pa
 report percentage agreement and label counts. Where kappa cannot be computed because both
 annotators used a single category, report **"not estimable"**.
 
+> **Frozen decision, 11 August 2026, before any annotation: which controls enter
+> per-rule agreement.**
+>
+> Per-rule kappa is computed over **controls both annotators independently labelled as
+> personal-name controls at stage one**, and over no others.
+>
+> Two alternatives were rejected. Taking the union and treating an absent rule label as
+> negative would invent labels: an annotator who judged a control not to be a name never
+> formed a view on FF-01 for it, and the invented labels would usually agree, inflating
+> the figure. Using the controls the adjudicator later ruled to be name controls would
+> leak a post-adjudication decision into a measure the protocol requires to come from the
+> original independent labels.
+>
+> The consequence is that stage-one disagreements are excluded from per-rule agreement
+> rather than resolved inside it, so `stageOneDisagreements` and `controlsInPerRuleBasis`
+> are reported alongside every per-rule figure.
+
 ### Two implementation choices recorded here
 
 Neither is specified above; both are fixed now rather than after seeing results.

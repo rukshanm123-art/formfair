@@ -13,6 +13,7 @@
     "inventory": "node src/cli-inventory.mjs",
     "join": "node src/cli-join.mjs",
     "instrument:setup": "bash scripts/setup-instrument.sh",
-    "ground-truth": "node src/cli-ground-truth.mjs"
+    "ground-truth": "node src/cli-ground-truth.mjs",
+    "agreement": "node src/cli-agreement.mjs"
   }
 }

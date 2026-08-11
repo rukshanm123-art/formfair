@@ -19,7 +19,7 @@
  * destroy the evidence that annotation finished before the tool was seen.
  */
 
-import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, statSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
 import { buildDataset } from './join.mjs';
@@ -27,6 +27,7 @@ import { loadInstrument, instrumentDirFromEnv } from './instrument-ref.mjs';
 import { validateDataset } from './schema.mjs';
 import { verifySeal, sealedFileMatches } from './seal.mjs';
 import { buildGroundTruth } from './ground-truth.mjs';
+import { computeAgreement } from './agreement.mjs';
 import { claimRun, completeRun, failRun, describeRefusal } from './run-lock.mjs';
 
 function fail(message, details = []) {
@@ -50,6 +51,7 @@ const reportsOut = flag('--reports');
 const closedSealOut = flag('--closed-seal');
 const noDelegated = args.includes('--no-delegated');
 const synthetic = args.includes('--synthetic');
+const runRecordsDir = flag('--run-records') ?? join(dirname(new URL(import.meta.url).pathname), '..', 'data', 'runs');
 
 if (!sealPath || !capturesDir || !inventoryPath || !truthPath || !outPath || !reportsOut || !closedSealOut) {
   fail(
@@ -57,6 +59,38 @@ if (!sealPath || !capturesDir || !inventoryPath || !truthPath || !outPath || !re
       '         --truth <file> --out <dataset> --reports <file> --closed-seal <file>\n\n' +
       'The seal is required. FormFair must not run before the annotations are sealed.'
   );
+}
+
+// Output paths must not be able to destroy the evidence. Every input and output is
+// resolved and compared: an --out or --reports pointing at the seal, the inventory, the
+// ground truth, an annotation, a capture, or at each other would overwrite the material
+// the figures rest on, and the seal would then verify against whatever replaced it.
+const inputs = {
+  '--seal': sealPath,
+  '--captures': capturesDir,
+  '--inventory': inventoryPath,
+  '--truth': truthPath,
+};
+const outputs = { '--out': outPath, '--reports': reportsOut, '--closed-seal': closedSealOut };
+
+const seen = new Map();
+for (const [flagName, path] of Object.entries({ ...inputs, ...outputs })) {
+  const key = resolve(path);
+  if (seen.has(key)) {
+    fail(`${flagName} and ${seen.get(key)} are the same path (${key}). Every path must be distinct.`);
+  }
+  seen.set(key, flagName);
+}
+for (const [flagName, path] of Object.entries(outputs)) {
+  if (existsSync(path)) {
+    fail(
+      `${flagName} already exists at ${path}.\n` +
+        'Outputs are never overwritten: a rerun that quietly replaced a previous result ' +
+        'would leave no trace that there had been one.'
+    );
+  }
+  const within = resolve(path).startsWith(resolve(capturesDir) + '/');
+  if (within) fail(`${flagName} is inside the captures directory, which holds sealed evidence`);
 }
 
 // A run without the delegated engine is not the evaluation the protocol describes, so it
@@ -156,6 +190,24 @@ if (regenerated.text !== readFileSync(truthPath, 'utf8')) {
   );
 }
 
+// The sealed agreement must be what the sealed annotations produce, for the same reason
+// as the ground truth: sealing a file does not make it derived.
+const regeneratedAgreement = computeAgreement({
+  annotationA: JSON.parse(readFileSync(sealedPath('annotatorA'), 'utf8')),
+  annotationB: JSON.parse(readFileSync(sealedPath('annotatorB'), 'utf8')),
+  inventory: inventoryFile,
+});
+if (!regeneratedAgreement.agreement) {
+  fail('the sealed annotations do not produce an agreement record:', regeneratedAgreement.problems);
+}
+if (regeneratedAgreement.text !== readFileSync(sealedPath('kappa'), 'utf8')) {
+  fail('the sealed agreement is not what the sealed annotations produce.', [
+    `derived: ${regeneratedAgreement.sha256}`,
+    `sealed:  ${hashOf(sealedPath('kappa'))}`,
+    'It must be produced by cli-agreement from the sealed annotations and inventory.',
+  ]);
+}
+
 // Every capture must exist and be the bytes the inventory records.
 const capturesFor = [];
 for (const inventory of inventoryFile.pages) {
@@ -189,11 +241,11 @@ for (const { inventory } of capturesFor) {
 }
 
 // CLAIM. Exclusive and durable, written before the analyser runs.
-const claim = claimRun(sealPath, {
+const preRunSealSha256 = hashOf(sealPath);
+const claim = claimRun(runRecordsDir, preRunSealSha256, {
   startedAt: new Date().toISOString().replace(/\.\d+Z$/, 'Z'),
   instrument: instrument.tag,
   instrumentCommit: instrument.commit,
-  preRunSealSha256: hashOf(sealPath),
   synthetic,
   outputs: { reports: reportsOut, dataset: outPath, closedSeal: closedSealOut },
 });
@@ -237,9 +289,9 @@ const { valid, problems: schemaProblems } = validateDataset(dataset);
 if (!valid) abort('the joined dataset does not match the frozen schema, so nothing was written:', schemaProblems);
 
 // Only now is anything written.
-writeFileSync(reportsOut, reportsText);
+writeFileSync(reportsOut, reportsText, { flag: 'wx' });
 const datasetText = JSON.stringify(dataset, null, 2) + '\n';
-writeFileSync(outPath, datasetText);
+writeFileSync(outPath, datasetText, { flag: 'wx' });
 const datasetSha256 = createHash('sha256').update(Buffer.from(datasetText, 'utf8')).digest('hex');
 const reportsSha256 = hashes.reports;
 
@@ -263,17 +315,16 @@ const closed = {
     groundTruthSha256: hashes.groundTruth,
     reportsSha256,
     datasetSha256,
-    preRunSealSha256: hashOf(sealPath),
+    preRunSealSha256,
   },
 };
 if (existsSync(closedSealOut) && resolve(closedSealOut) === resolve(sealPath)) {
   fail('the closed seal must be a separate file; overwriting the pre-run seal would destroy it');
 }
 if (synthetic) closed.synthetic = true;
-writeFileSync(closedSealOut, JSON.stringify(closed, null, 2) + '\n');
+writeFileSync(closedSealOut, JSON.stringify(closed, null, 2) + '\n', { flag: 'wx' });
 
 completeRun(claim.path, {
-  startedAt: JSON.parse(readFileSync(claim.path, 'utf8')).startedAt,
   completedAt: new Date().toISOString().replace(/\.\d+Z$/, 'Z'),
   instrument: instrument.tag,
   instrumentCommit: instrument.commit,
