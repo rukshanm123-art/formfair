@@ -1,0 +1,13 @@
+{
+  "name": "formfair-evaluation",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Held-out evaluation harness for FormFair. Deliberately dependency-free.",
+  "scripts": {
+    "test": "node --test",
+    "draw-order": "node src/cli-draw-order.mjs",
+    "metrics": "node src/cli-metrics.mjs",
+    "seal:verify": "node src/cli-seal.mjs"
+  }
+}

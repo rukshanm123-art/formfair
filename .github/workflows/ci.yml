@@ -95,3 +95,19 @@ jobs:
       # that was only ever a development dependency; this can.
       - name: Verify the published package from a consumer's position
         run: npm run verify:package
+
+  evaluation-harness:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # The harness has no dependencies, by design: building evaluation tooling must not
+      # be able to change the instrument the evaluation is run with. No npm ci here.
+      - name: Evaluation harness tests
+        working-directory: evaluation
+        run: npm test

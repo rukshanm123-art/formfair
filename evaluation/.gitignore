@@ -1,0 +1,4 @@
+# Captured third-party markup and annotation files never enter version control.
+# Only hashes, provenance metadata and schemas are published.
+data/
+*.local.json
