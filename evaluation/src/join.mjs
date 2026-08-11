@@ -147,6 +147,7 @@ export function buildDataset({ pages, hashes }) {
     instrument: 'evaluation-v1.0.0',
     builtFrom: {
       inventorySha256: hashes?.inventory ?? null,
+      groundTruthSha256: hashes?.groundTruth ?? null,
       annotationASha256: hashes?.annotationA ?? null,
       annotationBSha256: hashes?.annotationB ?? null,
       kappaSha256: hashes?.kappa ?? null,

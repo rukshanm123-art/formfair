@@ -108,7 +108,7 @@ describe('evaluation seal (protocol section 10)', () => {
 
   const buildManifest = (dir, overrides = {}) => {
     const files = {};
-    for (const key of ['annotatorA', 'annotatorB', 'kappa', 'adjudication']) {
+    for (const key of ['annotatorA', 'annotatorB', 'kappa', 'adjudication', 'inventory', 'groundTruth']) {
       const path = join(dir, `${key}.json`);
       writeFileSync(path, JSON.stringify({ key }));
       files[key] = { path: `${key}.json`, sha256: hashFile(path) };

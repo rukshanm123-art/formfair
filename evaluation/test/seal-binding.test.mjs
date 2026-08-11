@@ -54,6 +54,7 @@ function sealedEvaluation(dir, { tamper } = {}) {
   };
 
   const inventorySha = write('inventory', JSON.stringify({ pages: [] }));
+  const groundTruthSha = write('groundTruth', JSON.stringify({ pages: {} }));
   const reportsSha = write('reports', JSON.stringify({}));
   const annotationA = write('annotatorA', JSON.stringify({ annotator: 'a' }));
   const annotationB = write('annotatorB', JSON.stringify({ annotator: 'b' }));
@@ -62,6 +63,7 @@ function sealedEvaluation(dir, { tamper } = {}) {
 
   dataset.builtFrom = {
     inventorySha256: inventorySha,
+    groundTruthSha256: groundTruthSha,
     reportsSha256: reportsSha,
     annotationASha256: annotationA,
     annotationBSha256: annotationB,
@@ -84,6 +86,7 @@ function sealedEvaluation(dir, { tamper } = {}) {
       instrument: 'evaluation-v1.0.0',
       instrumentCommit: INSTRUMENT_COMMIT,
       inventorySha256: inventorySha,
+      groundTruthSha256: groundTruthSha,
       reportsSha256: reportsSha,
       datasetSha256: files.dataset.sha256,
     },

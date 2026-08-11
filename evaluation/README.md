@@ -9,7 +9,7 @@ evaluation is run with. Tests use `node:test`.
 
 ```bash
 cd evaluation
-npm test              # 143 tests, on synthetic fixtures only
+npm test              # 160 tests, on synthetic fixtures only
 npm run draw-order    # verify the frozen order still matches the frame
 npm run build-frame   # rebuild frame.csv from the archived page and re-assert its counts
 npm run metrics -- fixtures/synthetic/dataset.valid.json --synthetic
@@ -50,7 +50,9 @@ the one thing that artefact exists to prevent. Creating it takes an explicit `--
 | `src/join.mjs` | inventory + adjudicated truth + run output -> the scored dataset |
 | `src/instrument-ref.mjs` | resolves and verifies the frozen instrument checkout |
 | `src/cli-inventory.mjs` | build the inventory from captured pages |
-| `src/cli-join.mjs` | run the instrument and join into the dataset |
+| `src/cli-join.mjs` | run the instrument under the seal and join into the dataset |
+| `src/ground-truth.mjs` | derive final ground truth from both annotations plus adjudication |
+| `src/cli-ground-truth.mjs` | the same, from the command line |
 | `src/metrics.mjs` | protocol section 9 - stage one, stage two, end to end |
 | `src/draw-order.mjs` | protocol section 2 - deterministic agency ordering |
 | `src/seal.mjs` | protocol section 10 - the gate that must pass before FormFair runs |
@@ -133,16 +135,53 @@ Why a report alone is not enough: a detected control on which all five rules com
 clean leaves no trace beyond the `summary.controls` count. `findNameControls` supplies
 the missing identities without changing the frozen analyser.
 
+## Order of the sealed pipeline
+
+```
+inventory -> annotate (x2) -> ground truth -> PRE-RUN SEAL -> join -> CLOSED SEAL -> metrics
+                                                              ^
+                                                     FormFair runs here, and
+                                                     only here, and only with
+                                                     a valid pre-run seal
+```
+
+**Ground truth is derived, not assembled.** `cli-ground-truth.mjs` produces it from both
+annotations and the adjudication: where the annotators agree, that label stands; where
+they disagree, an adjudicated decision is required and its absence is an error, never a
+silent preference for one annotator. An adjudicated decision on a case nobody disputed is
+also an error. Output is byte-identical for identical inputs.
+
+**The pre-run seal covers six files**: both annotations, the kappa file, the adjudication,
+the frozen inventory and the final ground truth. The last two are in it because the join
+is handed paths to them; without sealing them, a different inventory or a hand-edited
+ground truth could be supplied.
+
+**`cli-join.mjs` requires `--seal` and will not start without it.** It is the command that
+calls `findNameControls` and `analyseWith`, so this is where section 10 has to bite. It
+also checks the inventory and ground truth it was given **by hash** against the seal, and
+re-hashes every captured page against the sealed inventory, so the bytes analysed are
+provably the bytes annotated. A seal that already records a run is refused: a second run
+would be post hoc.
+
+**The closed seal is a separate file.** Overwriting the pre-run seal would destroy the
+evidence that annotation finished before the tool was seen. All hashes in it are computed
+from the sealed files; there is no caller-supplied hash list to trust.
+
+**Delegated findings are actually collected.** The join runs the frozen instrument's
+pinned axe-core 4.12.1 provider and emits `toJsonWithDelegated` reports. A count of zero
+would otherwise be indistinguishable from never having asked, so a synthetic page carries
+an unlabelled input and a test asserts the joined dataset contains a non-zero delegated
+count that never enters the accuracy figures.
+
 ## Official metrics require a closed seal
 
-`npm run metrics` refuses to run without `--seal` naming a **closed** seal: one carrying
-the run record and the hashes of what the run produced. A pre-run seal is not enough,
-because it says annotation finished before the tool was seen but not which run the
-figures describe.
+`npm run metrics` refuses to run without `--seal` naming a **closed** seal carrying the
+run record and the hashes of what the run produced, and it binds that seal to the dataset
+in front of it: the dataset must hash to the sealed dataset and its `builtFrom` must name
+the sealed inventory, ground truth, reports, both annotations, kappa and adjudication.
 
-`--synthetic` bypasses this for fixtures, and refuses any dataset that does not declare
-`"synthetic": true`, so it cannot be used to score real data by mistake. The two flags
-are mutually exclusive.
+`--synthetic` bypasses this for fixtures, refuses any dataset not declaring
+`"synthetic": true`, and is mutually exclusive with `--seal`.
 
 ## Figures below the reporting threshold
 

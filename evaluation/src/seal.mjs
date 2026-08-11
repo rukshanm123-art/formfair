@@ -9,11 +9,20 @@
 import { createHash } from 'node:crypto';
 import { readFileSync, existsSync } from 'node:fs';
 
+/**
+ * Sealed before FormFair is run.
+ *
+ * The inventory and the final ground truth are here, not merely the annotations they came
+ * from: the join is given paths to those two files, and unless the seal covers them, a
+ * different inventory or a hand-edited ground truth could be supplied to it.
+ */
 export const REQUIRED = [
   { key: 'annotatorA', description: "first primary annotator's original independent labels" },
   { key: 'annotatorB', description: "second primary annotator's original independent labels" },
   { key: 'kappa', description: 'agreement computed from the original labels, before adjudication' },
   { key: 'adjudication', description: 'adjudicated decisions, reasons and catalogue clauses' },
+  { key: 'inventory', description: 'the frozen control inventory the annotators labelled' },
+  { key: 'groundTruth', description: 'final ground truth, derived from both annotations and the adjudication' },
 ];
 
 export function hashFile(path) {
@@ -58,8 +67,8 @@ export function verifySeal(manifest, resolve = (p) => p) {
 }
 
 /** Artefacts the run produces. Required, and hash-checked, once the seal is closed. */
+/** Produced by the run itself, and recorded in a separate closed seal. */
 export const RUN_ARTEFACTS = [
-  { key: 'inventory', description: 'the frozen control inventory annotators labelled' },
   { key: 'reports', description: 'the unmodified JSON reports from the run' },
   { key: 'dataset', description: 'the joined dataset the metrics were computed from' },
 ];
@@ -135,7 +144,7 @@ export function verifyClosedSeal(manifest, resolve = (p) => p) {
   }
 
   // The run's own record of what it produced must agree with the sealed files.
-  for (const { key } of RUN_ARTEFACTS) {
+  for (const { key } of [...RUN_ARTEFACTS, { key: 'inventory' }, { key: 'groundTruth' }]) {
     const field = `${key}Sha256`;
     const sealed = manifest?.files?.[key]?.sha256;
     if (sealed && run[field] !== sealed) {
@@ -173,6 +182,7 @@ export function bindDataset(manifest, dataset, datasetSha256) {
 
   const pairs = [
     ['inventorySha256', 'inventory'],
+    ['groundTruthSha256', 'groundTruth'],
     ['reportsSha256', 'reports'],
     ['annotationASha256', 'annotatorA'],
     ['annotationBSha256', 'annotatorB'],
@@ -196,4 +206,26 @@ export function bindDataset(manifest, dataset, datasetSha256) {
   }
 
   return { bound: failures.length === 0, failures };
+}
+
+/**
+ * Confirms a file handed to a command is exactly the one the seal covers.
+ *
+ * Sealing a file and then analysing a different one is the obvious way round a seal, and
+ * comparing hashes is the only thing that closes it: a path can point anywhere.
+ */
+export function sealedFileMatches(manifest, key, path) {
+  const entry = manifest?.files?.[key];
+  if (!entry) return { ok: false, reason: `the seal does not cover ${key}` };
+  if (!existsSync(path)) return { ok: false, reason: `${key}: no file at ${path}` };
+  const actual = hashFile(path);
+  if (actual !== entry.sha256) {
+    return {
+      ok: false,
+      reason:
+        `${key}: ${path} hashes to ${actual} but the seal covers ${entry.sha256}. ` +
+        'This is not the file that was sealed.',
+    };
+  }
+  return { ok: true, sha256: actual };
 }
