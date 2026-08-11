@@ -27,13 +27,15 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "vite build && tsc -p tsconfig.build.json",
+    "build": "npm run instrument && vite build && tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "coverage": "vitest run --coverage",
     "example": "npm run build && node scripts/generate-example.mjs",
     "test:delegated": "vitest run --config vitest.delegated.config.ts",
-    "verify:package": "bash scripts/verify-packed-consumer.sh"
+    "verify:package": "bash scripts/verify-packed-consumer.sh",
+    "instrument": "node scripts/write-instrument.mjs",
+    "verify:snapshots": "node scripts/verify-snapshot-versions.mjs"
   },
   "dependencies": {
     "axe-core": "4.12.1",

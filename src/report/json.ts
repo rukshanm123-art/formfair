@@ -1,9 +1,17 @@
 import type { AnalysisResult } from '../types.js';
 import type { MergedResult } from '../delegated/merge.js';
 import { sortFindings, summarise, type Summary } from './summary.js';
+import { instrument, type Instrument } from '../instrument.js';
 
 export interface JsonReport {
   readonly schema: 'formfair/report@1';
+  /**
+   * What produced this report. A catalogue version alone does not reproduce a result:
+   * the parser, the accessibility engine and the package itself all bear on the output,
+   * so each is recorded here. The commit and the resolved dependency tree are fixed by
+   * the evaluation tag; see docs/evaluation/README.md.
+   */
+  readonly instrument: Instrument;
   readonly catalogueVersion: string;
   readonly summary: Summary;
   readonly findings: readonly {
@@ -42,6 +50,7 @@ export interface JsonReport {
 export function toJson(result: AnalysisResult): JsonReport {
   return {
     schema: 'formfair/report@1',
+    instrument: instrument(result.catalogueVersion),
     catalogueVersion: result.catalogueVersion,
     summary: summarise(result),
     findings: sortFindings(result.findings).map((f) => ({

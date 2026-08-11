@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { analyse, decisionCoverage } from '../src/index.js';
 import { toText } from '../src/report/text.js';
 import { toJson } from '../src/report/json.js';
+import { toHtml } from '../src/report/html.js';
 import { summarise } from '../src/report/summary.js';
 
 function form(...patterns: string[]): string {
@@ -86,6 +87,20 @@ describe('advisories', () => {
     expect(toText(r)).toContain('not scored');
   });
 
+  it('appears in the HTML report, labelled and escaped', () => {
+    const html = toHtml(analyse('<form><input name="firstName" maxlength="40"></form>'));
+    expect(html).toContain('ADV-NORM-BOUNDARY');
+    expect(html).toContain('Reported, not scored');
+    expect(html).toContain('excluded from the accuracy figures');
+    expect(html).not.toMatch(/<script|src=|href=/);
+  });
+
+  it('is absent from the HTML report when nothing raised one', () => {
+    const html = toHtml(analyse('<form><input name="firstName" pattern="[A-Za-z]+"></form>'));
+    expect(html).not.toContain('ADV-NORM-BOUNDARY');
+    expect(html).not.toContain('<h2>Advisories</h2>');
+  });
+
   it('does not fire FF-03 on a maximum no fixture pair straddles', () => {
     // The frozen FF-03 requires a witnessed asymmetry, not a constructible one.
     const r = analyse('<form><input name="firstName" maxlength="40"></form>');
@@ -95,5 +110,27 @@ describe('advisories', () => {
   it('still fires FF-03 where a fixture pair is witnessed to straddle the maximum', () => {
     const r = analyse('<form><input name="firstName" maxlength="7"></form>');
     expect(r.findings.map((f) => f.rule)).toEqual(['FF-03']);
+  });
+});
+
+describe('the report identifies the instrument that produced it', () => {
+  it('records the catalogue, the package and the dependencies that bear on results', () => {
+    const { instrument } = toJson(analyse('<form><input name="firstName"></form>'));
+    expect(instrument.catalogueVersion).toBe('1.0.0');
+    expect(instrument.packageVersion).toMatch(/^\d+\.\d+\.\d+/);
+    expect(instrument.dependencies['parse5']).toMatch(/^\d+\.\d+\.\d+/);
+    expect(instrument.dependencies['axe-core']).toMatch(/^\d+\.\d+\.\d+/);
+  });
+
+  it('records the runtime, so a Node result is distinguishable from a browser one', () => {
+    const { instrument } = toJson(analyse('<form><input name="firstName"></form>'));
+    expect(instrument.runtime).toMatch(/^node \d+\./);
+  });
+
+  it('records the axe-core version the snapshot documents', () => {
+    // Paired with scripts/verify-snapshot-versions.mjs: the report must name the same
+    // engine release the captured catalogue evidences.
+    const { instrument } = toJson(analyse('<form><input name="firstName"></form>'));
+    expect(instrument.dependencies['axe-core']).toBe('4.12.1');
   });
 });

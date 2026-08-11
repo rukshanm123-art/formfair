@@ -9,6 +9,5 @@
  * against the core package's Node 20.
  */
 
-export { axeProvider, createAnalysisWindow } from './delegated/axe.js';
-export { runAxeOnDocument, DELEGATED_RULES } from './delegated/axe.js';
+export { axeProvider, runAxeOnDocument, DELEGATED_RULES } from './delegated/axe.js';
 export type { AccessibilityProvider, DelegatedFinding, DelegatedResult } from './delegated/types.js';

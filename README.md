@@ -119,17 +119,18 @@ Requires Node 20 or later: the analyser compiles patterns with the regular-expre
 
 ```bash
 npm install
-npm test                # 86 tests, the rule catalogue and reports
+npm test                # 98 tests, the rule catalogue and reports
 npm run typecheck
 npm run build           # dist/index.js with type declarations
 npm run example         # rebuilds, then regenerates examples/sample-report.html
-npm run test:delegated  # the axe-core suite; needs Node 22, see below
+npm run test:delegated  # 13 tests; needs jsdom's Node floor, see below
 ```
 
 The delegated suite runs axe-core inside jsdom, whose bundled undici calls a Node
-internal that Node 20 does not provide, so it needs Node 22. That constrains the test
-harness only; the analyser itself runs on Node 20. CI verifies the package on both
-versions and runs the delegated suite on 22.
+internal that Node 20 does not provide. It needs jsdom's own floor —
+`^22.22.2 || ^24.15.0 || >=26` — which constrains the test harness only; the analyser
+itself runs on Node 20. CI verifies the package on both versions and runs the delegated
+suite on 22.
 
 ### Entry points
 
@@ -149,6 +150,18 @@ npm install formfair jsdom    # plus the delegated provider
 
 `npm run verify:package` installs the packed tarball into a throwaway project and
 exercises both entry points as a consumer would. CI runs it on Node 20 and 22.
+
+## Reproducing a result
+
+Every JSON report carries an `instrument` block naming the catalogue version, the
+package version, the parse5 and axe-core versions, and the runtime — because a catalogue
+version alone does not reproduce a result. Held-out analysis is run from the
+`evaluation-v1.0.0` tag, which fixes the commit, the locked dependency tree and all of
+the above together. See [docs/evaluation/README.md](docs/evaluation/README.md).
+
+`npm run verify:snapshots` fails if a delegated engine is bumped without recapturing the
+catalogue snapshot held as evidence for it, so the write-up cannot end up describing an
+engine the tool no longer runs.
 
 ```ts
 import { analyse, toText, toHtml, toJsonString } from './src/index.js';

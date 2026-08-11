@@ -103,7 +103,13 @@ function buildWindow(JSDOM: JsdomConstructor, html: string): JsdomInstance {
   });
 }
 
-/** Exposed so the no-script-execution guarantee can be tested directly. */
+/**
+ * Internal. Exported so the no-script-execution guarantee can be asserted against the
+ * window the provider actually builds; it is not re-exported from `formfair/node` and
+ * is not public API.
+ *
+ * @internal
+ */
 export async function createAnalysisWindow(html: string): Promise<JsdomInstance> {
   const { JSDOM } = await import('jsdom');
   return buildWindow(JSDOM as unknown as JsdomConstructor, html);

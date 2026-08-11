@@ -30,6 +30,17 @@ jobs:
       - name: Audit dependencies
         run: npm audit
 
+      # The pinned engine version must match the catalogue snapshot captured as its
+      # evidence, so a dependency bump cannot silently outrun the write-up.
+      - name: Verify snapshot versions
+        run: npm run verify:snapshots
+
+      # The generated instrument record must match the installed tree.
+      - name: Verify the instrument record is current
+        run: |
+          npm run instrument
+          git diff --exit-code src/instrument.generated.ts
+
       - name: Typecheck
         run: npm run typecheck
 

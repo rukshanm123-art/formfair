@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { analyse, analyseWith } from '../src/index.js';
-import { axeProvider, createAnalysisWindow, DELEGATED_RULES } from '../src/node.js';
+import { axeProvider, DELEGATED_RULES } from '../src/node.js';
+// Internal testing seam, deliberately not part of the formfair/node surface.
+import { createAnalysisWindow } from '../src/delegated/axe.js';
 import { merge, withoutDelegation, totalReportedFindings } from '../src/delegated/merge.js';
 import { EMPTY_DELEGATED } from '../src/delegated/types.js';
 import { toTextWithDelegated } from '../src/report/text.js';
