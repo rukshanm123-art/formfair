@@ -67,7 +67,25 @@ export function wilson(successes, total, z = Z_95) {
 export function cohensKappa(a, b) {
   if (a.length !== b.length) throw new RangeError('rater vectors must be the same length');
   const n = a.length;
-  if (n === 0) return notEstimable('no paired labels');
+
+  // A caller printing agreement should not have to guard every field. Even with nothing
+  // to compare, the raw counts are returned: a corpus where the annotators never both
+  // called the same control a name has an empty per-rule basis, which is a result to
+  // report, not a crash.
+  if (n === 0) {
+    return {
+      ...notEstimable('no paired labels'),
+      percentageAgreement: null,
+      counts: {
+        n: 0,
+        bothPositive: 0,
+        bothNegative: 0,
+        disagreements: 0,
+        raterAPositive: 0,
+        raterBPositive: 0,
+      },
+    };
+  }
 
   const cell = { pp: 0, pn: 0, np: 0, nn: 0 };
   for (let i = 0; i < n; i++) {

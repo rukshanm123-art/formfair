@@ -60,6 +60,15 @@ describe("Cohen's kappa", () => {
     assert.equal(r.percentageAgreement, 1, 'agreement is still reported');
   });
 
+  test('returns raw counts even with nothing to compare', () => {
+    // An empty per-rule basis is a result to report, not a crash: a caller printing
+    // agreement should not have to guard every field.
+    const r = cohensKappa([], []);
+    assert.equal(r.estimable, false);
+    assert.equal(r.counts.n, 0);
+    assert.equal(r.percentageAgreement, null);
+  });
+
   test('reports percentage agreement and label counts alongside', () => {
     const r = cohensKappa(
       ['positive', 'negative', 'positive'],

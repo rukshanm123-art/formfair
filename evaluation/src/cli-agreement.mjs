@@ -63,12 +63,12 @@ if (!agreement) fail('agreement could not be computed:', problems);
 
 writeFileSync(outPath, text);
 
-const show = (name, r) =>
-  console.log(
-    `  ${name.padEnd(10)} ${
-      r.estimable ? r.kappa.toFixed(3) : `not estimable (${r.reason})`
-    }   agreement ${(r.percentageAgreement * 100).toFixed(1)}%   n=${r.counts.n}`
-  );
+const show = (name, r) => {
+  const value = r.estimable ? r.kappa.toFixed(3) : `not estimable (${r.reason})`;
+  const agreement =
+    typeof r.percentageAgreement === 'number' ? `${(r.percentageAgreement * 100).toFixed(1)}%` : 'n/a';
+  console.log(`  ${name.padEnd(10)} ${value}   agreement ${agreement}   n=${r.counts?.n ?? 0}`);
+};
 
 console.log(`annotators: ${agreement.computedFrom.annotatorA}, ${agreement.computedFrom.annotatorB}`);
 console.log(`per-rule basis: ${agreement.perRuleBasis}`);

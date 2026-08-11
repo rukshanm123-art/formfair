@@ -24,7 +24,7 @@ import { createHash } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
 import { buildDataset } from './join.mjs';
 import { loadInstrument, instrumentDirFromEnv } from './instrument-ref.mjs';
-import { validateDataset } from './schema.mjs';
+import { validateDataset, validateAnnotation, validateAdjudication } from './schema.mjs';
 import { verifySeal, sealedFileMatches } from './seal.mjs';
 import { buildGroundTruth } from './ground-truth.mjs';
 import { computeAgreement } from './agreement.mjs';
@@ -51,7 +51,14 @@ const reportsOut = flag('--reports');
 const closedSealOut = flag('--closed-seal');
 const noDelegated = args.includes('--no-delegated');
 const synthetic = args.includes('--synthetic');
-const runRecordsDir = flag('--run-records') ?? join(dirname(new URL(import.meta.url).pathname), '..', 'data', 'runs');
+/**
+ * One fixed place for run records. A caller-chosen directory would undo the whole point:
+ * an official run could use one directory and the identical seal could then be run again
+ * pointing somewhere else. The override exists only so the synthetic fixtures can be
+ * isolated from each other, and it is refused without --synthetic.
+ */
+const OFFICIAL_RUN_RECORDS = join(dirname(new URL(import.meta.url).pathname), '..', 'data', 'runs');
+const runRecordsOverride = flag('--run-records');
 
 if (!sealPath || !capturesDir || !inventoryPath || !truthPath || !outPath || !reportsOut || !closedSealOut) {
   fail(
@@ -60,6 +67,16 @@ if (!sealPath || !capturesDir || !inventoryPath || !truthPath || !outPath || !re
       'The seal is required. FormFair must not run before the annotations are sealed.'
   );
 }
+
+if (runRecordsOverride && !synthetic) {
+  fail(
+    '--run-records is available only together with --synthetic.\n' +
+      'An official run keeps its record in one fixed place. Letting the caller choose\n' +
+      'would allow the same seal to be run again against a different directory, which is\n' +
+      'exactly what the one-run record exists to prevent.'
+  );
+}
+const runRecordsDir = runRecordsOverride ?? OFFICIAL_RUN_RECORDS;
 
 // Output paths must not be able to destroy the evidence. Every input and output is
 // resolved and compared: an --out or --reports pointing at the seal, the inventory, the
@@ -166,13 +183,30 @@ const sealedPath = (key) => resolve(sealBase, manifest.files[key].path);
 // in the material cannot be discovered halfway through a run that has already written
 // reports. Nothing below this point writes anything until the join has succeeded.
 
+// The sealed files must still satisfy the schemas they were written against. Deriving
+// the agreement and the ground truth reads only the labels, so reasons, evidence and
+// input types could be stripped after derivation, resealed, and still regenerate
+// identically. Revalidating here is what closes that.
+const sealedAnnotationA = JSON.parse(readFileSync(sealedPath('annotatorA'), 'utf8'));
+const sealedAnnotationB = JSON.parse(readFileSync(sealedPath('annotatorB'), 'utf8'));
+const sealedAdjudication = JSON.parse(readFileSync(sealedPath('adjudication'), 'utf8'));
+
+for (const [file, name] of [[sealedAnnotationA, 'annotatorA'], [sealedAnnotationB, 'annotatorB']]) {
+  const { valid, problems } = validateAnnotation(file);
+  if (!valid) fail(`the sealed ${name} no longer matches the frozen annotation schema:`, problems);
+}
+{
+  const { valid, problems } = validateAdjudication(sealedAdjudication);
+  if (!valid) fail('the sealed adjudication no longer matches the frozen schema:', problems);
+}
+
 // The sealed ground truth must be exactly what the sealed annotations and adjudication
 // produce. Sealing a file does not make it derived: without regenerating it, an arbitrary
 // ground truth could be sealed alongside annotations that do not imply it.
 const regenerated = buildGroundTruth({
-  annotationA: JSON.parse(readFileSync(sealedPath('annotatorA'), 'utf8')),
-  annotationB: JSON.parse(readFileSync(sealedPath('annotatorB'), 'utf8')),
-  adjudication: JSON.parse(readFileSync(sealedPath('adjudication'), 'utf8')),
+  annotationA: sealedAnnotationA,
+  annotationB: sealedAnnotationB,
+  adjudication: sealedAdjudication,
   inventory: inventoryFile,
 });
 if (!regenerated.groundTruth) {
@@ -193,8 +227,8 @@ if (regenerated.text !== readFileSync(truthPath, 'utf8')) {
 // The sealed agreement must be what the sealed annotations produce, for the same reason
 // as the ground truth: sealing a file does not make it derived.
 const regeneratedAgreement = computeAgreement({
-  annotationA: JSON.parse(readFileSync(sealedPath('annotatorA'), 'utf8')),
-  annotationB: JSON.parse(readFileSync(sealedPath('annotatorB'), 'utf8')),
+  annotationA: sealedAnnotationA,
+  annotationB: sealedAnnotationB,
   inventory: inventoryFile,
 });
 if (!regeneratedAgreement.agreement) {

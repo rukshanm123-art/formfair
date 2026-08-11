@@ -16,6 +16,7 @@ import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { instrumentDirFromEnv } from '../src/instrument-ref.mjs';
+import { claimRun, completeRun, lockPathFor } from '../src/run-lock.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, '..');
@@ -221,7 +222,7 @@ describe('the join refuses to run FormFair outside the seal', () => {
     '--out', join(p.dir, 'dataset.json'),
     '--reports', join(p.dir, 'reports.json'),
     '--closed-seal', join(p.dir, 'seal.closed.json'),
-    '--run-records', p.runs,
+    '--run-records', p.runs, '--synthetic',
   ];
 
   test('without --seal it will not start', () =>
@@ -305,7 +306,7 @@ describe('a sealed run, end to end', () => {
     const joined = cli('cli-join.mjs', [
       '--seal', sealPath, '--captures', p.captures, '--inventory', p.inventoryPath,
       '--truth', p.truthPath, '--out', datasetPath, '--reports', reportsPath, '--closed-seal', closedPath,
-      '--run-records', p.runs,
+      '--run-records', p.runs, '--synthetic',
     ]);
     return { p, sealPath, datasetPath, reportsPath, closedPath, joined };
   };
@@ -342,14 +343,20 @@ describe('a sealed run, end to end', () => {
       assert.equal(closed.formfairRun.delegatedEngine, 'axe-core');
     }));
 
-  test('the metrics accept the closed seal and the dataset it covers', () =>
+  test('a synthetic run is marked, and its closed seal cannot yield official figures', () =>
     withDir((dir) => {
+      // These runs isolate their run records, which is only allowed for synthetic runs,
+      // so everything they produce is marked. The official metrics path is covered in
+      // seal-binding.test.mjs against a genuinely closed, unmarked seal.
       const { closedPath, datasetPath } = run(dir);
+      assert.equal(JSON.parse(readFileSync(datasetPath, 'utf8')).synthetic, true);
       const r = cli('cli-metrics.mjs', [datasetPath, '--seal', closedPath]);
-      assert.equal(r.code, 0, r.stderr);
-      assert.match(r.stderr, /seal: closed, and bound to this dataset/);
-      const report = JSON.parse(r.stdout);
-      assert.ok(report.stageOne.counts.tp >= 1);
+      assert.equal(r.code, 1);
+      assert.match(r.stderr, /marked synthetic cannot be scored through the sealed path/);
+      // The figures are still computable through the synthetic path.
+      const viaBypass = cli('cli-metrics.mjs', [datasetPath, '--synthetic']);
+      assert.equal(viaBypass.code, 0, viaBypass.stderr);
+      assert.ok(JSON.parse(viaBypass.stdout).stageOne.counts.tp >= 1);
     }));
 
   test('delegated findings are present, counted, and unscored', () =>
@@ -375,8 +382,8 @@ describe('a sealed run, end to end', () => {
 
   test('delegated findings stay out of the accuracy figures', () =>
     withDir((dir) => {
-      const { closedPath, datasetPath } = run(dir);
-      const report = JSON.parse(cli('cli-metrics.mjs', [datasetPath, '--seal', closedPath]).stdout);
+      const { datasetPath } = run(dir);
+      const report = JSON.parse(cli('cli-metrics.mjs', [datasetPath, '--synthetic']).stdout);
       assert.equal(report.unscored.scored, false);
       assert.ok(report.unscored.delegated.total > 0, 'they are reported');
       const scored = report.stageOne.counts;
@@ -390,7 +397,7 @@ describe('a pre-run seal is good for exactly one run', () => {
     '--out', join(p.dir, `dataset${suffix}.json`),
     '--reports', join(p.dir, `reports${suffix}.json`),
     '--closed-seal', join(p.dir, `seal.closed${suffix}.json`),
-    '--run-records', p.runs,
+    '--run-records', p.runs, '--synthetic',
   ];
 
   test('a second run against the same seal is refused', () =>
@@ -456,7 +463,7 @@ describe('a pre-run seal is good for exactly one run', () => {
 describe('output paths cannot destroy the evidence', () => {
   const base = (p, sealPath) => [
     '--seal', sealPath, '--captures', p.captures, '--inventory', p.inventoryPath,
-    '--truth', p.truthPath, '--run-records', p.runs,
+    '--truth', p.truthPath, '--run-records', p.runs, '--synthetic',
   ];
 
   test('an output pointing at the seal is refused', () =>
@@ -535,7 +542,7 @@ describe('the sealed agreement must be derived too', () => {
       const sealPath = seal(p);
       const r = cli('cli-join.mjs', [
         '--seal', sealPath, '--captures', p.captures, '--inventory', p.inventoryPath,
-        '--truth', p.truthPath, '--run-records', p.runs,
+        '--truth', p.truthPath, '--run-records', p.runs, '--synthetic',
         '--out', join(dir, 'd.json'), '--reports', join(dir, 'r.json'), '--closed-seal', join(dir, 'c.json'),
       ]);
       assert.equal(r.code, 1);
@@ -641,7 +648,7 @@ describe('the ground truth must be derived from the sealed inputs', () => {
       const r = cli('cli-join.mjs', [
         '--seal', sealPath, '--captures', p.captures, '--inventory', p.inventoryPath, '--truth', p.truthPath,
         '--out', join(dir, 'd.json'), '--reports', join(dir, 'r.json'), '--closed-seal', join(dir, 'c.json'),
-        '--run-records', p.runs,
+        '--run-records', p.runs, '--synthetic',
       ]);
       assert.equal(r.code, 1);
       assert.match(r.stderr, /not what the sealed annotations and adjudication derive/);
@@ -694,5 +701,149 @@ describe('the ground truth must be derived from the sealed inputs', () => {
       ]);
       assert.equal(r.code, 1);
       assert.match(r.stderr, /inventory is required/);
+    }));
+});
+
+describe('the run record cannot be relocated', () => {
+  test('--run-records is refused without --synthetic', () =>
+    withDir((dir) => {
+      const p = prepare(dir);
+      const sealPath = seal(p);
+      const r = cli('cli-join.mjs', [
+        '--seal', sealPath, '--captures', p.captures, '--inventory', p.inventoryPath,
+        '--truth', p.truthPath, '--run-records', p.runs,
+        '--out', join(dir, 'd.json'), '--reports', join(dir, 'r.json'), '--closed-seal', join(dir, 'c.json'),
+      ]);
+      assert.equal(r.code, 1, 'an official run must not choose where its record goes');
+      assert.match(r.stderr, /available only together with --synthetic/);
+      assert.equal(existsSync(join(dir, 'c.json')), false);
+    }));
+
+  test('claimRun refuses a second claim on the same seal hash', () =>
+    withDir((dir) => {
+      // The lower-level guarantee, independent of any command-line handling.
+      const hash = 'a'.repeat(64);
+      const first = claimRun(dir, hash, { startedAt: '2026-09-01T00:00:00Z' });
+      assert.equal(first.claimed, true);
+      const second = claimRun(dir, hash, { startedAt: '2026-09-02T00:00:00Z' });
+      assert.equal(second.claimed, false);
+      assert.equal(second.existing.startedAt, '2026-09-01T00:00:00Z');
+    }));
+
+  test('claimRun keys on the hash, not on anything else', () =>
+    withDir((dir) => {
+      assert.equal(claimRun(dir, 'a'.repeat(64), {}).claimed, true);
+      assert.equal(claimRun(dir, 'b'.repeat(64), {}).claimed, true, 'a different seal may run');
+      assert.equal(lockPathFor(dir, 'a'.repeat(64)).endsWith(`${'a'.repeat(64)}.json`), true);
+    }));
+
+  test('an outcome preserves what the claim recorded', () =>
+    withDir((dir) => {
+      const hash = 'c'.repeat(64);
+      const { path } = claimRun(dir, hash, { startedAt: '2026-09-01T00:00:00Z', instrument: 'evaluation-v1.0.0' });
+      completeRun(path, { completedAt: '2026-09-01T01:00:00Z' });
+      const record = JSON.parse(readFileSync(path, 'utf8'));
+      assert.equal(record.status, 'completed');
+      assert.equal(record.sealSha256, hash, 'the key it is filed under must survive');
+      assert.equal(record.instrument, 'evaluation-v1.0.0');
+    }));
+});
+
+describe('sealed annotations are revalidated at the join', () => {
+  const strip = (path, mutate) => {
+    const file = JSON.parse(readFileSync(path, 'utf8'));
+    mutate(file);
+    writeFileSync(path, JSON.stringify(file, null, 2));
+  };
+
+  const joinAfter = (p, dir) => {
+    const sealPath = seal(p);
+    return cli('cli-join.mjs', [
+      '--seal', sealPath, '--captures', p.captures, '--inventory', p.inventoryPath,
+      '--truth', p.truthPath, '--run-records', p.runs, '--synthetic',
+      '--out', join(dir, 'd.json'), '--reports', join(dir, 'r.json'), '--closed-seal', join(dir, 'c.json'),
+    ]);
+  };
+
+  test('evidence stripped after derivation is caught', () =>
+    withDir((dir) => {
+      // Derivation reads only the labels, so the agreement and ground truth still
+      // regenerate identically. Only the schema notices.
+      const p = prepare(dir);
+      strip(p.aPath, (file) => {
+        for (const page of file.pages) for (const control of page.controls) {
+          delete control.stageOne.evidence;
+          for (const rule of Object.values(control.rules ?? {})) delete rule.evidence;
+        }
+      });
+      const r = joinAfter(p, dir);
+      assert.equal(r.code, 1);
+      assert.match(r.stderr, /no longer matches the frozen annotation schema/);
+      assert.match(r.stderr, /must carry the markup evidence/);
+      assert.equal(existsSync(join(dir, 'r.json')), false);
+    }));
+
+  test('reasons stripped after derivation are caught', () =>
+    withDir((dir) => {
+      const p = prepare(dir);
+      strip(p.bPath, (file) => {
+        for (const page of file.pages) for (const control of page.controls) delete control.stageOne.reason;
+      });
+      const r = joinAfter(p, dir);
+      assert.equal(r.code, 1);
+      assert.match(r.stderr, /must carry a short reason/);
+    }));
+
+  test('an adjudication stripped of its catalogue clause is caught', () =>
+    withDir((dir) => {
+      const p = prepare(dir, { disagree: true });
+      strip(p.adjPath, (file) => {
+        for (const d of file.decisions) delete d.catalogueClause;
+      });
+      const r = joinAfter(p, dir);
+      assert.equal(r.code, 1);
+      assert.match(r.stderr, /adjudication no longer matches the frozen schema/);
+    }));
+
+  test('an inputType that disagrees with the inventory is caught', () =>
+    withDir((dir) => {
+      const p = prepare(dir);
+      strip(p.aPath, (file) => {
+        file.pages[0].controls[0].inputType = 'search';
+      });
+      const r = cli('cli-ground-truth.mjs', [
+        '--a', p.aPath, '--b', p.bPath, '--adjudication', p.adjPath,
+        '--inventory', p.inventoryPath, '--out', join(dir, 'x.json'),
+      ]);
+      assert.equal(r.code, 1);
+      assert.match(r.stderr, /but the frozen inventory has/);
+    }));
+});
+
+describe('an empty per-rule basis is reported, not a crash', () => {
+  test('annotators who never agree a control is a name still produce a figure', () =>
+    withDir((dir) => {
+      const p = prepare(dir);
+      // B calls every control a non-name, so no control enters the per-rule basis.
+      const b = JSON.parse(readFileSync(p.bPath, 'utf8'));
+      for (const page of b.pages) for (const control of page.controls) {
+        control.stageOne.label = 'negative';
+        delete control.rules;
+      }
+      writeFileSync(p.bPath, JSON.stringify(b, null, 2));
+
+      const out = join(dir, 'kappa-empty.json');
+      const r = cli('cli-agreement.mjs', ['--a', p.aPath, '--b', p.bPath, '--inventory', p.inventoryPath, '--out', out]);
+      assert.equal(r.code, 0, r.stderr);
+
+      const kappa = JSON.parse(readFileSync(out, 'utf8'));
+      assert.equal(kappa.controlsInPerRuleBasis, 0);
+      for (const rule of ['FF-01', 'FF-02', 'FF-03', 'FF-04', 'FF-05']) {
+        assert.equal(kappa.perRule[rule].estimable, false);
+        assert.equal(kappa.perRule[rule].counts.n, 0);
+        assert.equal(kappa.perRule[rule].percentageAgreement, null);
+      }
+      assert.match(r.stdout, /FF-01\s+not estimable/);
+      assert.match(r.stdout, /agreement n\/a/);
     }));
 });

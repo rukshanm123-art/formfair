@@ -9,7 +9,7 @@ evaluation is run with. Tests use `node:test`.
 
 ```bash
 cd evaluation
-npm test              # 180 tests, on synthetic fixtures only
+npm test              # 190 tests, on synthetic fixtures only
 npm run draw-order    # verify the frozen order still matches the frame
 npm run build-frame   # rebuild frame.csv from the archived page and re-assert its counts
 npm run metrics -- fixtures/synthetic/dataset.valid.json --synthetic
@@ -189,7 +189,13 @@ run, so on its own it could be presented again and again, producing a second dat
 choice between them. Before the analyser is touched, `cli-join` claims the run by exclusively creating a record
 keyed by the **seal's SHA-256** in one fixed directory, and flushing it to disk. Keying on
 the filename secured nothing: a copy under another name produced a different lock path and
-a second run of the same evaluation. A second attempt against the same seal is
+a second run of the same evaluation.
+
+The directory is fixed for an official run. `--run-records` is refused without
+`--synthetic`, because a caller-chosen directory would undo the whole thing: one official
+run here, the identical seal run again pointing somewhere else. The override exists so the
+synthetic fixtures can be isolated from each other, and the lower-level guarantee is
+tested directly against `claimRun`. A second attempt against the same seal is
 refused. A run that fails after claiming leaves the record behind marked `failed`, so it
 cannot be quietly repeated: running again means deleting the lock deliberately.
 
@@ -198,6 +204,12 @@ compared before anything runs: `--out` or `--reports` pointing at the seal, the 
 the ground truth, an annotation, the captures directory, or at each other is refused, as is
 any output that already exists. All three outputs are written with an exclusive flag, so a
 race cannot overwrite one either.
+
+**The sealed files are revalidated at the join.** Deriving the agreement and the ground
+truth reads only the labels, so reasons, evidence and input types could be stripped after
+derivation, resealed, and still regenerate identically. Both annotations and the
+adjudication are therefore checked against the frozen schemas again during preflight, and
+each annotated `inputType` must match the frozen inventory.
 
 **Everything checkable is checked before the analyser starts.** The sealed ground truth is
 **regenerated** from the sealed annotations, adjudication and inventory and must match byte
