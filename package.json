@@ -39,7 +39,7 @@
   },
   "dependencies": {
     "axe-core": "4.12.1",
-    "parse5": "^7.2.1"
+    "parse5": "^8.0.1"
   },
   "devDependencies": {
     "@types/jsdom": "^30.0.0",
