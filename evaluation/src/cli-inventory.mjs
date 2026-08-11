@@ -28,9 +28,10 @@ const flag = (name) => {
 };
 const capturesDir = args.find((a) => !a.startsWith('--') && args[args.indexOf(a) - 1] !== '--out');
 const outPath = flag('--out');
+const synthetic = args.includes('--synthetic');
 
 if (!capturesDir || !outPath) {
-  fail('usage: node src/cli-inventory.mjs <captures-dir> --out data/inventory.json');
+  fail('usage: node src/cli-inventory.mjs <captures-dir> --out data/inventory.json [--synthetic]');
 }
 
 const instrumentDir = instrumentDirFromEnv();
@@ -65,6 +66,10 @@ const inventories = pages.map((file) => {
 
 const output = {
   instrument: instrument.tag,
+  // Declared here, not only on the command line, because this file is hash-covered by
+  // the seal: a synthetic exercise cannot later be passed off as a held-out run, and a
+  // held-out inventory cannot be previewed as though it were synthetic.
+  ...(synthetic ? { synthetic: true } : {}),
   instrumentCommit: instrument.commit,
   parser: `parse5 ${instrument.parserVersion}`,
   pages: inventories,
@@ -76,5 +81,6 @@ const controls = inventories.reduce((n, i) => n + i.controls.length, 0);
 console.log(`instrument: ${instrument.tag} (${instrument.commit.slice(0, 12)})`);
 console.log(`pages:      ${inventories.length}`);
 console.log(`controls:   ${controls}`);
+console.log(`synthetic:  ${synthetic}`);
 console.log(`written:    ${outPath}`);
 console.log(`sha256:     ${createHash('sha256').update(text).digest('hex')}`);

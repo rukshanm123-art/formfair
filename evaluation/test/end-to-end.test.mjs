@@ -69,13 +69,13 @@ const withDir = (fn) => {
 };
 
 /** Runs inventory, writes annotations that agree, derives ground truth, and seals. */
-function prepare(dir, { disagree = false } = {}) {
+function prepare(dir, { disagree = false, synthetic = true } = {}) {
   const captures = join(dir, 'captures');
   mkdirSync(captures);
   for (const [pageId, html] of Object.entries(PAGES)) writeFileSync(join(captures, `${pageId}.html`), html);
 
   const inventoryPath = join(dir, 'inventory.json');
-  const inv = cli('cli-inventory.mjs', [captures, '--out', inventoryPath]);
+  const inv = cli('cli-inventory.mjs', [captures, '--out', inventoryPath, ...(synthetic ? ['--synthetic'] : [])]);
   assert.equal(inv.code, 0, inv.stderr);
   const inventory = JSON.parse(readFileSync(inventoryPath, 'utf8'));
 
@@ -144,7 +144,7 @@ function prepare(dir, { disagree = false } = {}) {
 }
 
 /** Writes a valid pre-run seal over the prepared files. */
-function seal(prepared, { omit } = {}) {
+function seal(prepared, { omit, synthetic = true } = {}) {
   const entry = (key, path) => [key, { path, sha256: sha256(readFileSync(join(prepared.dir, path), 'utf8')) }];
   const files = Object.fromEntries(
     [
@@ -157,7 +157,10 @@ function seal(prepared, { omit } = {}) {
     ].filter(([key]) => key !== omit)
   );
   const sealPath = join(prepared.dir, 'seal.pre-run.json');
-  writeFileSync(sealPath, JSON.stringify({ instrument: 'evaluation-v1.0.0', files }, null, 2));
+  writeFileSync(
+    sealPath,
+    JSON.stringify({ instrument: 'evaluation-v1.0.0', ...(synthetic ? { synthetic: true } : {}), files }, null, 2)
+  );
   return sealPath;
 }
 
@@ -845,5 +848,84 @@ describe('an empty per-rule basis is reported, not a crash', () => {
       }
       assert.match(r.stdout, /FF-01\s+not estimable/);
       assert.match(r.stdout, /agreement n\/a/);
+    }));
+});
+
+describe('synthetic status is bound to the sealed material', () => {
+  const joinArgs = (p, sealPath, dir, extra = []) => [
+    '--seal', sealPath, '--captures', p.captures, '--inventory', p.inventoryPath,
+    '--truth', p.truthPath,
+    '--out', join(dir, 'd.json'), '--reports', join(dir, 'r.json'), '--closed-seal', join(dir, 'c.json'),
+    ...extra,
+  ];
+
+  test('a held-out seal cannot be previewed under --synthetic, then run officially', () =>
+    withDir((dir) => {
+      // The attack this closes: preview the held-out seal into a temporary run-records
+      // directory, look at the results, then run it officially. The metrics would refuse
+      // the preview dataset, but every page would already have been analysed twice and
+      // seen once before the official run.
+      const p = prepare(dir, { synthetic: false });
+      const sealPath = seal(p, { synthetic: false });
+      const preview = join(dir, 'preview-runs');
+
+      const attempt = cli('cli-join.mjs', joinArgs(p, sealPath, dir, ['--synthetic', '--run-records', preview]));
+      assert.equal(attempt.code, 1, 'a held-out seal must not be previewable');
+      assert.match(attempt.stderr, /not a synthetic one/);
+
+      // Nothing was produced, and no page was analysed.
+      for (const name of ['d.json', 'r.json', 'c.json']) {
+        assert.equal(existsSync(join(dir, name)), false, `${name} must not exist`);
+      }
+      assert.equal(existsSync(preview), false, 'no run was even claimed');
+    }));
+
+  test('a synthetic seal cannot produce an official run', () =>
+    withDir((dir) => {
+      const p = prepare(dir);
+      const sealPath = seal(p);
+      const r = cli('cli-join.mjs', joinArgs(p, sealPath, dir));
+      assert.equal(r.code, 1);
+      assert.match(r.stderr, /marked synthetic, so it cannot produce an official run/);
+      assert.equal(existsSync(join(dir, 'c.json')), false);
+    }));
+
+  test('a synthetic seal over a held-out inventory is refused', () =>
+    withDir((dir) => {
+      // Marking the seal is not enough on its own: the inventory carries the flag too,
+      // and the seal covers it by hash, so it cannot be flipped without rebuilding.
+      const p = prepare(dir, { synthetic: false });
+      const sealPath = seal(p, { synthetic: true });
+      const r = cli('cli-join.mjs', joinArgs(p, sealPath, dir, ['--synthetic', '--run-records', p.runs]));
+      assert.equal(r.code, 1);
+      assert.match(r.stderr, /sealed inventory is not marked synthetic/);
+      assert.equal(existsSync(join(dir, 'r.json')), false);
+    }));
+
+  test('a held-out seal over a synthetic inventory is refused', () =>
+    withDir((dir) => {
+      const p = prepare(dir, { synthetic: true });
+      const sealPath = seal(p, { synthetic: false });
+      const r = cli('cli-join.mjs', joinArgs(p, sealPath, dir));
+      assert.equal(r.code, 1);
+      assert.match(r.stderr, /sealed inventory is marked synthetic/);
+    }));
+
+  test('the marker is inside the hash-covered inventory, not only on the command line', () =>
+    withDir((dir) => {
+      const p = prepare(dir);
+      const inventory = JSON.parse(readFileSync(p.inventoryPath, 'utf8'));
+      assert.equal(inventory.synthetic, true);
+
+      // Flipping it breaks the seal's inventory entry.
+      const sealPath = seal(p);
+      delete inventory.synthetic;
+      writeFileSync(p.inventoryPath, JSON.stringify(inventory, null, 2) + '\n');
+      const r = cli('cli-join.mjs', joinArgs(p, sealPath, dir, ['--synthetic', '--run-records', p.runs]));
+      assert.equal(r.code, 1);
+      // Caught by the seal itself, before the flag is even consulted: the inventory is
+      // one of the files the seal hashes.
+      assert.match(r.stderr, /inventory: hash mismatch/);
+      assert.match(r.stderr, /A sealed file must not change/);
     }));
 });

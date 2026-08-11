@@ -128,6 +128,28 @@ try {
 } catch (error) {
   fail(`cannot read the seal manifest at ${sealPath}: ${error.message}`);
 }
+/**
+ * Synthetic status belongs to the sealed material, not to the command line.
+ *
+ * As a bare flag it secured nothing: a held-out seal could be run with --synthetic and a
+ * temporary run-records directory, the output inspected, and the same seal then run
+ * officially. The metrics would refuse the first dataset, but every held-out page would
+ * already have been analysed twice, and seen once before the official run.
+ */
+if (synthetic && manifest?.synthetic !== true) {
+  fail(
+    'this pre-run seal is not a synthetic one, so it cannot be run with --synthetic.\n' +
+      'A held-out seal has exactly one run. Previewing it under --synthetic would analyse\n' +
+      'every page an extra time, and show the results before the official run.'
+  );
+}
+if (!synthetic && manifest?.synthetic === true) {
+  fail(
+    'this pre-run seal is marked synthetic, so it cannot produce an official run.\n' +
+      'Pass --synthetic, and understand that nothing it produces can be scored.'
+  );
+}
+
 const sealBase = dirname(sealPath);
 const { sealed, failures } = verifySeal(manifest, (p) => resolve(sealBase, p));
 if (!sealed) {
@@ -175,6 +197,19 @@ if (!noDelegated) {
 
 const inventoryFile = JSON.parse(readFileSync(inventoryPath, 'utf8'));
 const truthFile = JSON.parse(readFileSync(truthPath, 'utf8'));
+
+// The same binding on the inventory, which the seal covers by hash: flipping this flag
+// invalidates the seal's inventory entry, so the marker cannot be added or removed
+// without rebuilding the whole seal.
+if (synthetic && inventoryFile?.synthetic !== true) {
+  fail(
+    'the sealed inventory is not marked synthetic, so this is not a synthetic exercise.\n' +
+      'Build it with `cli-inventory --synthetic` if it is.'
+  );
+}
+if (!synthetic && inventoryFile?.synthetic === true) {
+  fail('the sealed inventory is marked synthetic, so it cannot produce an official run.');
+}
 
 const hashOf = (path) => createHash('sha256').update(readFileSync(path)).digest('hex');
 const sealedPath = (key) => resolve(sealBase, manifest.files[key].path);

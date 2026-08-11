@@ -9,7 +9,7 @@ evaluation is run with. Tests use `node:test`.
 
 ```bash
 cd evaluation
-npm test              # 190 tests, on synthetic fixtures only
+npm test              # 195 tests, on synthetic fixtures only
 npm run draw-order    # verify the frozen order still matches the frame
 npm run build-frame   # rebuild frame.csv from the archived page and re-assert its counts
 npm run metrics -- fixtures/synthetic/dataset.valid.json --synthetic
@@ -195,7 +195,19 @@ The directory is fixed for an official run. `--run-records` is refused without
 `--synthetic`, because a caller-chosen directory would undo the whole thing: one official
 run here, the identical seal run again pointing somewhere else. The override exists so the
 synthetic fixtures can be isolated from each other, and the lower-level guarantee is
-tested directly against `claimRun`. A second attempt against the same seal is
+tested directly against `claimRun`.
+
+**And `--synthetic` is not a claim the caller gets to make.** As a bare flag it secured
+nothing: a held-out seal could be run with `--synthetic` into a temporary run-records
+directory, the output inspected, and the same seal then run officially. The metrics would
+refuse the preview dataset, but every held-out page would already have been analysed twice
+and seen once before the official run.
+
+Synthetic status now lives in the sealed material and is checked both ways. The pre-run
+seal must carry `synthetic: true`, and so must the inventory, which the seal covers by
+hash — so the marker cannot be added or removed without rebuilding the entire seal. A
+held-out seal refuses `--synthetic`; a synthetic seal refuses an official run. Build a
+synthetic inventory with `cli-inventory --synthetic`. A second attempt against the same seal is
 refused. A run that fails after claiming leaves the record behind marked `failed`, so it
 cannot be quietly repeated: running again means deleting the lock deliberately.
 
