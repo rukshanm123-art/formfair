@@ -9,12 +9,32 @@ evaluation is run with. Tests use `node:test`.
 
 ```bash
 cd evaluation
-npm test              # 125 tests, on synthetic fixtures only
+npm test              # 143 tests, on synthetic fixtures only
 npm run draw-order    # verify the frozen order still matches the frame
 npm run build-frame   # rebuild frame.csv from the archived page and re-assert its counts
 npm run metrics -- fixtures/synthetic/dataset.valid.json --synthetic
 npm run seal:verify -- data/seal.json
 ```
+
+## The instrument is a separate checkout
+
+The harness must be tested against `evaluation-v1.0.0`, not against this branch. main's
+analyser sources drift as work continues, and the frozen instrument is not only a set of
+rule behaviours: it includes the exact message, evidence and basis text a report carries.
+A later commit replaced the en dashes in one evidence string, which is enough to make the
+working tree the wrong thing to test against.
+
+```bash
+bash scripts/setup-instrument.sh          # git worktree at the tag, npm ci, build
+export FORMFAIR_INSTRUMENT_DIR=$PWD/../.instrument
+npm test
+```
+
+`instrument-ref.mjs` refuses any directory whose commit is not
+`9f43862d033e1b45890f977cffb89ca4a9504d40` or whose lockfile does not match the hash
+recorded in the tag, and a test asserts that the harness checkout itself is rejected.
+parse5 is resolved from that directory too, so the inventory's source positions come from
+the same parser the analyser uses.
 
 `npm run draw-order` **verifies and changes nothing.** The order is frozen and tagged; a
 command that silently rewrote it could re-roll the draw without leaving a trace, which is
@@ -28,6 +48,9 @@ the one thing that artefact exists to prevent. Creating it takes an explicit `--
 | `src/schema.mjs` | frozen shapes for capture, annotation, adjudication and the joined dataset |
 | `src/inventory.mjs` | protocol section 7 - the neutral control inventory annotators label |
 | `src/join.mjs` | inventory + adjudicated truth + run output -> the scored dataset |
+| `src/instrument-ref.mjs` | resolves and verifies the frozen instrument checkout |
+| `src/cli-inventory.mjs` | build the inventory from captured pages |
+| `src/cli-join.mjs` | run the instrument and join into the dataset |
 | `src/metrics.mjs` | protocol section 9 - stage one, stage two, end to end |
 | `src/draw-order.mjs` | protocol section 2 - deterministic agency ordering |
 | `src/seal.mjs` | protocol section 10 - the gate that must pass before FormFair runs |

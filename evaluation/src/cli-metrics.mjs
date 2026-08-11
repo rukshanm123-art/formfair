@@ -14,10 +14,11 @@
  */
 
 import { readFileSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { dirname, resolve } from 'node:path';
 import { report } from './metrics.mjs';
 import { validateDataset } from './schema.mjs';
-import { verifyClosedSeal } from './seal.mjs';
+import { verifyClosedSeal, bindDataset } from './seal.mjs';
 
 function fail(message, details = []) {
   console.error(message);
@@ -44,24 +45,13 @@ const synthetic = args.includes('--synthetic');
  * against synthetic fixtures, and it refuses to run on anything not marked synthetic, so
  * it cannot be used to score real data by mistake.
  */
-if (synthetic) {
-  if (sealPath) fail('--synthetic and --seal are mutually exclusive');
-} else if (!sealPath) {
+if (synthetic && sealPath) fail('--synthetic and --seal are mutually exclusive');
+if (!synthetic && !sealPath) {
   fail(
     'refusing to compute metrics without --seal.\n' +
       'Official figures require a closed seal naming the run that produced them.\n' +
       'For a synthetic fixture, pass --synthetic instead.'
   );
-} else {
-  let manifest;
-  try {
-    manifest = JSON.parse(readFileSync(sealPath, 'utf8'));
-  } catch (error) {
-    fail(`cannot read the seal manifest at ${sealPath}: ${error.message}`);
-  }
-  const base = dirname(sealPath);
-  const { sealed, failures } = verifyClosedSeal(manifest, (p) => resolve(base, p));
-  if (!sealed) fail('the seal is not closed, so these metrics would not be trustworthy:', failures);
 }
 
 let dataset;
@@ -78,8 +68,27 @@ if (synthetic && dataset?.synthetic !== true) {
   );
 }
 
-const { valid, problems } = validateDataset(dataset);
-if (!valid) fail(`the dataset at ${datasetPath} does not match the frozen schema:`, problems);
+if (sealPath) {
+  let manifest;
+  try {
+    manifest = JSON.parse(readFileSync(sealPath, 'utf8'));
+  } catch (error) {
+    fail(`cannot read the seal manifest at ${sealPath}: ${error.message}`);
+  }
+  const base = dirname(sealPath);
+  const { sealed, failures } = verifyClosedSeal(manifest, (p) => resolve(base, p));
+  if (!sealed) fail('the seal is not closed, so these metrics would not be trustworthy:', failures);
+
+  // Verifying the seal proves the sealed files are intact. It does not prove this
+  // dataset is the one they cover, which is what binding checks.
+  const datasetSha256 = createHash('sha256').update(readFileSync(datasetPath)).digest('hex');
+  const { bound, failures: bindFailures } = bindDataset(manifest, dataset, datasetSha256);
+  if (!bound) fail('the dataset is not the one this seal covers:', bindFailures);
+  console.error(`seal: closed, and bound to this dataset (${datasetSha256.slice(0, 12)}...)`);
+}
+
+const { valid: schemaValid, problems: schemaProblems } = validateDataset(dataset);
+if (!schemaValid) fail(`the dataset at ${datasetPath} does not match the frozen schema:`, schemaProblems);
 
 const result = report(dataset.pages);
 const output = JSON.stringify(result, null, 2) + '\n';

@@ -9,6 +9,9 @@
     "draw-order": "node src/cli-draw-order.mjs",
     "metrics": "node src/cli-metrics.mjs",
     "seal:verify": "node src/cli-seal.mjs",
-    "build-frame": "node src/build-frame.mjs frame/cwac-website-scores-2026-08-11.html"
+    "build-frame": "node src/build-frame.mjs frame/cwac-website-scores-2026-08-11.html",
+    "inventory": "node src/cli-inventory.mjs",
+    "join": "node src/cli-join.mjs",
+    "instrument:setup": "bash scripts/setup-instrument.sh"
   }
 }

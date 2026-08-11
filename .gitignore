@@ -3,3 +3,6 @@ dist/
 coverage/
 *.log
 .DS_Store
+
+# Separate checkout of the frozen instrument, created by evaluation/scripts/setup-instrument.sh
+.instrument/

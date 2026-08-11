@@ -100,19 +100,45 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Check out the harness
+        uses: actions/checkout@v4
+
+      # The instrument is a SEPARATE checkout at the frozen tag. Testing the harness
+      # against this branch would validate it against an analyser the protocol does not
+      # name: main's sources drift, and the frozen instrument includes exact message,
+      # evidence and basis text, not only rule behaviour.
+      - name: Check out the frozen instrument
+        uses: actions/checkout@v4
+        with:
+          ref: evaluation-v1.0.0
+          path: .instrument
 
       - uses: actions/setup-node@v4
         with:
           node-version: 22
 
-      # The harness declares no dependencies of its own, so building evaluation tooling
-      # cannot change the instrument. It does need the instrument itself: the control
-      # inventory must be parsed by the same pinned parse5 the analyser uses, or the
-      # source positions the join relies on could differ.
-      - run: npm ci
-      - run: npm run build
+      - name: Build the frozen instrument
+        working-directory: .instrument
+        run: |
+          npm ci
+          npm run build
+
+      - name: Assert the instrument's identity
+        run: |
+          expected=9f43862d033e1b45890f977cffb89ca4a9504d40
+          actual=$(git -C .instrument rev-parse HEAD)
+          if [ "$actual" != "$expected" ]; then
+            echo "instrument is at $actual, expected $expected (evaluation-v1.0.0)"; exit 1
+          fi
+          expected_lock=2a88d26ebeee56016b92f9a9a3f2584c99df6c77b3d01ccd753910412f626a1f
+          actual_lock=$(shasum -a 256 .instrument/package-lock.json | cut -d' ' -f1)
+          if [ "$actual_lock" != "$expected_lock" ]; then
+            echo "instrument lockfile is $actual_lock, expected $expected_lock"; exit 1
+          fi
+          echo "instrument verified: $actual"
 
       - name: Evaluation harness tests
         working-directory: evaluation
+        env:
+          FORMFAIR_INSTRUMENT_DIR: ${{ github.workspace }}/.instrument
         run: npm test

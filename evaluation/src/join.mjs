@@ -140,11 +140,16 @@ export function buildDataset({ pages, hashes }) {
     built.push(joined);
   }
 
+  // Both primary annotations are bound separately, not merged into one hash: the seal
+  // covers them as two independent files, and a single combined digest could not be
+  // checked against either.
   const dataset = {
     instrument: 'evaluation-v1.0.0',
     builtFrom: {
       inventorySha256: hashes?.inventory ?? null,
-      annotationSha256: hashes?.annotation ?? null,
+      annotationASha256: hashes?.annotationA ?? null,
+      annotationBSha256: hashes?.annotationB ?? null,
+      kappaSha256: hashes?.kappa ?? null,
       adjudicationSha256: hashes?.adjudication ?? null,
       reportsSha256: hashes?.reports ?? null,
       htmlSha256ByPage: Object.fromEntries(built.map((p) => [p.pageId, p.htmlSha256])),

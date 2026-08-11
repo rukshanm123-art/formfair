@@ -57,38 +57,59 @@ export function verifySeal(manifest, resolve = (p) => p) {
   return { sealed: failures.length === 0, failures };
 }
 
+/** Artefacts the run produces. Required, and hash-checked, once the seal is closed. */
+export const RUN_ARTEFACTS = [
+  { key: 'inventory', description: 'the frozen control inventory annotators labelled' },
+  { key: 'reports', description: 'the unmodified JSON reports from the run' },
+  { key: 'dataset', description: 'the joined dataset the metrics were computed from' },
+];
+
 /**
  * Protocol section 10, after the run.
  *
- * A pre-run seal says annotation was finished before FormFair was seen. It does not say
- * which run the metrics describe. Official figures need both, so this additionally
- * requires the run record and the hashes of what it produced: without them, a report
- * could be swapped for another and the seal would still verify.
+ * A pre-run seal says annotation finished before FormFair was seen. It does not say which
+ * run the metrics describe, and it does not bind the numbers to any particular material.
+ *
+ * This checks the files themselves, not the shape of their hashes. Validating that a
+ * digest looks like a digest is not a check: sixty-four zeros satisfy it, and a seal that
+ * accepts sixty-four zeros secures nothing at all.
  */
 export function verifyClosedSeal(manifest, resolve = (p) => p) {
   const failures = [];
+  const run = manifest?.formfairRun;
 
-  for (const { key, description } of REQUIRED) {
-    const entry = manifest?.files?.[key];
-    if (!entry) {
-      failures.push(`missing from the manifest: ${key} (${description})`);
-      continue;
+  const checkFiles = (entries) => {
+    for (const { key, description } of entries) {
+      const entry = manifest?.files?.[key];
+      if (!entry) {
+        failures.push(`missing from the manifest: ${key} (${description})`);
+        continue;
+      }
+      if (!isDigest(entry.sha256)) {
+        failures.push(`${key}: sha256 must be a 64-character hex digest`);
+        continue;
+      }
+      const path = resolve(entry.path);
+      if (!existsSync(path)) {
+        failures.push(`${key}: file not found at ${entry.path}`);
+        continue;
+      }
+      const actual = hashFile(path);
+      if (actual !== entry.sha256) {
+        failures.push(
+          `${key}: ${entry.path} hashes to ${actual} but the seal records ${entry.sha256}. ` +
+            'A sealed file must not change.'
+        );
+      }
     }
-    const path = resolve(entry.path);
-    if (!existsSync(path)) {
-      failures.push(`${key}: file not found at ${entry.path}`);
-      continue;
-    }
-    if (hashFile(path) !== entry.sha256) {
-      failures.push(`${key}: hash mismatch, a sealed file must not change after sealing`);
-    }
-  }
+  };
+
+  checkFiles(REQUIRED);
 
   if (manifest?.instrument !== 'evaluation-v1.0.0') {
     failures.push(`instrument must be evaluation-v1.0.0, found ${manifest?.instrument ?? 'nothing'}`);
   }
 
-  const run = manifest?.formfairRun;
   if (!run) {
     failures.push(
       'formfairRun is absent: this seal has not been closed, so no official metrics can ' +
@@ -98,17 +119,81 @@ export function verifyClosedSeal(manifest, resolve = (p) => p) {
     return { sealed: false, failures };
   }
 
+  checkFiles(RUN_ARTEFACTS);
+
   if (!/^\d{4}-\d{2}-\d{2}T/.test(run.runAt ?? '')) {
     failures.push('formfairRun.runAt must be an ISO 8601 UTC timestamp');
   }
   if (run.instrument !== 'evaluation-v1.0.0') {
     failures.push(`formfairRun.instrument must be evaluation-v1.0.0, found ${run.instrument ?? 'nothing'}`);
   }
-  for (const key of ['reportsSha256', 'datasetSha256', 'inventorySha256']) {
-    if (!/^[0-9a-f]{64}$/.test(run[key] ?? '')) {
-      failures.push(`formfairRun.${key} must be a 64-character hex digest of what the run produced`);
+  if (run.instrumentCommit !== INSTRUMENT_COMMIT) {
+    failures.push(
+      `formfairRun.instrumentCommit must be ${INSTRUMENT_COMMIT}, the commit ` +
+        `evaluation-v1.0.0 points at, found ${run.instrumentCommit ?? 'nothing'}`
+    );
+  }
+
+  // The run's own record of what it produced must agree with the sealed files.
+  for (const { key } of RUN_ARTEFACTS) {
+    const field = `${key}Sha256`;
+    const sealed = manifest?.files?.[key]?.sha256;
+    if (sealed && run[field] !== sealed) {
+      failures.push(
+        `formfairRun.${field} is ${run[field] ?? 'absent'} but the sealed ${key} hashes to ` +
+          `${sealed}. The run record and the sealed artefact disagree.`
+      );
     }
   }
 
   return { sealed: failures.length === 0, failures };
+}
+
+export const INSTRUMENT_COMMIT = '9f43862d033e1b45890f977cffb89ca4a9504d40';
+
+const isDigest = (v) => typeof v === 'string' && /^[0-9a-f]{64}$/.test(v);
+
+/**
+ * Binds a dataset to a closed seal.
+ *
+ * Verifying the seal proves the sealed files are intact. It does not prove that the
+ * dataset in front of you is the one they describe: without this, a seal over one
+ * evaluation can be presented alongside the numbers from another.
+ */
+export function bindDataset(manifest, dataset, datasetSha256) {
+  const failures = [];
+  const sealedDataset = manifest?.files?.dataset?.sha256;
+
+  if (sealedDataset && datasetSha256 !== sealedDataset) {
+    failures.push(
+      `the dataset supplied hashes to ${datasetSha256} but the seal covers ${sealedDataset}. ` +
+        'These metrics would describe a different evaluation from the one that was sealed.'
+    );
+  }
+
+  const pairs = [
+    ['inventorySha256', 'inventory'],
+    ['reportsSha256', 'reports'],
+    ['annotationASha256', 'annotatorA'],
+    ['annotationBSha256', 'annotatorB'],
+    ['kappaSha256', 'kappa'],
+    ['adjudicationSha256', 'adjudication'],
+  ];
+  for (const [field, key] of pairs) {
+    const sealed = manifest?.files?.[key]?.sha256;
+    const claimed = dataset?.builtFrom?.[field];
+    if (!sealed) continue;
+    if (claimed !== sealed) {
+      failures.push(
+        `dataset.builtFrom.${field} is ${claimed ?? 'absent'} but the sealed ${key} hashes ` +
+          `to ${sealed}. The dataset was not built from the sealed material.`
+      );
+    }
+  }
+
+  if (dataset?.synthetic === true) {
+    failures.push('a dataset marked synthetic cannot be scored through the sealed path');
+  }
+
+  return { bound: failures.length === 0, failures };
 }
