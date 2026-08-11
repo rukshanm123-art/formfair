@@ -86,7 +86,7 @@ This is a pre-data clarification of the proposal's "development and held-out" wo
 
 The capture harness and the annotation interface are **built and tested only with
 synthetic pages**. FormFair is not run on a held-out page until annotation and
-adjudication are complete and sealed (§10).
+adjudication are complete and sealed (section 10).
 
 ## 5. Capturing a page
 
@@ -103,7 +103,7 @@ Record for every attempt:
 | `browser`, `automationTool` | with versions |
 | `viewport`, `locale` | |
 | `redirects` | the chain |
-| `category` | §3 priority category |
+| `category` | the priority category from section 3 |
 | `status`, `exclusionReason` | captured, or why not |
 | `htmlSha256` | of the captured markup |
 
