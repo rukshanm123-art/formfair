@@ -38,7 +38,7 @@
     "verify:snapshots": "node scripts/verify-snapshot-versions.mjs"
   },
   "dependencies": {
-    "axe-core": "4.12.1",
+    "axe-core": "4.13.0",
     "parse5": "^7.2.1"
   },
   "devDependencies": {
