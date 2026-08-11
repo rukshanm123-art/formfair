@@ -18,11 +18,20 @@ jobs:
 
       - run: npm ci
 
+      - name: Audit dependencies
+        run: npm audit --audit-level=high
+
       - name: Typecheck
         run: npm run typecheck
 
       - name: Test
         run: npm run coverage
+
+      - name: Delegated accessibility suite
+        run: npm run test:delegated
+
+      - name: Build
+        run: npm run build
 
       - name: Verify catalogue snapshot integrity
         working-directory: docs/catalogue-snapshots

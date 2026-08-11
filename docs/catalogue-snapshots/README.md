@@ -44,5 +44,12 @@ shasum -a 256 -c SHA256SUMS
 ## Finding
 
 Across these catalogues, no rule evaluates accepted character classes, the `pattern` attribute,
-`minlength`, or Unicode normalisation. axe-core's sole form-validation rule is `autocomplete-valid`,
-which checks token syntax rather than accepted input.
+`minlength`, or Unicode normalisation.
+
+axe-core carries several rules addressed to form controls — `label`, `label-title-only`,
+`label-content-name-mismatch`, `form-field-multiple-labels`, `select-name`,
+`input-button-name`, `aria-input-field-name` and `autocomplete-valid` among them — but
+they concern whether a control is named and labelled, not what it accepts. Of these,
+`autocomplete-valid` is the only one that inspects a validation-adjacent attribute
+value, and it checks the syntax of the autocomplete token list rather than the input
+the control will admit.

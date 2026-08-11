@@ -36,7 +36,7 @@ h2 { font-size: .95rem; margin: 2.5rem 0 .3rem; }
 <h1>FormFair report</h1>
 <p class="meta">Rule catalogue 0.1.0</p>
 <div class="tally">
-  <div><strong>2</strong>name controls</div>
+  <div><strong>3</strong>name controls</div>
   <div><strong>4</strong>findings</div>
   <div><strong>1</strong>critical</div>
   <div><strong>2</strong>high</div>
@@ -50,10 +50,11 @@ h2 { font-size: .95rem; margin: 2.5rem 0 .3rem; }
   </div>
   <p class="msg">This field declares a constraint that rejects names outside the Basic Latin (ASCII) range.</p>
   <dl>
-    <dt>Evidence</dt><dd>pattern=&quot;[A-Za-z]{2,40}&quot; accepts &quot;Smith&quot; but rejects every tested name containing a letter outside U+0041–U+005A and U+0061–U+007A.</dd>
+    <dt>Evidence</dt><dd>pattern=&quot;[A-Za-z]{2,40}&quot; admits letters in U+0041–U+005A and U+0061–U+007A and no letter outside that range.</dd>
     <dt>Remediation</dt><dd>Draw the permitted characters from the CLDR exemplar sets for the languages the form serves, or use a Unicode-aware class such as \p{L} with the punctuation names require.</dd>
+    <dt>Basis</dt><dd>UTS #35 Part 8 advises drawing permitted characters from CLDR exemplar sets rather than restricting to ASCII.</dd>
   </dl>
-  <pre>&lt;input id=&quot;fn&quot; name=&quot;firstName&quot; pattern=&quot;[A-Za-z]{2,40}&quot; required&gt;</pre>
+  <pre>&lt;input id=&quot;fn&quot; name=&quot;firstName&quot; pattern=&quot;[A-Za-z]{2,40}&quot; minlength=&quot;2&quot; maxlength=&quot;40&quot;&gt;</pre>
 </div>
 <div class="finding" style="--c:#8a5a00">
   <div class="head">
@@ -63,10 +64,11 @@ h2 { font-size: .95rem; margin: 2.5rem 0 .3rem; }
   </div>
   <p class="msg">Legitimate name punctuation is rejected.</p>
   <dl>
-    <dt>Evidence</dt><dd>pattern=&quot;[A-Za-z]{2,40}&quot; rejects: apostrophe U+0027 — &quot;O'Brien&quot;; right single quotation mark U+2019 — &quot;O’Brien&quot;; hyphen-minus U+002D — &quot;Anne-Marie&quot;; space U+0020 — &quot;van der Berg&quot;.</dd>
+    <dt>Evidence</dt><dd>No position in pattern=&quot;[A-Za-z]{2,40}&quot; admits: apostrophe U+0027 — &quot;O'Brien&quot;; right single quotation mark U+2019 — &quot;O’Brien&quot;; hyphen-minus U+002D — &quot;Anne-Marie&quot;; space U+0020 — &quot;van der Berg&quot;.</dd>
     <dt>Remediation</dt><dd>Admit apostrophes, hyphens and internal spaces. Escaping on output is the defence against injection; input restriction is not.</dd>
+    <dt>Basis</dt><dd>UTS #35 Part 8; names such as O’Brien, Anne-Marie and van der Berg require these characters.</dd>
   </dl>
-  <pre>&lt;input id=&quot;fn&quot; name=&quot;firstName&quot; pattern=&quot;[A-Za-z]{2,40}&quot; required&gt;</pre>
+  <pre>&lt;input id=&quot;fn&quot; name=&quot;firstName&quot; pattern=&quot;[A-Za-z]{2,40}&quot; minlength=&quot;2&quot; maxlength=&quot;40&quot;&gt;</pre>
 </div>
 <div class="finding" style="--c:#8a5a00">
   <div class="head">
@@ -76,10 +78,11 @@ h2 { font-size: .95rem; margin: 2.5rem 0 .3rem; }
   </div>
   <p class="msg">The constraint treats two identical-looking encodings of the same name differently.</p>
   <dl>
-    <dt>Evidence</dt><dd>&quot;Tāwhiao&quot; accepted but its decomposed form rejected; &quot;Émile&quot; accepted but its decomposed form rejected; &quot;Müller&quot; accepted but its decomposed form rejected. The forms are canonically equivalent under UAX #15.</dd>
+    <dt>Evidence</dt><dd>&quot;Tāwhiao&quot;, &quot;Émile&quot;, &quot;Müller&quot; accepted, but the decomposed form rejected by pattern=&quot;[\p{L}\u0027\u2019 \x2D]+&quot;. The forms are canonically equivalent under UAX #15.</dd>
     <dt>Remediation</dt><dd>Normalise the value before validating it, typically to NFC, so that canonically equivalent inputs are treated alike.</dd>
+    <dt>Basis</dt><dd>UAX #15; UTS #35 Part 8 recommends normalising before validation.</dd>
   </dl>
-  <pre>&lt;input id=&quot;ln&quot; name=&quot;lastName&quot; pattern=&quot;[\p{L}\u0027\u2019 -]+&quot;&gt;</pre>
+  <pre>&lt;input id=&quot;ln&quot; name=&quot;lastName&quot; pattern=&quot;[\p{L}\u0027\u2019 \x2D]+&quot;&gt;</pre>
 </div>
 <div class="finding" style="--c:#3b5d78">
   <div class="head">
@@ -89,10 +92,11 @@ h2 { font-size: .95rem; margin: 2.5rem 0 .3rem; }
   </div>
   <p class="msg">The field declares a minimum length that excludes short legitimate names.</p>
   <dl>
-    <dt>Evidence</dt><dd>pattern=&quot;[A-Za-z]{2,40}&quot; accepts nothing shorter than 2 characters.</dd>
-    <dt>Remediation</dt><dd>Allow a single character, or remove the lower bound from the pattern.</dd>
+    <dt>Evidence</dt><dd>minlength=&quot;2&quot; rejects single-letter names.</dd>
+    <dt>Remediation</dt><dd>Set the minimum to one, or remove the attribute.</dd>
+    <dt>Basis</dt><dd>Ishida (2011) records that people can have single-letter names.</dd>
   </dl>
-  <pre>&lt;input id=&quot;fn&quot; name=&quot;firstName&quot; pattern=&quot;[A-Za-z]{2,40}&quot; required&gt;</pre>
+  <pre>&lt;input id=&quot;fn&quot; name=&quot;firstName&quot; pattern=&quot;[A-Za-z]{2,40}&quot; minlength=&quot;2&quot; maxlength=&quot;40&quot;&gt;</pre>
 </div>
 <h2>Decision coverage</h2>
 <p class="note">The proportion of controls each rule reached a decision on. A declined control was not analysed, which is not the same as clean.</p>
@@ -102,7 +106,7 @@ h2 { font-size: .95rem; margin: 2.5rem 0 .3rem; }
 <tr><td><code>FF-02</code></td><td>100%</td><td>0</td><td></td></tr>
 <tr><td><code>FF-03</code></td><td>100%</td><td>1</td><td></td></tr>
 <tr><td><code>FF-04</code></td><td>100%</td><td>1</td><td></td></tr>
-<tr><td><code>FF-05</code></td><td>50%</td><td>1</td><td>1</td></tr>
+<tr><td><code>FF-05</code></td><td>33%</td><td>1</td><td>2</td></tr>
 </table>
 </body>
 </html>

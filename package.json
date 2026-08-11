@@ -4,20 +4,40 @@
   "description": "Static analysis of declared personal-name validation constraints in web-form markup",
   "license": "MIT",
   "type": "module",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
-    "dev": "vite",
-    "build": "tsc --noEmit && vite build",
+    "build": "vite build && tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest",
-    "coverage": "vitest run --coverage"
+    "coverage": "vitest run --coverage",
+    "example": "vite-node scripts/generate-example.ts",
+    "test:delegated": "vitest run --config vitest.delegated.config.ts"
   },
   "dependencies": {
+    "axe-core": "4.12.1",
     "parse5": "^7.2.1"
   },
   "devDependencies": {
+    "@types/jsdom": "^30.0.0",
     "@types/node": "^22.10.2",
     "@vitest/coverage-v8": "^2.1.9",
+    "jsdom": "^30.0.1",
     "typescript": "^5.7.2",
     "vite": "^6.0.5",
     "vitest": "^2.1.8"
