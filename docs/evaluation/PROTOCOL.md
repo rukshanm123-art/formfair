@@ -30,6 +30,14 @@ agencies, so 40 eligible forms may not be reachable. That is accepted in advance
 all agencies in the frozen order and report the achieved sample honestly. The frame is
 **not** widened afterwards to reach 40.
 
+> **Observation, 11 August 2026, recorded when the frame was captured.** The Website
+> scores page — the frame named above — carries **45** agencies, not 47. The page renders
+> 47 accordions, two of which are explanatory panels rather than agencies. The leaderboard
+> figure of 47 was descriptive context; the frame is the Website scores page, and it has
+> not been substituted or widened. The target of 40 therefore allows at most 5 agencies to
+> fail to yield an eligible form. See `evaluation/frame/README.md`. This note records what
+> was found; it changes no rule in this protocol, and `protocol-v1.0.0` is not moved.
+
 ## 2. Random agency order
 
 The agency is the sampling unit. One reproducible order is created before any form is

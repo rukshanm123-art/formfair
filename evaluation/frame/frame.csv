@@ -1,0 +1,512 @@
+# FormFair Held-Out Evaluation Protocol v1.0, section 1
+# source_url=https://www.digital.govt.nz/standards-and-guidance/nz-government-web-standards/centralised-web-accessibility-checker-cwac/website-scores-cwac
+# retrieved_utc=2026-08-11T05:18:19Z
+# scan_date=2026-06-30
+# page_sha256=ac6a0c4eb5c6087c0766218808c7714974fd68220d0b02ddaaf9dbb212f2a933
+# agencies=45
+# websites=504
+agency,website,url,score,change,pages_scanned,views_with_issues,total_issues,not_scanned
+Aroturuki Tamariki,Aroturuki Tamariki,https://aroturuki.govt.nz/,0,-1,217,0,0,false
+Cancer Control Agency,Kupe,https://kupe.net.nz/,100,0,17,17,382,false
+Cancer Control Agency,Te Aho o Te Kahu,https://teaho.govt.nz/,100,0,156,156,8433,false
+Charter School Agency,Charter School Agency,https://www.charterschools.govt.nz/,97,86,61,59,120,false
+Crown Law Office,Crown Law,https://www.crownlaw.govt.nz/,100,0,85,85,6468,false
+Department of Conservation,Bird Banding,https://app.birdbanding.doc.govt.nz/,0,0,3,0,0,false
+Department of Conservation,DOC API Developer Portal,https://api.doc.govt.nz/,0,0,1,0,0,false
+Department of Conservation,Infringements,https://paymyinfringement.doc.govt.nz/,0,0,1,0,0,false
+Department of Conservation,DOC Careers,https://doc.wd105.myworkdayjobs.com/en-US/DOC/,3,2,40,2,4,false
+Department of Conservation,My permits and licences,https://permits-licences.doc.govt.nz/,9,-7,22,2,298,false
+Department of Conservation,Department of Conservation,https://www.doc.govt.nz/,21,-10,300,76,255,false
+Department of Conservation,NZTCS,https://nztcs.org.nz/,30,-70,300,91,1267,false
+Department of Conservation,Rangitahi /Molesworth,https://storymaps.arcgis.com/stories/907003437c504c9e9402420d05d59aeb,50,50,1,1,3,false
+Department of Conservation,Conservation blog,https://blog.doc.govt.nz/,100,0,300,300,6724,false
+Department of Conservation,DOC Booking Service,https://bookings.doc.govt.nz/web/,100,0,4,4,110,false
+Department of Conservation,DOC Marine Data Portal,https://doc-marine-data-deptconservation.hub.arcgis.com/,100,100,1,1,2,false
+Department of Conservation,DOC Open Spatial Data,https://doc-deptconservation.opendata.arcgis.com/,100,0,1,1,2,false
+Department of Conservation,Kakapo Recovery,https://kakapo-recovery.raiselysite.com/,100,0,200,200,1006,false
+Department of Conservation,PFNZ2050 Predator Control Application,https://deptconservation.maps.arcgis.com/apps/webappviewer/index.html?id=4299ffa07de9451994681b43b60ad95b,100,0,1,1,2,false
+Department of Conservation,Cerberus Web Client,https://ftp.doc.govt.nz/login,Not scanned,N/A,0,N/A,N/A,true
+Department of Corrections,Office of the Inspectorate,https://inspectorate.corrections.govt.nz/,8,-48,161,13,83,false
+Department of Corrections,Department of Corrections,https://www.corrections.govt.nz/,18,-21,300,67,208,false
+Department of Corrections,Careers at Corrections,https://mahi.corrections.govt.nz/,38,-12,24,9,54,false
+Department of Corrections,Corrections Jobs in NZ,https://careers.corrections.govt.nz/,44,-16,241,177,580,false
+Department of Corrections,New Zealand Parole Board,https://www.paroleboard.govt.nz/,51,0,300,300,316,false
+Department of Internal Affairs,DigitalNZ,https://digitalnz.org/,0,0,1,0,0,false
+Department of Internal Affairs,Granted,https://granted.govt.nz/,0,0,1,0,0,false
+Department of Internal Affairs,Order New Zealand Certificates,https://certificates.services.govt.nz/,0,0,3,0,0,false
+Department of Internal Affairs,Reading Ambassador,https://readingambassador.nz/,0,0,1,0,0,false
+Department of Internal Affairs,Survivor Experiences Service,https://www.survivorexperiences.govt.nz/,5,0,38,2,260,false
+Department of Internal Affairs,Royal Commission of Inquiry into the Attack on Christchurch Mosques on 15 March 2019,https://christchurchattack.royalcommission.nz/,11,-2,181,20,63,false
+Department of Internal Affairs,Covid-19 Lessons Learned,https://www.covid19lessons.royalcommission.nz/,19,-1,300,67,423,false
+Department of Internal Affairs,Local Government Commission,https://www.lgc.govt.nz/,27,10,243,113,229,false
+Department of Internal Affairs,Single Transferable Vote,https://www.stv.govt.nz/index.shtml,31,0,13,4,34,false
+Department of Internal Affairs,AnyQuestions,https://anyquestions.govt.nz/,34,-5,300,102,2580,false
+Department of Internal Affairs,National Library of New Zealand,https://natlib.govt.nz/,49,-42,300,263,799,false
+Department of Internal Affairs,AMLOnline,https://aml.dia.govt.nz/,50,-20,5,5,15,false
+Department of Internal Affairs,RealMe,https://www.realme.govt.nz/,50,1,48,46,56,false
+Department of Internal Affairs,New Zealand Passports,https://www.passports.govt.nz/,52,0,31,22,47,false
+Department of Internal Affairs,Government Inquiry into Mental Health and Addiction,https://mentalhealth.inquiry.govt.nz/,57,1,132,132,984,false
+Department of Internal Affairs,The Department of Internal Affairs,https://www.dia.govt.nz/,57,10,300,170,2242,false
+Department of Internal Affairs,Operation Burnham,https://operationburnham.inquiry.govt.nz/,58,0,84,84,793,false
+Department of Internal Affairs,RealMe for developers,https://developers.realme.govt.nz/,63,0,58,52,176,false
+Department of Internal Affairs,Royal Commission into the Pike River Mine Tragedy,https://pikeriver.royalcommission.govt.nz/,67,-1,64,43,130,false
+Department of Internal Affairs,Beehive.govt.nz,https://www.beehive.govt.nz/,68,-2,300,300,2345,false
+Department of Internal Affairs,"Birth, Death and Marriage Historical Records",https://bdmhistoricalrecords.dia.govt.nz/,85,-15,27,23,137,false
+Department of Internal Affairs,Keep It Real Online,https://www.keepitrealonline.govt.nz/,86,4,300,300,1966,false
+Department of Internal Affairs,Papers Past,https://paperspast.natlib.govt.nz/,87,9,300,266,1968,false
+Department of Internal Affairs,Christchurch Earthquake Appeal Trust,https://www.christchurchappealtrust.org.nz,92,-8,25,23,576,false
+Department of Internal Affairs,Candidate Experience Site,https://fa-eqqg-saasfaprod1.fa.ocs.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1001/,98,2,52,51,121,false
+Department of Internal Affairs,SmartStart,https://smartstart.services.govt.nz/,98,0,33,33,383,false
+Department of Internal Affairs,Abuse in Care - Royal Commission of Inquiry,https://www.abuseincare.org.nz/,99,0,300,300,2301,false
+Department of Internal Affairs,7726.govt.nz,https://www.7726.govt.nz/,100,0,6,6,16,false
+Department of Internal Affairs,Archives New Zealand,https://www.archives.govt.nz/,100,0,300,300,2407,false
+Department of Internal Affairs,Auckland Transition Agency,https://www.ata.govt.nz/web/cms_ata.nsf/,100,0,62,62,360,false
+Department of Internal Affairs,"Births, Deaths & Marriages Online",https://bdmonline.dia.govt.nz/,100,0,11,11,26,false
+Department of Internal Affairs,Celebrants Online,https://celebrants.dia.govt.nz/,100,0,2,2,24,false
+Department of Internal Affairs,Charities Services,https://register.charities.govt.nz/CharitiesRegister/Search,100,0,1,1,30,false
+Department of Internal Affairs,Charities Services,https://www.charities.govt.nz/,100,0,300,300,4080,false
+Department of Internal Affairs,Collections search,https://collections.archives.govt.nz/,100,0,51,51,369,false
+Department of Internal Affairs,Community Matters,https://www.communitymatters.govt.nz/,100,0,300,300,4932,false
+Department of Internal Affairs,Death Documents,https://deathdocs.services.govt.nz/,100,0,9,9,130,false
+Department of Internal Affairs,DIA services,https://dia.services.govt.nz/,100,0,6,6,68,false
+Department of Internal Affairs,Early Learning Journeys,https://earlylearning.services.govt.nz/,100,0,42,42,600,false
+Department of Internal Affairs,End of Life Service,https://endoflife.services.govt.nz/,100,0,10,10,282,false
+Department of Internal Affairs,Gambling Aotearoa,https://www.gamblingaotearoa.govt.nz/,100,0,2,2,28,false
+Department of Internal Affairs,New Zealand Gambling Commission,https://www.gamblingcommission.govt.nz/,100,0,83,83,1155,false
+Department of Internal Affairs,NZ Web Archive,https://webarchive.natlib.govt.nz/,100,0,6,6,80,false
+Department of Internal Affairs,Reportspam,https://www.reportspam.co.nz/,100,0,3,3,9,false
+Department of Internal Affairs,Royal Commission of Inquiry into Building Failure Caused by the Canterbury Earthquakes,https://canterbury.royalcommission.govt.nz/,100,0,134,134,636,false
+Department of Internal Affairs,Te Puna Foundation,https://natlib.govt.nz/support-us/te-puna-foundation/,100,0,7,7,28,false
+Department of Internal Affairs,The Inter-Yeti - Lost on a Wild Webventure,https://theinteryeti.govt.nz/,100,0,1,1,4,false
+Department of Internal Affairs,Whetūrangitia,https://wheturangitia.services.govt.nz/,100,0,48,48,922,false
+Department of the Prime Minister and Cabinet,DPMC Consultation hub,https://consultation.dpmc.govt.nz/,1,0,38,1,1,false
+Department of the Prime Minister and Cabinet,Department of the Prime Minister and Cabinet,https://www.dpmc.govt.nz/,74,2,300,300,2113,false
+Department of the Prime Minister and Cabinet,Search Jobs - Department of the Prime Minister and Cabinet,https://careers.dpmc.govt.nz/search,100,100,6,6,42,false
+Department of the Prime Minister and Cabinet,The Governor-General of New Zealand,https://gg.govt.nz/,100,0,300,300,2079,false
+Education Review Office,Education Review Office,https://www.ero.govt.nz/,2,-2,300,7,14,false
+Education Review Office,Evidence and Insights,https://www.evidence.ero.govt.nz/,6,-37,300,19,776,false
+Family Violence and Sexual Violence Executive Board,Centre for Family Violence and Sexual Violence Prevention,https://preventfvsv.govt.nz/,0,0,54,0,0,false
+Financial Markets Authority,Financial Markets Authority,https://www.fma.govt.nz/,25,5,300,82,1501,false
+Financial Markets Authority,FinTech Forum,https://fintech.govt.nz,94,0,8,8,25,false
+Financial Markets Authority,Financial Advice Code,https://financialadvicecode.govt.nz,100,0,13,13,131,false
+Financial Markets Authority,Financial Advisers Disciplinary Committee,https://fadc.govt.nz/,100,0,16,16,135,false
+Government Communications Security Bureau,Beyond Ordinary Careers,https://beyondordinary.nzic.govt.nz/,0,0,27,0,0,false
+Government Communications Security Bureau,Government Communications Security Bureau,https://www.gcsb.govt.nz/,0,0,186,0,0,false
+Government Communications Security Bureau,New Zealand Information Security Manual,https://nzism.gcsb.govt.nz/,0,0,35,0,0,false
+Government Communications Security Bureau,New Zealand Intelligence Community,https://www.nzic.govt.nz/,0,0,3,0,0,false
+Government Communications Security Bureau,Own Your Online,https://www.ownyouronline.govt.nz/,1,-1,199,2,5,false
+Government Communications Security Bureau,National Cyber Security Centre,https://www.ncsc.govt.nz/,5,-53,300,16,52,false
+Health New Zealand,My Health Record,https://my.health.nz/,0,0,5,0,0,false
+Health New Zealand,Safer Gambling Aotearoa,https://www.safergambling.org.nz/,8,0,26,2,10,false
+Health New Zealand,Health Information and Services,https://www.healthnz.govt.nz/,9,-4,300,27,1043,false
+Health New Zealand,Smokefree,https://www.smokefree.org.nz/,16,0,97,17,91,false
+Health New Zealand,Nōku te Ao,https://www.nokuteao.org.nz/,24,0,59,14,48,false
+Health New Zealand,Depression and Anxiety,https://www.depression.org.nz,31,0,51,16,60,false
+Health New Zealand,Alcohol Resources,https://resources.alcohol.org.nz/,52,52,114,114,132,false
+Health New Zealand,Amohia te Waiora,https://www.alcohol.org.nz/,52,52,98,98,108,false
+Health New Zealand,Search jobs at Health New Zealand,https://jobs.tewhatuora.govt.nz/jobtools/JnCustomLogin.Login?in_organid=19739,78,7,18,18,72,false
+Health New Zealand,Health New Zealand resource store,https://order.healthpromotion.govt.nz/,100,0,300,300,4236,false
+Health New Zealand,HealthEd,https://healthed.govt.nz/,100,0,300,300,1214,false
+Health New Zealand,Small Steps,https://www.smallsteps.org.nz/,100,0,29,29,446,false
+Inland Revenue Department,Tax Policy,https://www.taxpolicy.ird.govt.nz/,3,-17,236,11,18,false
+Inland Revenue Department,Tax Technical,https://www.taxtechnical.ird.govt.nz/,4,1,126,5,12,false
+Inland Revenue Department,Inland Revenue,https://www.ird.govt.nz/,5,1,300,17,41,false
+Land Information New Zealand,Careers at LINZ,https://careers.linz.govt.nz/,0,-58,16,0,0,false
+Land Information New Zealand,NZGB Gazetteer,https://gazetteer.linz.govt.nz/,0,0,1,0,0,false
+Land Information New Zealand,Overseas Investment Office,https://oio.linz.govt.nz/,0,0,15,0,0,false
+Land Information New Zealand,Land Information New Zealand,https://www.linz.govt.nz/,1,-15,300,2,5,false
+Land Information New Zealand,New Zealand ENC Service,https://encservice.linz.govt.nz/,11,0,9,1,4,false
+Land Information New Zealand,LINZ Charts,https://charts.linz.govt.nz/,46,-48,300,145,532,false
+Land Information New Zealand,Basemaps,https://basemaps.linz.govt.nz/,100,0,1,1,2,false
+Land Information New Zealand,Land Record Search,https://lrs.linz.govt.nz/search/,100,0,1,1,6,false
+Land Information New Zealand,LINZ Data Service,https://data.linz.govt.nz/,100,0,300,300,3995,false
+"Ministry for Cities, Environment, Regions and Transport",Have your say,https://consult.environment.govt.nz/,0,-1,300,1,1,false
+"Ministry for Cities, Environment, Regions and Transport",Transport Knowledge Hub,https://www.knowledgehub.transport.govt.nz/,0,0,7,0,0,false
+"Ministry for Cities, Environment, Regions and Transport",Ministry of Housing and Urban Development,https://www.hud.govt.nz/,4,1,300,24,113,false
+"Ministry for Cities, Environment, Regions and Transport",Ministry for the Environment,https://environment.govt.nz/,9,-2,300,31,68,false
+"Ministry for Cities, Environment, Regions and Transport",Open Data,https://open-data-mfe.hub.arcgis.com,50,0,1,1,1,false
+"Ministry for Cities, Environment, Regions and Transport",Ministry of Transport,https://www.transport.govt.nz/,54,-2,264,145,1373,false
+"Ministry for Cities, Environment, Regions and Transport",Online Waste Reporting System,https://wastelevy.govt.nz/,67,0,6,4,9,false
+"Ministry for Cities, Environment, Regions and Transport",Community Housing Regulatory Authority,https://www.chra.hud.govt.nz/,76,0,40,31,65,false
+"Ministry for Cities, Environment, Regions and Transport",Quality Planning,https://www.qualityplanning.org.nz/,82,-10,300,300,1016,false
+"Ministry for Cities, Environment, Regions and Transport",Fiordland Marine Guardians,https://www.fmg.org.nz/,98,0,77,77,1697,false
+"Ministry for Cities, Environment, Regions and Transport",NZSAR,https://www.nzsar.govt.nz/,98,-2,289,284,1364,false
+"Ministry for Cities, Environment, Regions and Transport",ArcGIS Online,https://mfe.maps.arcgis.com/home/index.html,100,0,1,1,2,false
+"Ministry for Cities, Environment, Regions and Transport",Enquire Login,https://fms-cp.mfe-enquire.cloud/user/realme.html,100,0,1,1,6,false
+"Ministry for Cities, Environment, Regions and Transport",MfE Careers,https://careers.mfe.govt.nz/,100,0,8,8,124,false
+"Ministry for Cities, Environment, Regions and Transport",MfE Data Service,https://data.mfe.govt.nz,100,0,300,300,4836,false
+"Ministry for Cities, Environment, Regions and Transport",Multilateral Agreement on the Liberalization of International Air Transportation,https://www.maliat.govt.nz/,100,0,10,10,61,false
+"Ministry for Cities, Environment, Regions and Transport",NZSAR Resources,https://nzsar-resources.org.nz/,100,0,25,25,136,false
+Ministry for Culture and Heritage,28 Māori Battalion,https://28maoribattalion.org.nz/,0,-3,300,0,0,false
+Ministry for Culture and Heritage,Canterbury Earthquake National Memorial,https://www.mch.govt.nz/our-work/memorials-and-commemorations/oi-manawa-canterbury-earthquake-national-memorial,0,0,2,0,0,false
+Ministry for Culture and Heritage,New Zealand and the Vietnam War,https://vietnamwar.govt.nz/,0,0,300,0,0,false
+Ministry for Culture and Heritage,Ministry for Culture & Heritage,https://www.mch.govt.nz/,2,-2,300,10,21,false
+Ministry for Culture and Heritage,NZ History,https://nzhistory.govt.nz/,3,-7,300,10,287,false
+Ministry for Culture and Heritage,Te Ara Encyclopedia of New Zealand,https://teara.govt.nz/,4,2,300,13,54,false
+Ministry for Culture and Heritage,Te Tai Treaty Settlement Stories,https://tetai.nz/,Not scanned,N/A,0,N/A,N/A,true
+Ministry for Ethnic Communities,EX25 - Ethnic Xchange Symposium,https://ethnicxchange.org.nz/,0,0,1,0,0,false
+Ministry for Ethnic Communities,Ethnic Communities,https://www.ethniccommunities.govt.nz/,4,-96,300,11,30,false
+Ministry for Pacific Peoples,Ministry for Pacific Peoples,https://www.mpp.govt.nz/,86,-4,300,300,3514,false
+Ministry for Pacific Peoples,Kātoatoa,https://katoatoa.mpp.govt.nz/,100,50,1,1,8,false
+Ministry for Primary Industries,Official New Zealand Pest Register,https://onzpr.mpi.govt.nz/,0,0,7,0,0,false
+Ministry for Primary Industries,Ministry for Primary Industries,https://www.mpi.govt.nz/,3,-11,300,9,45,false
+Ministry for Primary Industries,PIER Search,https://piersearch.mpi.govt.nz/,3,-13,16,1,2,false
+Ministry for Primary Industries,Bionet.NZ,https://www.bionet.nz/,5,-95,60,3,6,false
+Ministry for Primary Industries,Food and fibre workforce insights,https://www.workforceinsights.govt.nz/,5,-30,86,8,8,false
+Ministry for Primary Industries,Kauri Protection,https://www.kauriprotection.co.nz/,5,-10,300,28,32,false
+Ministry for Primary Industries,Marine Biosecurity Porthole,https://marinebiosecurity.org.nz/,8,-92,78,6,12,false
+Ministry for Primary Industries,Canopy,https://www.canopy.govt.nz/,10,-52,300,59,60,false
+Ministry for Primary Industries,Ground Rules,https://www.groundrules.mpi.govt.nz/,11,7,268,42,109,false
+Ministry for Primary Industries,NAEAC,https://www.naeac.org.nz/,27,-60,15,8,8,false
+Ministry for Primary Industries,NAWAC,https://www.nawac.org.nz/,31,-59,21,13,13,false
+Ministry for Primary Industries,Predator Free 2050,https://www.tuiatetaiao.nz/,52,0,29,29,93,false
+Ministry for Primary Industries,Myrtle Rust,https://www.myrtlerust.org.nz/,63,0,58,58,318,false
+Ministry for Primary Industries,Wilding Pines,https://www.wildingpines.nz/,65,-34,132,129,849,false
+Ministry for Primary Industries,Government Health and Safety Lead,https://www.healthandsafety.govt.nz,100,0,222,221,2512,false
+Ministry for Primary Industries,Global Research Alliance,https://globalresearchalliance.org/,Not scanned,N/A,0,N/A,N/A,true
+Ministry for Regulation,Ministry for Regulation Engagement hub,https://consultation.regulation.govt.nz/,0,0,34,0,0,false
+Ministry for Regulation,Ministry for Regulation,https://www.regulation.govt.nz/,4,-18,300,12,36,false
+Ministry for Regulation,Careers at the Ministry for Regulation,https://careers.regulation.govt.nz/,7,-14,23,2,5,false
+Ministry for Women,Ministry for Women,https://www.women.govt.nz/,2,-1,300,7,10,false
+"Ministry of Business, Innovation and Employment",Auditors Register - Companies Office,https://www.companiesoffice.govt.nz/all-registers/auditors/,0,0,4,0,0,false
+"Ministry of Business, Innovation and Employment",Building Societies Register - Companies Office,https://www.companiesoffice.govt.nz/all-registers/building-societies/,0,-44,11,0,0,false
+"Ministry of Business, Innovation and Employment",Contributory Mortgage Brokers Register - Companies Office,https://www.companiesoffice.govt.nz/all-registers/contributory-mortgage-brokers/,0,0,3,0,0,false
+"Ministry of Business, Innovation and Employment",Determinations - Employment Relations Authority (ERA),https://determinations.era.govt.nz/determinations,0,0,33,0,0,false
+"Ministry of Business, Innovation and Employment",Do you need a building consent?,https://www.canibuildit.govt.nz/,0,0,41,0,0,false
+"Ministry of Business, Innovation and Employment",Employment NZ Early Resolution Web Form,https://earlyresolution.employment.govt.nz/,0,0,1,0,0,false
+"Ministry of Business, Innovation and Employment",Employment Relations Authority (ERA),https://www.era.govt.nz/,0,0,31,0,0,false
+"Ministry of Business, Innovation and Employment",Employment Services Workplace Repository,https://workplacerepository.mbie.govt.nz/,0,0,6,0,0,false
+"Ministry of Business, Innovation and Employment",Find Electrical Workers - Kete,https://kete.mbie.govt.nz/EW/EWPRSearch/,0,0,1,0,0,false
+"Ministry of Business, Innovation and Employment",Friendly Societies Register - Companies Office,https://www.companiesoffice.govt.nz/all-registers/friendly-societies/,0,-50,3,0,0,false
+"Ministry of Business, Innovation and Employment",Heating Assessment Tool - Tenancy Services,https://tools.tenancy.govt.nz/heating-tool,0,0,1,0,0,false
+"Ministry of Business, Innovation and Employment",Industrial & Provident Societies Register - Companies Office,https://www.companiesoffice.govt.nz/all-registers/industrial-and-provident-societies/,0,-23,13,0,0,false
+"Ministry of Business, Innovation and Employment",Insolvency and Trustee Service,https://www.insolvency.govt.nz/,0,-100,128,0,0,false
+"Ministry of Business, Innovation and Employment",Managed Isolation and Quarantine (MIQ),https://portal.miq.govt.nz/,0,0,1,0,0,false
+"Ministry of Business, Innovation and Employment",Niue Companies Office,https://www.companies.gov.nu/,0,0,13,0,0,false
+"Ministry of Business, Innovation and Employment",NZ Claims Resolution Service,https://www.nzcrs.govt.nz/,0,-100,95,0,0,false
+"Ministry of Business, Innovation and Employment",Online Immigration,https://online.immigration.govt.nz/,0,0,300,0,0,false
+"Ministry of Business, Innovation and Employment",Overseas Issuers Register - Companies Office,https://www.companiesoffice.govt.nz/all-registers/overseas-issuers/,0,0,6,0,0,false
+"Ministry of Business, Innovation and Employment",Participatory Securities Register - Companies Office,https://www.companiesoffice.govt.nz/all-registers/participatory-securities/,0,-50,1,0,0,false
+"Ministry of Business, Innovation and Employment",Pītau - Investment Management System,https://pitau.mbie.govt.nz/,0,0,2,0,0,false
+"Ministry of Business, Innovation and Employment",Register of Approved Overseas Auditors & Associations of Accountants - Companies Office,https://www.companiesoffice.govt.nz/all-registers/approved-overseas-auditors-and-associations-of-accountants/,0,-50,2,0,0,false
+"Ministry of Business, Innovation and Employment",Research Development Tax Incentive,https://www.rdti.govt.nz/,0,-13,49,0,0,false
+"Ministry of Business, Innovation and Employment",Standards NZ Consultation Hub,https://consultations.standards.govt.nz/,0,0,63,0,0,false
+"Ministry of Business, Innovation and Employment",Superannuation Schemes Register - Companies Office,https://www.companiesoffice.govt.nz/all-registers/superannuation-schemes/,0,0,1,0,0,false
+"Ministry of Business, Innovation and Employment",Tenancy Services,https://mybond.tenancy.govt.nz/,0,0,2,0,0,false
+"Ministry of Business, Innovation and Employment",Trading Standards,https://www.tradingstandards.govt.nz/,0,-50,9,0,0,false
+"Ministry of Business, Innovation and Employment",Unit Trusts Register - Companies Office,https://www.companiesoffice.govt.nz/all-registers/unit-trusts/,0,0,1,0,0,false
+"Ministry of Business, Innovation and Employment",Jobs at MBIE,https://jobs.mbie.govt.nz/,2,-7,300,7,75,false
+"Ministry of Business, Innovation and Employment",NZ Business Number,https://www.nzbn.govt.nz/,2,-49,46,1,2,false
+"Ministry of Business, Innovation and Employment",Remuneration Authority,https://www.remauthority.govt.nz/,2,0,43,2,3,false
+"Ministry of Business, Innovation and Employment",Tenancy Services,https://www.tenancy.govt.nz/,2,-75,300,7,16,false
+"Ministry of Business, Innovation and Employment",Licensed Building Practitioners,https://www.lbp.govt.nz/,3,-4,300,14,27,false
+"Ministry of Business, Innovation and Employment",Retirement Villages Register - Companies Office,https://www.companiesoffice.govt.nz/all-registers/retirement-villages/,3,-40,38,1,2,false
+"Ministry of Business, Innovation and Employment",Electrical Workers Registration Board (EWRB),https://www.ewrb.govt.nz/,4,-2,300,17,37,false
+"Ministry of Business, Innovation and Employment",Employment NZ,https://www.employment.govt.nz/,4,-3,300,13,51,false
+"Ministry of Business, Innovation and Employment",Motor Vehicle Traders Register,https://www.motortraders.govt.nz/,4,-33,96,6,22,false
+"Ministry of Business, Innovation and Employment",Credit Unions Register - Companies Office,https://www.companiesoffice.govt.nz/all-registers/credit-unions/,7,-40,15,1,2,false
+"Ministry of Business, Innovation and Employment",NZ Traveller Declaration,https://www.travellerdeclaration.govt.nz/,7,0,23,2,3,false
+"Ministry of Business, Innovation and Employment",Trade Measurement,https://trademeasurement.tradingstandards.govt.nz/,8,-84,164,18,43,false
+"Ministry of Business, Innovation and Employment",Unit Title Services,https://www.unittitles.govt.nz/,8,-87,111,9,18,false
+"Ministry of Business, Innovation and Employment",Radio Spectrum Management NZ,https://www.rsm.govt.nz/,9,4,300,29,91,false
+"Ministry of Business, Innovation and Employment",Immigration NZ,https://www.immigration.govt.nz/,10,4,300,29,127,false
+"Ministry of Business, Innovation and Employment",Disclose Register,https://disclose-register.companiesoffice.govt.nz/,11,1,54,6,12,false
+"Ministry of Business, Innovation and Employment",Te Pae,https://tepae.building.govt.nz/,13,13,4,1,10,false
+"Ministry of Business, Innovation and Employment",Temporary Accommodation Service,https://www.tas.mbie.govt.nz/,13,-1,16,2,4,false
+"Ministry of Business, Innovation and Employment",Personal Property Securities Register,https://ppsr.companiesoffice.govt.nz/,18,0,66,12,44,false
+"Ministry of Business, Innovation and Employment",NZ Petroleum and Minerals,https://www.nzpam.govt.nz/,21,-10,299,63,207,false
+"Ministry of Business, Innovation and Employment",Companies Register,https://companies-register.companiesoffice.govt.nz/,23,6,13,3,8,false
+"Ministry of Business, Innovation and Employment",Limited Partnerships Registers,https://lp-register.companiesoffice.govt.nz/,23,23,13,3,16,false
+"Ministry of Business, Innovation and Employment",Business.govt.nz,https://www.business.govt.nz/,24,-7,294,74,284,false
+"Ministry of Business, Innovation and Employment",Financial Service Providers Register,https://fsp-register.companiesoffice.govt.nz/,24,-1,79,19,42,false
+"Ministry of Business, Innovation and Employment",Do business online - Business.govt.nz,https://www.tools.business.govt.nz/do-business-online/,25,0,2,1,1,false
+"Ministry of Business, Innovation and Employment",Funding Explorer - Business.govt.nz,https://www.tools.business.govt.nz/funding-explorer/,25,0,2,1,1,false
+"Ministry of Business, Innovation and Employment","Ministry of Business, Innovation & Employment",https://www.mbie.govt.nz/,27,-2,300,107,312,false
+"Ministry of Business, Innovation and Employment",Standards NZ,https://www.standards.govt.nz/,30,-3,300,103,277,false
+"Ministry of Business, Innovation and Employment",Charitable Trusts Register,https://ct-register.companiesoffice.govt.nz/,31,-1,13,4,18,false
+"Ministry of Business, Innovation and Employment",eInvoicing,https://www.einvoicing.govt.nz/,35,-38,122,62,152,false
+"Ministry of Business, Innovation and Employment",NZ Immigration Advisers Authority (IAA),https://www.iaa.govt.nz/,36,-19,300,109,309,false
+"Ministry of Business, Innovation and Employment",Tourism Evidence and Insights Centre,https://teic.mbie.govt.nz/,39,3,121,47,1420,false
+"Ministry of Business, Innovation and Employment",NZ Companies Office,https://www.companiesoffice.govt.nz/,40,-5,89,36,74,false
+"Ministry of Business, Innovation and Employment",Intellectual Property Office of New Zealand,https://www.iponz.govt.nz/,42,-24,300,143,1609,false
+"Ministry of Business, Innovation and Employment",Building CodeHub,https://codehub.building.govt.nz/,45,-6,300,148,762,false
+"Ministry of Business, Innovation and Employment",Debt Repayment Register,https://app.insolvency.govt.nz/ui/public/search/dro-register,50,0,1,1,1,false
+"Ministry of Business, Innovation and Employment",Licensed Building Practitioners Kete,https://kete-lbp.mbie.govt.nz/,50,0,2,2,2,false
+"Ministry of Business, Innovation and Employment",Government Property Office,https://www.gpo.govt.nz/,52,52,50,50,67,false
+"Ministry of Business, Innovation and Employment",FormBuilder,https://www.formbuilder.govt.nz/,55,55,86,74,211,false
+"Ministry of Business, Innovation and Employment",Major Events,https://www.majorevents.govt.nz/,56,-36,72,68,214,false
+"Ministry of Business, Innovation and Employment",NZ Petroleum & Minerals Online permitting system,https://aca-auprod.accela.com/NZPAM/Welcome.aspx,60,0,5,3,23,false
+"Ministry of Business, Innovation and Employment",Consumer Protection,https://www.consumerprotection.govt.nz/,63,17,300,200,983,false
+"Ministry of Business, Innovation and Employment",IRC Toolkit,https://irctoolkit.mbie.govt.nz/,63,-30,27,23,60,false
+"Ministry of Business, Innovation and Employment",NZ Government Procurement,https://www.procurement.govt.nz/,71,2,300,298,985,false
+"Ministry of Business, Innovation and Employment",NZ Claims Resolution Service Portal,https://portal.nzcrs.govt.nz/login.aspx,75,0,2,2,5,false
+"Ministry of Business, Innovation and Employment",Product Safety NZ,https://www.productsafety.govt.nz/,76,9,300,227,2553,false
+"Ministry of Business, Innovation and Employment",Geodata Catalogue,https://geodata.nzpam.govt.nz/,81,-1,300,243,1336,false
+"Ministry of Business, Innovation and Employment",Better Rules ñ Better Outcomes,https://www.betterrules.govt.nz/,83,-9,6,5,16,false
+"Ministry of Business, Innovation and Employment",Government Electronic Tenders Service (GETS),https://www.gets.govt.nz/ExternalIndex.htm,83,-6,300,250,9824,false
+"Ministry of Business, Innovation and Employment",API cloud platform support,https://support.api.business.govt.nz/s/,95,0,22,21,163,false
+"Ministry of Business, Innovation and Employment",Kānoa – Regional Economic Development & Investment Fund,https://www.growregions.govt.nz/,98,18,268,268,643,false
+"Ministry of Business, Innovation and Employment",Auctioneers registration,https://auctioneers.mbie.govt.nz/,100,0,195,195,390,false
+"Ministry of Business, Innovation and Employment",Building Performance,https://learning.building.govt.nz/,100,0,300,299,3633,false
+"Ministry of Business, Innovation and Employment",Building Performance,https://www.building.govt.nz/,100,0,300,300,3692,false
+"Ministry of Business, Innovation and Employment",Building Performance Notification of Modification or Waiver,https://waivermodsform.building.govt.nz/,100,100,1,1,4,false
+"Ministry of Business, Innovation and Employment",Business Registers,https://app.businessregisters.govt.nz/,100,50,14,14,116,false
+"Ministry of Business, Innovation and Employment",Cashflow Forecaster - Business.govt.nz,https://www.tools.business.govt.nz/cashflow-forecaster/,100,0,1,1,6,false
+"Ministry of Business, Innovation and Employment",Climate Action Toolbox - Business.govt.nz,https://www.tools.business.govt.nz/climate/,100,17,3,3,39,false
+"Ministry of Business, Innovation and Employment",Compliance Matters - Business.govt.nz,https://www.tools2.business.govt.nz/compliance-matters,100,0,1,1,2,false
+"Ministry of Business, Innovation and Employment",Conflict Of Interest (COI) Tool,https://coi.procurement.govt.nz/,100,100,3,3,6,false
+"Ministry of Business, Innovation and Employment",Employee Cost Calculator - Business.govt.nz,https://www.tools2.business.govt.nz/employeecostcalculator,100,0,1,1,5,false
+"Ministry of Business, Innovation and Employment",Employment Agreement Builder,https://eab.business.govt.nz/employmentagreementbuilder/startscreen,100,0,1,1,2,false
+"Ministry of Business, Innovation and Employment",Employment Mediation Services,https://dispute.employment.govt.nz/app/Extra/Employment/Default.aspx,100,0,1,1,13,false
+"Ministry of Business, Innovation and Employment",Employment NZ Request Help,https://gethelp.employment.govt.nz/,100,0,1,1,8,false
+"Ministry of Business, Innovation and Employment",Fuel Quality Monitoring,https://fuelquality.tradingstandards.govt.nz/,100,0,24,24,49,false
+"Ministry of Business, Innovation and Employment",Grants portal,https://grantsportal.business.govt.nz/prweb/PRAuth/app/default/B6PIYiJh5GurSCmPu9_PnppG3kv3D5gbCQyAy7GtpfGx4p4uVXhGlw*/!STANDARD,100,100,2,2,22,false
+"Ministry of Business, Innovation and Employment",Hīkina-Learning for Government Procurement and Property,https://learning.procurement.govt.nz/,100,0,46,46,385,false
+"Ministry of Business, Innovation and Employment",Immigration NZ Operational Manual,https://www.immigration.govt.nz/opsmanual/,100,0,1,1,65,false
+"Ministry of Business, Innovation and Employment",Incorporated Societies Register,https://is-register.companiesoffice.govt.nz/,100,77,32,32,158,false
+"Ministry of Business, Innovation and Employment",Independently Qualified Pool Inspectors,https://poolinspectors.mbie.govt.nz/,100,0,24,24,48,false
+"Ministry of Business, Innovation and Employment",Insolvency Register,https://app.insolvency.govt.nz/ui/public/search/insolvency-register,100,0,1,1,9,false
+"Ministry of Business, Innovation and Employment",Making a ERA Application online,https://dispute.era.govt.nz/app/Extra/ERA/Default.aspx,100,0,1,1,4,false
+"Ministry of Business, Innovation and Employment",Making a Tenancy Tribunal Application online,https://dispute.tenancy.govt.nz/app/Extra/TenancyTribunal/Default.aspx,100,0,1,1,6,false
+"Ministry of Business, Innovation and Employment",MBIE APIs,https://portal.api.business.govt.nz/,100,0,6,6,45,false
+"Ministry of Business, Innovation and Employment",Migrant Search,https://skillfinder.immigration.govt.nz/,100,0,1,1,12,false
+"Ministry of Business, Innovation and Employment",Migration Data Explorer,https://mbienz.shinyapps.io/migration_data_explorer/,100,0,2,2,4,false
+"Ministry of Business, Innovation and Employment",Minerals and Petroleum Maps,https://gis.nzpam.govt.nz/permitwebmaps/,100,0,1,1,4,false
+"Ministry of Business, Innovation and Employment",NZ Labour Market Dashboard,https://mbienz.shinyapps.io/labour-market-dashboard_prod/,100,0,2,2,4,false
+"Ministry of Business, Innovation and Employment",NZ Mine Plans,https://mineplans.nzpam.govt.nz/,100,0,1,1,6,false
+"Ministry of Business, Innovation and Employment",NZ Relay Services,https://www.nzrelay.co.nz/,100,0,27,27,471,false
+"Ministry of Business, Innovation and Employment",NZ Sectors Dashboard,https://sectorsdashboard.mbie.govt.nz/,100,0,1,1,6,false
+"Ministry of Business, Innovation and Employment",NZ Trading Standards Approvals Certificates,https://tradingstandardsnz.filebound.co.nz/public/search,100,100,1,1,9,false
+"Ministry of Business, Innovation and Employment",NZeTA application,https://nzeta.immigration.govt.nz/,100,0,1,1,12,false
+"Ministry of Business, Innovation and Employment",NZP&M ArcGIS Enterprise Portal,https://gis.nzpam.govt.nz/portal/sharing/oauth2/authorize?client_id=arcgisonline&response_type=code&state=%7B%22portalUrl%22%3A%22https%3A%2F%2Fgis.nzpam.govt.nz%2Fportal%22%2C%22uid%22%3A%22gjtYIp8Yxzk_AZ22vOJN7XnvauoV_8OP5cXBL7vLc6Q%22%2C%22returnUrl%22%3A%22https%3A%2F%2Fgis.nzpam.govt.nz%2Fportal%2Fhome%2Findex.html%22%2C%22useLandingPage%22%3Afalse%2C%22clientId%22%3A%22arcgisonline%22%7D&expiration=20160&locale=en-AU&redirect_uri=https%3A%2F%2Fgis.nzpam.govt.nz%2Fportal%2Fhome%2Faccountswitcher-callback.html&code_challenge=lgEAjtvprjG8Y10aIUoXYHG0BloYZLIxE5qIFkwRsuA&code_challenge_method=S256&display=default&force_login=false&hideCancel=true&showSignupOption=true&canHandleCrossOrgSignIn=true&signuptype=esri,100,100,1,1,2,false
+"Ministry of Business, Innovation and Employment",Public Information Resource Portal,https://www.mbieinformationresources.com/,100,17,3,3,75,false
+"Ministry of Business, Innovation and Employment",Regional economic activity report,https://webrear.mbie.govt.nz/summary/new-zealand,100,0,1,1,13,false
+"Ministry of Business, Innovation and Employment",Regional Factsheets,https://mbienz.shinyapps.io/RegionalFactsheets/,100,0,1,1,24,false
+"Ministry of Business, Innovation and Employment",Register of earthquake-prone buildings,https://epbr.building.govt.nz/,100,0,1,1,7,false
+"Ministry of Business, Innovation and Employment",Register of Radio Frequencies,https://rrf.rsm.govt.nz/ui?state=1,100,0,1,1,5,false
+"Ministry of Business, Innovation and Employment",Residential Tenancy Agreement Builder,https://rtab.tenancy.govt.nz/tenancybuilder/startscreen,100,0,1,1,2,false
+"Ministry of Business, Innovation and Employment",Temporary Accommodation Service Portal,https://portal.temporaryaccommodation.mbie.govt.nz/Temporaryaccommodation/,100,0,1,1,2,false
+"Ministry of Business, Innovation and Employment",The Kiwi Business Boost - Business.govt.nz,https://www.tools.business.govt.nz/boost/,100,0,2,2,6,false
+"Ministry of Business, Innovation and Employment",Trade Mark Check,https://app.iponz.govt.nz/app/TradeMarkCheck,100,100,300,300,3600,false
+"Ministry of Business, Innovation and Employment",Trading Standards Learning,https://learning.tradingstandards.govt.nz/login/,100,100,2,2,28,false
+"Ministry of Business, Innovation and Employment",Unit Title Act Disputes Application,https://utadispute.tenancy.govt.nz/app/Extra/UTA/Default.aspx?sid=639098629766028635,100,0,1,1,5,false
+"Ministry of Business, Innovation and Employment",Workplace Policy Builder,https://wpb.business.govt.nz/workplacepolicybuilder/startscreen,100,0,1,1,2,false
+"Ministry of Business, Innovation and Employment",Apply - Immigration,https://apply.immigration.govt.nz/,Not scanned,N/A,0,N/A,N/A,true
+"Ministry of Business, Innovation and Employment",Immigration Advisers Authority Register,https://app.mbieregisters.govt.nz/iaa/ui/start/searchForAnOccupationalRegistration,Not scanned,N/A,0,N/A,N/A,true
+"Ministry of Business, Innovation and Employment",Insolvency Practitioners Register - Companies Office,https://www.companiesoffice.govt.nz/all-registers/insolvency-practitioners/,Not scanned,N/A,0,N/A,N/A,true
+"Ministry of Business, Innovation and Employment",Motor Vehicle Traders Register (Search),https://app.mbieregisters.govt.nz/mvtr/ui/start/searchTheRegister,Not scanned,N/A,0,N/A,N/A,true
+"Ministry of Business, Innovation and Employment",Online Services - Immigration NZ,https://onlineservices.immigration.govt.nz/,Not scanned,N/A,0,N/A,N/A,true
+"Ministry of Business, Innovation and Employment",Procure Connect,https://connect.procurement.govt.nz/,Not scanned,N/A,0,N/A,N/A,true
+"Ministry of Business, Innovation and Employment",Registered Unions - Companies Office,https://www.companiesoffice.govt.nz/all-registers/registered-unions/,Not scanned,N/A,0,N/A,N/A,true
+Ministry of Defence,Ministry of Defence,https://www.defence.govt.nz/,0,0,159,0,0,false
+Ministry of Defence,Jobs at Ministry of Defence,https://jobs.defence.govt.nz/home,17,-50,6,1,12,false
+Ministry of Education,Kōwhiti Whakapae,https://kowhiti-whakapae.education.govt.nz/,0,-50,69,0,0,false
+Ministry of Education,Zero Data,https://zero.education.govt.nz/,0,-100,5,0,0,false
+Ministry of Education,Professional Learning & Development,https://pld.education.govt.nz/,1,-99,81,1,2,false
+Ministry of Education,Curriculum Progress Tools,https://curriculumprogresstools.education.govt.nz/,3,-97,36,1,12,false
+Ministry of Education,Ministry of Education,https://www.education.govt.nz/,4,-18,300,17,64,false
+Ministry of Education,Te Rito,https://terito.govt.nz/,5,-95,19,1,2,false
+Ministry of Education,Evaluation Hub,https://evaluationhub.education.govt.nz/,6,0,18,1,2,false
+Ministry of Education,Incredible Years Autism,https://iya.education.govt.nz/login,17,-83,6,1,2,false
+Ministry of Education,Te Kete Ipurangi,https://www.tki.org.nz/,17,-20,300,52,330,false
+Ministry of Education,NCEA,https://ncea.education.govt.nz/,18,5,40,9,52,false
+Ministry of Education,Education Workforce,https://workforce.education.govt.nz,35,30,63,44,219,false
+Ministry of Education,Ministry of Eductation Design System,https://designsystem.education.govt.nz/,49,2,34,19,57,false
+Ministry of Education,Careers in Education,https://careers.education.govt.nz/,50,21,7,7,27,false
+Ministry of Education,School Leavers' Toolkit,https://school-leavers-toolkit.education.govt.nz/,58,3,73,47,100,false
+Ministry of Education,New Zealand Curriculum,https://newzealandcurriculum.tahurangi.education.govt.nz/,77,-3,300,236,2251,false
+Ministry of Education,Tuia Mātauranga,https://tuiaeducation.org.nz/,83,0,15,15,364,false
+Ministry of Education,Youth Guarantee,https://youthguarantee.education.govt.nz,89,1,109,97,2669,false
+Ministry of Education,Education Gazette,https://gazette.education.govt.nz/,92,-8,13,13,516,false
+Ministry of Education,Aotearoa NZ's Histories,https://aotearoahistories.education.govt.nz/,98,0,26,26,94,false
+Ministry of Education,He Pikorua,https://hepikorua.education.govt.nz/,98,-1,42,41,707,false
+Ministry of Education,Learning from home,https://learningfromhome.govt.nz/,98,0,31,31,128,false
+Ministry of Education,Bullying Free NZ,https://bullyingfree.nz/,99,1,82,81,3315,false
+Ministry of Education,Catalogue of tools & online services,https://applications.education.govt.nz/,99,30,39,39,455,false
+Ministry of Education,Education Counts,https://www.educationcounts.govt.nz/home,99,-1,300,300,9152,false
+Ministry of Education,Careers at Ministry of Education,https://ministrycareers.education.govt.nz,100,0,1,1,4,false
+Ministry of Education,Inclusive Education,https://inclusive.tki.org.nz/,100,0,300,300,13438,false
+Ministry of Education,"Ka Ora, Ka Ako",https://kaorakaako.education.govt.nz/,100,76,74,74,187,false
+Ministry of Education,Kauwhata Reo,https://kauwhatareo.govt.nz/,100,0,197,197,2200,false
+Ministry of Education,Paekupu,https://paekupu.co.nz/,100,0,300,300,2091,false
+Ministry of Education,Pathways and Transitions,https://newzealandcurriculum.tahurangi.education.govt.nz/new-zealand-curriculum-online/teaching-support/pathways-and-transitions/5637164076.c,100,0,300,300,2698,false
+Ministry of Education,Pokapuu,https://pokapuu.education.govt.nz/Security/login/,100,0,1,1,10,false
+Ministry of Education,PowerUP Plus,https://powerupplus.education.govt.nz/,100,0,1,1,14,false
+Ministry of Foreign Affairs and Trade,Trade Barriers NZ,https://www.tradebarriers.govt.nz/,0,0,7,0,0,false
+Ministry of Foreign Affairs and Trade,DevData,https://devdata.mfat.govt.nz/,3,-15,300,20,21,false
+Ministry of Foreign Affairs and Trade,SafeTravel,https://www.safetravel.govt.nz/,5,-7,300,14,44,false
+Ministry of Foreign Affairs and Trade,Ministry of Foreign Affairs and Trade,https://www.mfat.govt.nz/,10,5,300,35,99,false
+Ministry of Foreign Affairs and Trade,FTA Services Online Tool,https://services-exporter-tool.govt.nz/,75,75,4,3,6,false
+Ministry of Foreign Affairs and Trade,Careers at MFAT,https://vacancies.mfat.govt.nz/,100,0,1,1,15,false
+Ministry of Foreign Affairs and Trade,New Zealand Treaties Online,https://treaties.mfat.govt.nz/,100,0,6,6,120,false
+Ministry of Foreign Affairs and Trade,Tariff Finder,https://www.tariff-finder.govt.nz/,100,0,3,3,279,false
+Ministry of Health,Advisory Committee on Assisted Reproductive Technology,https://acart.health.govt.nz/,0,0,64,0,0,false
+Ministry of Health,Ethics Committee on Assisted Reproductive Technology,https://ecart.health.govt.nz/,0,0,23,0,0,false
+Ministry of Health,Gambling Data Explorer,https://minhealthnz.shinyapps.io/national-gambling-study-data-explorer/,0,0,1,0,0,false
+Ministry of Health,Health and Disability Ethics Committees,https://ethics.health.govt.nz/,0,0,75,0,0,false
+Ministry of Health,Mental Health and Problematic Substance Use Data Explorer,https://minhealthnz.shinyapps.io/nz-health-survey-2022-23-mental-health-data-explorer/,0,0,2,0,0,false
+Ministry of Health,Ministry of Health NZ,https://www.health.govt.nz/,0,8,300,0,0,false
+Ministry of Health,National Ethics Advisory Committee,https://neac.health.govt.nz/,0,0,92,0,0,false
+Ministry of Health,New Zealand Health Survey Annual Data Explorer,https://minhealthnz.shinyapps.io/nz-health-survey-2024-25-annual-data-explorer/,0,0,2,0,0,false
+Ministry of Health,Tātai,https://tatai.maori.nz/,0,-88,4,0,0,false
+Ministry of Health,Health Consultation Hub,https://consult.health.govt.nz/,1,0,300,4,4,false
+Ministry of Health,Medsafe,https://www.medsafe.govt.nz/,3,1,300,10,68,false
+Ministry of Health,Ministry of Health Jobs,https://health.wd105.myworkdayjobs.com/External,5,5,51,5,10,false
+Ministry of Health,Whakamaua: 2020-2025,https://minhealthnz.shinyapps.io/WhakamauaDashboard/,100,0,2,2,99,false
+Ministry of Justice,Chief Victims Advisor,https://chiefvictimsadvisor.justice.govt.nz/,0,0,19,0,0,false
+Ministry of Justice,Courts of New Zealand Hearings,https://hearings.courtsofnz.govt.nz/,0,0,10,0,0,false
+Ministry of Justice,Disputes Tribunal of New Zealand,https://www.disputestribunal.govt.nz/,0,0,25,0,0,false
+Ministry of Justice,eLibs Online,https://www2.justice.govt.nz/elibsonline/,0,0,21,0,0,false
+Ministry of Justice,Human Rights Monitor,https://humanrights.govt.nz/,0,0,1,0,0,false
+Ministry of Justice,Institute of Judicial Studies,https://tekura.courts.govt.nz/,0,0,7,0,0,false
+Ministry of Justice,Office of the Judicial Conduct Commissioner,https://jcc.govt.nz/,0,0,5,0,0,false
+Ministry of Justice,Victims Information,https://victimsinfo.govt.nz/,0,-27,44,0,0,false
+Ministry of Justice,Youth Court of New Zealand,https://www.youthcourt.govt.nz/home-2/,0,0,1,0,0,false
+Ministry of Justice,Ministry of Justice consultation hub,https://consultations.justice.govt.nz/,1,1,117,1,2,false
+Ministry of Justice,Māori Land Court,https://www.xn--morilandcourt-wqb.govt.nz/,1,0,261,2,4,false
+Ministry of Justice,The District Court of New Zealand,https://www.districtcourts.govt.nz/,3,0,300,8,44,false
+Ministry of Justice,Employment Court of New Zealand,https://www.employmentcourt.govt.nz/,4,1,85,4,7,false
+Ministry of Justice,Pacific Justice Sector Programme,https://pjsp.govt.nz/,4,3,158,6,22,false
+Ministry of Justice,Sexual Violence Victims Information,https://sexualviolence.victimsinfo.govt.nz/,4,-96,48,2,84,false
+Ministry of Justice,Environment Court of New Zealand,https://www.environmentcourt.govt.nz/,5,0,77,4,18,false
+Ministry of Justice,Public Defence Service,https://www.pds.govt.nz/,6,0,9,1,1,false
+Ministry of Justice,Coroners Court,https://coronerscourt.govt.nz/,7,0,90,9,17,false
+Ministry of Justice,Ministry of Justice,https://www.justice.govt.nz/,10,1,300,51,77,false
+Ministry of Justice,Courts of New Zealand,https://www.courtsofnz.govt.nz/,23,6,300,93,227,false
+Ministry of Justice,Waitangi Tribunal,https://www.waitangitribunal.govt.nz/,31,14,300,92,980,false
+Ministry of Justice,Ministry of Justice Careers Centre,https://apply.justice.govt.nz/,100,0,51,51,1313,false
+Ministry of Social Development,Application form to top up resolved claim - Abuse in Care Inquiry,https://form.abuseincaretopups.govt.nz/online_forms/top_up_resolved_claim_form/new,0,0,1,0,0,false
+Ministry of Social Development,Digital Suite,https://digitalsuite.co.nz/,0,0,4,0,0,false
+Ministry of Social Development,Money Management payment card suppliers,https://www.moneymanagementsuppliers.workandincome.govt.nz/,0,0,1,0,0,false
+Ministry of Social Development,MSD Annual Report 2020/21,https://annualreport2021.msd.govt.nz/,0,0,78,0,0,false
+Ministry of Social Development,StudyLink for Providers,https://providers.studylink.govt.nz/,0,0,84,0,0,false
+Ministry of Social Development,Te Hao Rangahau,https://www.tehaorangahau.msd.govt.nz/,0,0,300,1,2,false
+Ministry of Social Development,Work and Income Supplier Registration Form,https://services.workandincome.govt.nz/ua/supplier_registration,0,0,2,0,0,false
+Ministry of Social Development,Youth Service,https://www.youthservice.govt.nz/,0,0,38,0,0,false
+Ministry of Social Development,Family Services Directory,https://www.familyservices.govt.nz/directory/,1,0,300,3,8,false
+Ministry of Social Development,Pasefika Proud,https://www.pasefikaproud.co.nz/,1,1,162,1,2,false
+Ministry of Social Development,StudyLink,https://www.studylink.govt.nz/,1,1,283,2,6,false
+Ministry of Social Development,Work and Income,https://www.workandincome.govt.nz/,1,-2,300,4,10,false
+Ministry of Social Development,Youth Service providers,https://providers.youthservice.govt.nz/,1,-3,151,1,2,false
+Ministry of Social Development,Office for Seniors,https://www.officeforseniors.govt.nz/,2,-1,141,5,13,false
+Ministry of Social Development,Disability Support Services,https://www.disabilitysupport.govt.nz/,3,-3,286,8,16,false
+Ministry of Social Development,Change is Possible,https://www.changeispossible.org.nz/,4,4,27,1,44,false
+Ministry of Social Development,Heartland Services,https://www.heartlandservices.govt.nz/,4,0,47,2,4,false
+Ministry of Social Development,Ministry of Youth Development,https://www.myd.govt.nz/,6,6,234,22,37,false
+Ministry of Social Development,What's new - Work and Income,https://www.workandincome.govt.nz/map/index.html,6,0,300,19,36,false
+Ministry of Social Development,MSD API Developer Portal,https://api.msd.govt.nz/,8,-4,13,1,2,false
+Ministry of Social Development,Love Better,https://www.lovebetter.org.nz/,9,-1,169,15,30,false
+Ministry of Social Development,Te Kāhui Kāhu,https://www.xn--tekhuikhu-7bbe.govt.nz/,10,2,26,3,9,false
+Ministry of Social Development,MyMSD,https://my.msd.govt.nz/,13,0,8,1,16,false
+Ministry of Social Development,Check what you might get,https://check.msd.govt.nz/,14,0,7,1,2,false
+Ministry of Social Development,Are You OK,https://www.areyouok.org.nz/,17,-43,300,52,260,false
+Ministry of Social Development,Te heke mai,https://tehekemai.co.nz/,17,17,3,1,2,false
+Ministry of Social Development,Top-up payments for Abuse in Care,https://www.abuseincaretopups.govt.nz/,17,0,6,1,2,false
+Ministry of Social Development,Service Finder,https://sft.org.nz/,29,0,7,2,16,false
+Ministry of Social Development,Digital Passport,https://www.digitalpassport.co.nz/,35,0,13,9,9,false
+Ministry of Social Development,Connect with StudyLink,https://www.connect.co.nz/,38,18,4,2,7,false
+Ministry of Social Development,Ministry of Social Development,https://www.msd.govt.nz/,40,0,300,122,247,false
+Ministry of Social Development,E Tū Whānau,https://etuwhanau.org.nz/,53,-14,300,299,1894,false
+Ministry of Social Development,Business Online Services,https://businessonlineservices.msd.govt.nz/bos/MSDProviderLogon.jsp,100,0,1,1,2,false
+Ministry of Social Development,Employment Assistance Evidence Catalogue,https://ea.analytics.msd.govt.nz/,100,100,1,1,2,false
+Ministry of Social Development,FinCap,https://fincap.org.nz/,100,100,249,249,3837,false
+Ministry of Social Development,MSD Jobs,https://jobs.msd.govt.nz/,100,0,300,300,1248,false
+Ministry of Social Development,MyStudyLink - mobile,https://my.studylink.govt.nz/mystudylink/logon_mobile.html,100,0,1,1,2,false
+Ministry of Social Development,MyStudyLink Help,https://my.studylink.govt.nz/my/studylink/help/general-info.html,100,0,13,13,52,false
+Ministry of Social Development,Safe to talk,https://www.safetotalk.nz/,100,0,22,22,515,false
+Ministry of Social Development,StudyLink Online Services,https://my.studylink.govt.nz/mystudylink/logon.html,100,0,1,1,6,false
+Ministry of Social Development,SuperGold,https://www.supergold.govt.nz/,100,0,300,299,2058,false
+National Emergency Management Agency,Easy Read - Get Ready,https://er.getready.govt.nz/,0,0,35,0,0,false
+National Emergency Management Agency,Español - Get Ready,https://es.getready.govt.nz/,0,0,60,0,0,false
+National Emergency Management Agency,Gagana Samoa - Get Ready,https://sm.getready.govt.nz/,0,0,129,0,0,false
+National Emergency Management Agency,Get Ready,https://getready.govt.nz/,0,-1,133,0,0,false
+National Emergency Management Agency,NZSL - Get Ready,https://nzsl.getready.govt.nz/,0,0,45,0,0,false
+National Emergency Management Agency,Peesi Tefitó - Get Ready,https://to.getready.govt.nz/,0,1,123,0,0,false
+National Emergency Management Agency,Tagalog - Get Ready,https://tl.getready.govt.nz/,0,0,72,0,0,false
+National Emergency Management Agency,Te reo Māori - Get Ready,https://mi.getready.govt.nz/,0,0,65,0,0,false
+National Emergency Management Agency,Te Reo Māori Kūki ‘Āirani - Get Ready,https://ci.getready.govt.nz/,0,0,60,0,0,false
+National Emergency Management Agency,Vagahau Niue - Get Ready,https://nu.getready.govt.nz/,0,0,60,0,0,false
+National Emergency Management Agency,عربي - Get Ready,https://ar.getready.govt.nz/,0,0,60,0,0,false
+National Emergency Management Agency,हिन्दी - Get Ready,https://hi.getready.govt.nz/,0,0,300,0,0,false
+National Emergency Management Agency,ਪੰਜਾਬੀ - Get Ready,https://pa.getready.govt.nz/,0,0,60,0,0,false
+National Emergency Management Agency,日本語 - Get Ready,https://ja.getready.govt.nz/,0,0,60,0,0,false
+National Emergency Management Agency,简体中文 - Get Ready,https://zh-hans.getready.govt.nz/,0,0,67,0,0,false
+National Emergency Management Agency,繁體中文 - Get Ready,https://zh-hant.getready.govt.nz/,0,0,60,0,0,false
+National Emergency Management Agency,National Emergency Management Agency,https://www.civildefence.govt.nz/,3,0,300,8,34,false
+National Emergency Management Agency,takatū (CDEM LMS),https://takatu.civildefence.govt.nz/,100,0,2,2,4,false
+Natural Hazards Commission,Natural Hazards Portal,https://www.naturalhazardsportal.govt.nz/,0,0,26,0,0,false
+Natural Hazards Commission,NHC Toka Tū Ake,https://www.naturalhazards.govt.nz/,5,0,300,27,51,false
+New Zealand Customs Service,Trade Single Window,https://www.tsw.govt.nz/external/application/login/app.html,0,0,1,0,0,false
+New Zealand Customs Service,New Zealand Customs Service,https://www.customs.govt.nz/,52,-2,300,300,1538,false
+New Zealand Customs Service,Careers at New Zealand Customs Service,https://careers.customs.govt.nz/home,100,0,33,33,110,false
+New Zealand Defence Force,Force 4 Families,https://www.nzdf.mil.nz/force4families/,3,3,203,7,145,false
+New Zealand Defence Force,Veterans' Affairs,https://www.veteransaffairs.mil.nz/,17,-3,300,69,280,false
+New Zealand Defence Force,New Zealand Defence Force,https://www.nzdf.mil.nz/nzdf/,37,-63,110,68,249,false
+New Zealand Defence Force,Defence Careers,https://www.defencecareers.mil.nz/,98,2,300,295,2715,false
+New Zealand Defence Force,Air Force Museum of New Zealand,https://airforcemuseum.co.nz/,100,1,300,300,3264,false
+New Zealand Defence Force,Defence Health Hub,https://health.nzdf.mil.nz/,100,0,300,300,3181,false
+New Zealand Defence Force,National Army Museum,https://www.armymuseum.co.nz/,100,0,174,174,5784,false
+New Zealand Defence Force,New Zealand Cadet Forces,https://cadetforces.org.nz/,100,0,19,19,152,false
+New Zealand Defence Force,Torpedo Bay Navy Museum,https://navymuseum.co.nz/,100,0,300,300,8889,false
+New Zealand Defence Force,New Zealand Cadet Forces Intranet,https://www.cadetnet.org.nz/,Not scanned,N/A,0,N/A,N/A,true
+New Zealand Police,New Cops,https://www.newcops.govt.nz/,15,14,74,22,22,false
+New Zealand Police,New Zealand Police,https://www.police.govt.nz/,88,21,4,4,9,false
+New Zealand Security Intelligence Service,New Zealand Security Intelligence Service,https://www.nzsis.govt.nz/,0,0,187,0,0,false
+New Zealand Security Intelligence Service,Protective Security Requirements,https://www.protectivesecurity.govt.nz/,0,0,65,0,0,false
+New Zealand Security Intelligence Service,Reporting a national security concern,https://providinginformation.nzsis.govt.nz/,100,0,1,1,2,false
+Oranga Tamariki,Children's Day,https://www.childrensday.org.nz/,0,0,4,0,0,false
+Oranga Tamariki,High and Complex Needs,https://www.hcn.govt.nz/,0,0,6,0,0,false
+Oranga Tamariki,Oranga Tamariki System Action Plan,https://www.orangatamarikiactionplan.govt.nz/,0,0,26,0,0,false
+Oranga Tamariki,Strengthening Families,https://www.strengtheningfamilies.govt.nz/,0,-3,17,0,0,false
+Oranga Tamariki,We need Youth Workers,https://youthwork.orangatamariki.govt.nz/,0,0,1,0,0,false
+Oranga Tamariki,Careers at Oranga Tamariki,https://mahi.orangatamariki.govt.nz/home,1,-38,194,2,20,false
+Oranga Tamariki,Practice Centre,https://practice.orangatamariki.govt.nz/,2,2,300,6,24,false
+Oranga Tamariki,Oranga Tamariki,https://www.orangatamariki.govt.nz/,6,-2,300,19,168,false
+Parliamentary Counsel Office,New Zealand Legislation,https://www.legislation.govt.nz/,0,-20,3,0,0,false
+Parliamentary Counsel Office,NZ Legislation Disclosures,https://disclosure.legislation.govt.nz/,15,-3,300,46,110,false
+Parliamentary Counsel Office,Parliamentary Counsel Office,https://www.pco.govt.nz/,55,26,300,176,3747,false
+Parliamentary Counsel Office,The Legislation Design and Advisory Committee,https://www.ldac.org.nz/,Not scanned,N/A,0,N/A,N/A,true
+Public Service Commission,Crown response to the Abuse in Care Inquiry,https://www.abuseinquiryresponse.govt.nz/,0,0,137,0,0,false
+Public Service Commission,Govt.nz - New Zealand Government,https://www.govt.nz/,0,0,300,1,2,false
+Public Service Commission,NZ Digital government,https://www.digital.govt.nz/,0,-1,300,1,2,false
+Public Service Commission,State Redress New Zealand,https://www.redress.govt.nz/,0,0,10,0,0,false
+Public Service Commission,Web Accessibility Guide,https://govtnz.github.io/web-a11y-guidance/,0,0,149,0,0,false
+Public Service Commission,Public Service Commission,https://www.publicservice.govt.nz/,1,-1,300,5,13,false
+Public Service Commission,Leadership Development Centre,https://www.ldc.govt.nz/,2,1,300,5,52,false
+Public Service Commission,NZ Government Jobs,https://jobs.govt.nz/,4,-7,300,13,30,false
+Public Service Commission,Data.govt.nz,https://data.govt.nz/,8,-6,300,24,141,false
+Public Service Commission,Public Service Fale,https://www.publicservicefale.govt.nz/,11,11,28,3,6,false
+Public Service Commission,DISTF-reference-architecture,https://github.com/nz-trust-framework/DISTF-reference-architecture,36,36,300,110,623,false
+Public Service Commission,Marketplace,https://www.marketplace.govt.nz/,51,-47,108,106,162,false
+Public Service Commission,Datasets - Data.govt.nz,https://catalogue.data.govt.nz/dataset,100,0,300,300,10185,false
+Public Service Commission,Gazette,https://gazette.govt.nz/,100,0,300,300,5741,false
+Public Service Commission,Government Women's Network,https://gwn.govt.nz/,100,1,300,299,1440,false
+Public Service Commission,DocRef Alpha,https://docref.digital.govt.nz/,Not scanned,N/A,0,N/A,N/A,true
+Serious Fraud Office,Serious Fraud Office,https://www.sfo.govt.nz/,7,0,235,16,34,false
+Social Investment Agency,The Hub,https://thehub.sia.govt.nz/,0,-12,300,0,0,false
+Social Investment Agency,Social Investment Agency,https://www.sia.govt.nz/,1,0,300,2,4,false
+Stats NZ,Place and ethnic group summaries,https://tools.summaries.stats.govt.nz/,0,-1,209,0,0,false
+Stats NZ,Stats NZ,https://www.stats.govt.nz,9,-5,300,28,104,false
+Stats NZ,DataInfo+,https://datainfoplus.stats.govt.nz/,31,0,300,94,1959,false
+Stats NZ,Aotearoa Data Explorer,https://explore.data.stats.govt.nz/,50,-50,1,1,1,false
+Stats NZ,Infoshare,https://infoshare.stats.govt.nz,92,-8,13,12,274,false
+Stats NZ,API Portal,https://portal.apis.stats.govt.nz/,100,0,9,9,36,false
+Stats NZ,Ariā,https://aria.stats.govt.nz/aria/,100,0,1,1,4,false
+Stats NZ,Ariā Coding Service,https://aria.stats.govt.nz/aria-coding/search,100,0,1,1,8,false
+Te Puni Kōkiri,Te Kāhui Māngai,https://www.tkm.govt.nz/,0,0,1,0,0,false
+Te Puni Kōkiri,Te Puni Kōkiri,https://www.tpk.govt.nz/mi,0,0,1,0,0,false
+Te Puni Kōkiri,Tupu.nz,https://www.tupu.nz/,0,-46,300,1,2,false
+Te Puni Kōkiri,Te Haeata,https://tehaeata.govt.nz/nau-mai-haere-mai-ki-te-haeata?destination=/kia-ora,6,0,9,1,1,false
+Te Tari Whakatau,Te Kete Kōrero a Te Takutai Moana Information Hub,https://storymaps.arcgis.com/stories/03a5d8c628b9439bbdcbef3e7974c3d6,0,0,3,0,0,false
+Te Tari Whakatau,Te Tari Whakatau,https://whakatau.govt.nz/,3,-73,223,6,12,false
+Te Tari Whakatau,Office of Treaty Settlements and Takutai Moana,https://maca-nds.maps.arcgis.com/home/index.html,100,0,1,1,2,false
+The Treasury,Board Appointments,https://www.boardappointments.co.nz/,0,0,17,0,0,false
+The Treasury,Budget 2025,https://budget.govt.nz/,3,2,224,7,17,false
+The Treasury,Central Agencies Jobs,https://centralagenciesjobs.cass.govt.nz/home,8,-55,40,3,30,false
+The Treasury,The Treasury,https://www.treasury.govt.nz/,63,-3,300,300,1207,false
+The Treasury,New Zealand Export Credit Office,https://exportcredit.treasury.govt.nz/,81,0,300,300,2906,false
+The Treasury,Living Standards Framework,https://lsfdashboard.treasury.govt.nz/wellbeing/,100,0,1,1,58,false
+The Treasury,New Zealand Debt Management,https://debtmanagement.treasury.govt.nz/,100,0,300,300,2798,false
+Whaikaha,NZSL Board,https://www.nzsl.govt.nz/,1,-1,275,4,28,false
+Whaikaha,Whaikaha,https://www.whaikaha.govt.nz/,1,0,300,3,8,false
+Whaikaha,Support My Decisions,https://www.supportmydecisions.nz/,2,2,26,1,1,false

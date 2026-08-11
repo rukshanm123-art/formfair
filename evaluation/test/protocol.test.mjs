@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { drawOrder, drawKey, toCsv, sha256 } from '../src/draw-order.mjs';
+import { drawOrder, drawKey, toCsv, sha256, firstField } from '../src/draw-order.mjs';
 import { verifySeal, hashFile } from '../src/seal.mjs';
 
 const AGENCIES = [
@@ -65,6 +65,34 @@ describe('draw order (protocol section 2)', () => {
   test('quotes agency names containing a comma', () => {
     const csv = toCsv(drawOrder(['Ministry of Health, Manatū Hauora'], FRAME_SHA), FRAME_SHA);
     assert.match(csv, /"Ministry of Health, Manatū Hauora"/);
+  });
+});
+
+describe('reading agency names back out of frame.csv', () => {
+  test('keeps a quoted name containing commas intact', () => {
+    // Splitting on the first comma truncated this to "Ministry of Business", which
+    // changed its draw key and so its position in the frozen order.
+    const line = '"Ministry of Business, Innovation and Employment",MBIE,https://mbie.govt.nz/,90';
+    assert.equal(firstField(line), 'Ministry of Business, Innovation and Employment');
+  });
+
+  test('reads an unquoted name', () => {
+    assert.equal(firstField('Stats NZ,Stats NZ,https://stats.govt.nz/,100'), 'Stats NZ');
+  });
+
+  test('unescapes a doubled quote inside a quoted name', () => {
+    assert.equal(firstField('"The ""Agency""",x,y'), 'The "Agency"');
+  });
+
+  test('round-trips every name through toCsv and back', () => {
+    const names = ['Stats NZ', 'Ministry of Business, Innovation and Employment', 'Te Puni Kōkiri'];
+    const csv = toCsv(drawOrder(names, FRAME_SHA), FRAME_SHA);
+    const read = csv
+      .split('\n')
+      .filter((l) => l.trim() && !l.startsWith('#'))
+      .slice(1)
+      .map((l) => firstField(l.slice(l.indexOf(',') + 1)));
+    assert.deepEqual(new Set(read), new Set(names));
   });
 });
 

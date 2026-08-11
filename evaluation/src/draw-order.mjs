@@ -31,6 +31,27 @@ export function drawOrder(agencies, frameSha256, tag = DRAW_TAG) {
     .map((row, index) => ({ position: index + 1, ...row }));
 }
 
+/**
+ * Reads the first field of a CSV line, honouring quoting.
+ *
+ * Splitting on the first comma silently truncates any agency whose name contains one —
+ * "Ministry of Business, Innovation and Employment" becomes "Ministry of Business" —
+ * and since the draw key is computed from the exact name, that would corrupt the frozen
+ * order without any visible error.
+ */
+export function firstField(line) {
+  if (line[0] !== '"') return (line.split(',')[0] ?? '').trim();
+  let out = '';
+  for (let i = 1; i < line.length; i++) {
+    if (line[i] === '"') {
+      if (line[i + 1] === '"') { out += '"'; i++; continue; }
+      break;
+    }
+    out += line[i];
+  }
+  return out.trim();
+}
+
 export function toCsv(rows, frameSha256, tag = DRAW_TAG) {
   const header = [
     `# FormFair Held-Out Evaluation Protocol v1.0, section 2`,

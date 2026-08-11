@@ -2,7 +2,7 @@
 /** Reads frame.csv, writes draw-order.csv, prints both hashes. Protocol section 2. */
 
 import { readFileSync, writeFileSync } from 'node:fs';
-import { drawOrder, toCsv, sha256 } from './draw-order.mjs';
+import { drawOrder, toCsv, sha256, firstField } from './draw-order.mjs';
 
 const [framePath = 'data/frame.csv', outPath = 'data/draw-order.csv'] = process.argv.slice(2);
 
@@ -13,7 +13,7 @@ const rows = frameText
   .split('\n')
   .filter((line) => line.trim() && !line.startsWith('#'))
   .slice(1)
-  .map((line) => line.split(',')[0].replace(/^"|"$/g, '').trim())
+  .map(firstField)
   .filter(Boolean);
 
 if (rows.length === 0) {
