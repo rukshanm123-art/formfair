@@ -1,4 +1,5 @@
 import type { AnalysisResult, Severity } from '../types.js';
+import type { MergedResult } from '../delegated/merge.js';
 import { sortFindings, summarise } from './summary.js';
 
 const LABEL: Readonly<Record<Severity, string>> = {
@@ -7,8 +8,8 @@ const LABEL: Readonly<Record<Severity, string>> = {
   medium: 'MEDIUM  ',
 };
 
-function pct(n: number): string {
-  return `${Math.round(n * 100)}%`;
+function pct(n: number | null): string {
+  return n === null ? 'n/a' : `${Math.round(n * 100)}%`;
 }
 
 /**
@@ -44,6 +45,7 @@ export function toText(result: AnalysisResult): string {
     out.push(`  ${f.message}`);
     out.push(`  Evidence:    ${f.evidence}`);
     out.push(`  Remediation: ${f.remediation}`);
+    out.push(`  Basis:       ${f.basis}`);
     if (f.source.snippet) out.push(`  Source:      ${f.source.snippet}`);
     out.push('');
   }
@@ -57,10 +59,40 @@ export function toText(result: AnalysisResult): string {
   if (result.declined.length > 0) {
     out.push('');
     out.push('Declined — not analysed, which is not the same as clean:');
-    const reasons = new Map<string, number>();
-    for (const d of result.declined) reasons.set(d.reason, (reasons.get(d.reason) ?? 0) + 1);
-    for (const [reason, n] of reasons) out.push(`  ${n} x ${reason}`);
+    const reasons = new Map<string, number[]>();
+    for (const d of result.declined) {
+      const lines = reasons.get(d.reason) ?? [];
+      lines.push(d.source.line);
+      reasons.set(d.reason, lines);
+    }
+    for (const [reason, lines] of reasons) {
+      const where = [...new Set(lines)].sort((a, b) => a - b).join(', ');
+      out.push(`  ${lines.length} x ${reason} (line${lines.length === 1 ? '' : 's'} ${where})`);
+    }
   }
 
+  return out.join('\n');
+}
+
+/**
+ * Appends the delegated engine's findings under their own heading. They are kept
+ * visually separate and labelled with the engine and version, so a reader is never
+ * left thinking FormFair detected something another tool did.
+ */
+export function toTextWithDelegated(result: MergedResult): string {
+  const out = [toText(result)];
+  const d = result.delegated;
+  if (d.findings.length === 0) return out.join('\n');
+
+  out.push('');
+  out.push(`Delegated accessibility findings (${d.engine} ${d.engineVersion})`);
+  out.push('Reported for completeness. Not part of the FormFair rule catalogue and');
+  out.push('excluded from its accuracy figures.');
+  out.push('');
+  for (const f of d.findings) {
+    out.push(`  ${f.ruleId}  ${f.target}`);
+    out.push(`    ${f.message}`);
+    if (f.evidence) out.push(`    Evidence: ${f.evidence}`);
+  }
   return out.join('\n');
 }

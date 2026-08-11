@@ -63,6 +63,7 @@ export function toHtml(result: AnalysisResult): string {
   <dl>
     <dt>Evidence</dt><dd>${escapeHtml(f.evidence)}</dd>
     <dt>Remediation</dt><dd>${escapeHtml(f.remediation)}</dd>
+    <dt>Basis</dt><dd>${escapeHtml(f.basis)}</dd>
   </dl>
   ${f.source.snippet ? `<pre>${escapeHtml(f.source.snippet)}</pre>` : ''}
 </div>`
@@ -72,7 +73,8 @@ export function toHtml(result: AnalysisResult): string {
   const coverage = s.byRule
     .map(
       (r) =>
-        `<tr><td><code>${r.rule}</code></td><td>${Math.round(r.decisionCoverage * 100)}%</td>` +
+        `<tr><td><code>${r.rule}</code></td>` +
+        `<td>${r.decisionCoverage === null ? 'n/a' : `${Math.round(r.decisionCoverage * 100)}%`}</td>` +
         `<td>${r.findings}</td><td>${r.declined || ''}</td></tr>`
     )
     .join('\n');

@@ -10,27 +10,64 @@ export const LOCALES = ['mi', 'sm', 'to', 'en', 'fr', 'de', 'es', 'pl', 'cs', 't
 
 export const MACRONS = ['ā', 'ē', 'ī', 'ō', 'ū', 'Ā', 'Ē', 'Ī', 'Ō', 'Ū'] as const;
 
-/** Precomposed letters outside Basic Latin, one per declared locale where applicable. */
-export const DIACRITIC_NAMES: readonly { name: string; locale: string }[] = [
-  { name: 'Tāwhiao', locale: 'mi' },
-  { name: 'Ngātā', locale: 'mi' },
-  { name: 'Faʻasamoa', locale: 'sm' },
-  { name: 'Émile', locale: 'fr' },
-  { name: 'Müller', locale: 'de' },
-  { name: 'Núñez', locale: 'es' },
-  { name: 'Łukasz', locale: 'pl' },
-  { name: 'Dvořák', locale: 'cs' },
-  { name: 'Gültekin', locale: 'tr' },
-  { name: 'Nguyễn', locale: 'vi' },
+/**
+ * The character a code-point label names, derived from the label itself so that the
+ * two cannot disagree.
+ */
+const fromLabel = (label: string): string =>
+  String.fromCodePoint(Number.parseInt(label.slice(2), 16));
+
+/** The letters in a name that fall outside U+0041-U+005A and U+0061-U+007A. */
+const outsideBasicLatinLetters = (name: string): readonly string[] => [
+  ...new Set([...name].filter((ch) => /\p{L}/u.test(ch) && !/[A-Za-z]/.test(ch))),
 ];
 
-/** Names whose validity depends on punctuation the ASCII letter range excludes. */
-export const PUNCTUATED_NAMES: readonly { name: string; character: string; codePoint: string }[] = [
+interface DiacriticName {
+  readonly name: string;
+  readonly locale: string;
+  /** The characters that decide whether the name is admitted, derived from the name. */
+  readonly characters: readonly string[];
+}
+
+const DIACRITIC_SOURCES: readonly { name: string; locale: string }[] = [
+  { name: 'T\u0101whiao', locale: 'mi' },
+  { name: 'Ng\u0101t\u0101', locale: 'mi' },
+  { name: 'Fa\u02bbasamoa', locale: 'sm' },
+  { name: '\u00c9mile', locale: 'fr' },
+  { name: 'M\u00fcller', locale: 'de' },
+  { name: 'N\u00fa\u00f1ez', locale: 'es' },
+  { name: '\u0141ukasz', locale: 'pl' },
+  { name: 'Dvo\u0159\u00e1k', locale: 'cs' },
+  { name: 'G\u00fcltekin', locale: 'tr' },
+  { name: 'Nguy\u1ec5n', locale: 'vi' },
+];
+
+/** Precomposed letters outside Basic Latin, one per declared locale where applicable. */
+export const DIACRITIC_NAMES: readonly DiacriticName[] = DIACRITIC_SOURCES.map((d) => ({
+  ...d,
+  characters: outsideBasicLatinLetters(d.name),
+}));
+
+interface PunctuatedName {
+  readonly name: string;
+  readonly character: string;
+  readonly codePoint: string;
+  /** The character itself, derived from its code-point label. */
+  readonly char: string;
+}
+
+const PUNCTUATION_SOURCES: readonly { name: string; character: string; codePoint: string }[] = [
   { name: "O'Brien", character: 'apostrophe', codePoint: 'U+0027' },
-  { name: 'O’Brien', character: 'right single quotation mark', codePoint: 'U+2019' },
+  { name: 'O\u2019Brien', character: 'right single quotation mark', codePoint: 'U+2019' },
   { name: 'Anne-Marie', character: 'hyphen-minus', codePoint: 'U+002D' },
   { name: 'van der Berg', character: 'space', codePoint: 'U+0020' },
 ];
+
+/** Names whose validity depends on punctuation the ASCII letter range excludes. */
+export const PUNCTUATED_NAMES: readonly PunctuatedName[] = PUNCTUATION_SOURCES.map((p) => ({
+  ...p,
+  char: fromLabel(p.codePoint),
+}));
 
 /** Single-letter given names, which a minimum length above one excludes. */
 export const SHORT_NAMES = ['O', 'X'] as const;

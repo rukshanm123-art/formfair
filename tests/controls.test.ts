@@ -40,6 +40,42 @@ describe('name-control identification', () => {
     expect(control?.source.snippet).toContain('pattern="[A-Za-z]+"');
   });
 
+  it('reads the label a control is associated with by id', () => {
+    // The attributes name the widget; only the label carries the human-facing word.
+    const html = '<label for="fn">First name</label><input id="fn" name="fn">';
+    expect(findNameControls(html)).toHaveLength(1);
+  });
+
+  it('reads an enclosing label', () => {
+    expect(findNameControls('<label>First name <input name="fn"></label>')).toHaveLength(1);
+  });
+
+  it('reads a label referenced by aria-labelledby', () => {
+    const html = '<span id="l1">Given name</span><input aria-labelledby="l1" name="gn">';
+    expect(findNameControls(html)).toHaveLength(1);
+  });
+
+  it('weighs evidence rather than letting one negative signal veto the rest', () => {
+    // "user-name" describes the widget; "firstName" describes the datum. Treating any
+    // negative match as decisive lost this control, and so lost its anti-patterns.
+    const html = '<input id="user-name-field" name="firstName" pattern="[A-Za-z]+">';
+    expect(findNameControls(html)).toHaveLength(1);
+  });
+
+  it('still rejects a control the author declared to hold something else', () => {
+    expect(findNameControls('<input autocomplete="email" name="firstName">')).toHaveLength(0);
+  });
+
+  it('is not misled by a label that names a non-person', () => {
+    expect(findNameControls('<label for="c">Company name</label><input id="c" name="c">')).toHaveLength(0);
+  });
+
+  it('records the evidence behind each identification', () => {
+    const [control] = findNameControls('<input autocomplete="given-name">');
+    expect(control?.detection.score).toBeGreaterThanOrEqual(3);
+    expect(control?.detection.signals).toContain('+autocomplete');
+  });
+
   it('finds controls nested inside a form', () => {
     const html = '<form><fieldset><input autocomplete="name"><input name="email" type="email"></fieldset></form>';
     expect(findNameControls(html)).toHaveLength(1);

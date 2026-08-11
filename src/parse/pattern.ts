@@ -19,6 +19,8 @@ export interface CharSet {
 
 export interface Atom {
   readonly set: CharSet;
+  /** The atom's own regex source, without its quantifier, for membership testing. */
+  readonly source: string;
   readonly min: number;
   readonly max: number;
 }
@@ -160,11 +162,20 @@ function readClass(src: string, i: number): { set: CharSet; next: number } | nul
   return { set: { codePoints, ranges, properties, negated }, next: j + 1 };
 }
 
-function readQuantifier(src: string, i: number): { min: number; max: number; next: number } {
+type Quantifier = { min: number; max: number; next: number } | { invalid: string };
+
+/**
+ * A lazy or possessive suffix changes matching strategy, not the language matched,
+ * so it is consumed rather than read as a further atom. `[A-Za-z]+?` accepts the
+ * same strings as `[A-Za-z]+`.
+ */
+function readQuantifier(src: string, i: number): Quantifier {
+  const consumeLazy = (n: number): number => (src[n] === '?' || src[n] === '+' ? n + 1 : n);
+
   const c = src[i];
-  if (c === '*') return { min: 0, max: Infinity, next: i + 1 };
-  if (c === '+') return { min: 1, max: Infinity, next: i + 1 };
-  if (c === '?') return { min: 0, max: 1, next: i + 1 };
+  if (c === '*') return { min: 0, max: Infinity, next: consumeLazy(i + 1) };
+  if (c === '+') return { min: 1, max: Infinity, next: consumeLazy(i + 1) };
+  if (c === '?') return { min: 0, max: 1, next: consumeLazy(i + 1) };
   if (c === '{') {
     const close = src.indexOf('}', i);
     if (close !== -1) {
@@ -173,7 +184,8 @@ function readQuantifier(src: string, i: number): { min: number; max: number; nex
       if (m) {
         const min = Number(m[1]);
         const max = m[2] === undefined ? min : m[3] === '' || m[3] === undefined ? Infinity : Number(m[3]);
-        return { min, max, next: close + 1 };
+        if (max < min) return { invalid: 'quantifier maximum below its minimum' };
+        return { min, max, next: consumeLazy(close + 1) };
       }
     }
   }
@@ -191,6 +203,7 @@ export function analysePattern(pattern: string): PatternAnalysis {
 
   while (i < src.length) {
     let set: CharSet;
+    const atomStart = i;
 
     if (src[i] === '[') {
       const cls = readClass(src, i);
@@ -211,9 +224,11 @@ export function analysePattern(pattern: string): PatternAnalysis {
       i += String.fromCodePoint(cp).length;
     }
 
+    const source = src.slice(atomStart, i);
     const q = readQuantifier(src, i);
+    if ('invalid' in q) return { kind: 'undecidable', reason: q.invalid };
     i = q.next;
-    atoms.push({ set, min: q.min, max: q.max });
+    atoms.push({ set, source, min: q.min, max: q.max });
   }
 
   if (atoms.length === 0) return { kind: 'undecidable', reason: 'empty pattern' };
@@ -238,4 +253,103 @@ export function admits(set: CharSet, codePoint: number): boolean | null {
 /** True when every atom is enumerable, i.e. no atom rests on a Unicode property escape. */
 export function fullyEnumerable(atoms: readonly Atom[]): boolean {
   return atoms.every((a) => a.set.properties.length === 0);
+}
+
+/**
+ * Whether an atom admits a single character, decided by the regular-expression
+ * engine itself rather than by re-implementing class semantics. Returns null when
+ * the atom cannot be compiled under `v`, which the caller treats as undecidable.
+ *
+ * Length never enters this question: exactly one character is tested, so a
+ * quantifier on the atom cannot confound the answer.
+ */
+export function atomAdmits(atom: Atom, ch: string): boolean | null {
+  try {
+    return new RegExp(`^(?:${atom.source})$`, 'v').test(ch);
+  } catch {
+    return null;
+  }
+}
+
+/** Whether any atom in the pattern admits the character. Null if any atom is undecidable. */
+export function patternAdmits(atoms: readonly Atom[], ch: string): boolean | null {
+  let unknown = false;
+  for (const atom of atoms) {
+    const r = atomAdmits(atom, ch);
+    if (r === null) unknown = true;
+    else if (r) return true;
+  }
+  return unknown ? null : false;
+}
+
+const BASIC_LATIN_LETTERS: readonly (readonly [number, number])[] = [
+  [0x41, 0x5a],
+  [0x61, 0x7a],
+];
+
+function withinBasicLatinLetters(cp: number): boolean {
+  return BASIC_LATIN_LETTERS.some(([lo, hi]) => cp >= lo && cp <= hi);
+}
+
+/** Letters standing in for the writing systems the catalogue claims coverage of. */
+const OUTSIDE_PROBES = ['\u0101', '\u00e9', '\u00fc', '\u0142', '\u1ec5', '\u02bb'] as const;
+
+/** Enumeration budget. A class wider than this is declined rather than walked. */
+const MAX_ENUMERATION = 20_000;
+
+const isLetter = (cp: number): boolean => /\p{L}/u.test(String.fromCodePoint(cp));
+
+export interface LetterProfile {
+  /** The pattern admits at least one letter in U+0041-U+005A or U+0061-U+007A. */
+  readonly basicLatin: boolean;
+  /** The pattern admits at least one letter outside that range. */
+  readonly outsideBasicLatin: boolean;
+}
+
+/**
+ * Which letters a pattern admits, derived from the parsed character sets rather than
+ * from whether whole example names match. Length cannot confound the answer, because
+ * no name is ever tested: each character is considered on its own.
+ *
+ * Enumerable sets are walked exactly. A set resting on a property escape is put to
+ * the regular-expression engine one character at a time, which can establish that a
+ * letter outside Basic Latin is admitted but never that none is; where that cannot be
+ * established the result is null and the caller declines.
+ */
+export function letterProfile(atoms: readonly Atom[]): LetterProfile | null {
+  let basicLatin = false;
+  let outsideBasicLatin = false;
+  let unknown = false;
+  let budget = MAX_ENUMERATION;
+
+  for (const atom of atoms) {
+    const { set } = atom;
+
+    if (set.negated || set.properties.length > 0) {
+      if (OUTSIDE_PROBES.some((ch) => atomAdmits(atom, ch) === true)) outsideBasicLatin = true;
+      else unknown = true;
+      if (atomAdmits(atom, 'a') === true) basicLatin = true;
+      continue;
+    }
+
+    const visit = (cp: number): void => {
+      if (withinBasicLatinLetters(cp)) basicLatin = true;
+      else if (isLetter(cp)) outsideBasicLatin = true;
+    };
+
+    for (const cp of set.codePoints) {
+      if (budget-- <= 0) return null;
+      visit(cp);
+    }
+    for (const [lo, hi] of set.ranges) {
+      if (hi - lo + 1 > budget) return null;
+      budget -= hi - lo + 1;
+      for (let cp = lo; cp <= hi; cp++) visit(cp);
+    }
+  }
+
+  // An admitted outside letter is decisive on its own: the remaining uncertainty
+  // could only add further admitted characters, never withdraw this one.
+  if (outsideBasicLatin) return { basicLatin, outsideBasicLatin: true };
+  return unknown ? null : { basicLatin, outsideBasicLatin: false };
 }

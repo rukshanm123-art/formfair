@@ -8,9 +8,9 @@ import { toHtml, escapeHtml } from '../src/report/html.js';
 const OFFENDING = '<form><input name="firstName" pattern="[A-Za-z]{2,40}"></form>';
 // Letters only: accepts precomposed names but rejects their decomposed forms, since a
 // combining mark is \p{M} rather than \p{L}. FF-03 is expected to fire.
-const LETTERS_ONLY = '<form><input name="firstName" pattern="[\\p{L}\\u0027\\u2019 -]+"></form>';
+const LETTERS_ONLY = '<form><input name="firstName" pattern="[\\p{L}\\u0027\\u2019 \\x2D]+"></form>';
 // Letters and combining marks: accepts both normalisation forms.
-const CLEAN = '<form><input name="firstName" pattern="[\\p{L}\\p{M}\\u0027\\u2019 -]+"></form>';
+const CLEAN = '<form><input name="firstName" pattern="[\\p{L}\\p{M}\\u0027\\u2019 \\x2D]+"></form>';
 const NO_CONTROLS = '<form><input type="email" name="email"></form>';
 const DECLINED = '<form><input name="firstName" pattern="[A-Za-z]+|[0-9]+"></form>';
 

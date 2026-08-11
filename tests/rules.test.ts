@@ -24,7 +24,7 @@ describe('FF-01 Basic Latin only', () => {
   });
 
   it('does not fire on a Unicode-aware class', () => {
-    expect(rulesFired(input('pattern="[\\p{L}\\u0027 -]+"'))).not.toContain('FF-01');
+    expect(rulesFired(input('pattern="[\\p{L}\\u0027 \\x2D]+"'))).not.toContain('FF-01');
   });
 
   it('does not fire when no pattern is declared', () => {
@@ -54,11 +54,11 @@ describe('FF-04 rejects name punctuation', () => {
   });
 
   it('does not fire when punctuation is admitted', () => {
-    expect(rulesFired(input('pattern="[\\p{L}\\u0027\\u2019 -]+"'))).not.toContain('FF-04');
+    expect(rulesFired(input('pattern="[\\p{L}\\u0027\\u2019 \\x2D]+"'))).not.toContain('FF-04');
   });
 
   it('is independent of FF-02 — a class may reject diacritics yet admit punctuation', () => {
-    const fired = rulesFired(input('pattern="[A-Za-zÀ-ÿ\\u0027\\u2019 -]+"'));
+    const fired = rulesFired(input('pattern="[A-Za-zÀ-ÿ\\u0027\\u2019 \\x2D]+"'));
     expect(fired).toContain('FF-02');
     expect(fired).not.toContain('FF-04');
   });

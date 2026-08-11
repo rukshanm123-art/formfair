@@ -5,7 +5,11 @@ export interface RuleSummary {
   readonly rule: RuleId;
   readonly findings: number;
   readonly declined: number;
-  readonly decisionCoverage: number;
+  /**
+   * Null where the rule had nothing to decide, which is not the same as a rule that
+   * decided everything put to it.
+   */
+  readonly decisionCoverage: number | null;
 }
 
 export interface Summary {
@@ -63,11 +67,14 @@ export function summarise(result: AnalysisResult): Summary {
  * decision rather than declining. Reported alongside accuracy so that silence is
  * never read as a clean result.
  */
-export function decisionCoverage(result: AnalysisResult): Record<RuleId, number> {
-  const coverage = {} as Record<RuleId, number>;
+export function decisionCoverage(result: AnalysisResult): Record<RuleId, number | null> {
+  const coverage = {} as Record<RuleId, number | null>;
   for (const rule of RULES) {
     const declines = result.declined.filter((d) => d.rule === rule.id).length;
-    coverage[rule.id] = result.controls === 0 ? 1 : (result.controls - declines) / result.controls;
+    // With no controls there is no coverage to report. Returning 1 here would put a
+    // rule that was never exercised alongside one that decided every case.
+    coverage[rule.id] =
+      result.controls === 0 ? null : (result.controls - declines) / result.controls;
   }
   return coverage;
 }
