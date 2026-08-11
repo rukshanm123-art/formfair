@@ -1,0 +1,21 @@
+{
+  "adjudicator": "synthetic-adjudicator",
+  "instrument": "evaluation-v1.0.0",
+  "decisions": [
+    {
+      "pageId": "synthetic-001",
+      "controlId": "synthetic-001#12:4",
+      "rule": "FF-02",
+      "decision": "negative",
+      "reason": "FF-01 fires, so FF-02 is contributing evidence rather than a finding",
+      "catalogueClause": "FF-02 Interaction: subsumed by FF-01"
+    },
+    {
+      "pageId": "synthetic-001",
+      "controlId": "synthetic-001#28:4",
+      "decision": "negative",
+      "reason": "a site search box is not a personal-name control",
+      "catalogueClause": "section 7 stage one, excluded: search boxes"
+    }
+  ]
+}

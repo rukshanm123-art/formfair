@@ -1,0 +1,27 @@
+{
+  "instrument": "evaluation-v1.0.0",
+  "captures": [
+    {
+      "agency": "Synthetic Agency",
+      "website": "Synthetic Site",
+      "originalUrl": "https://example.invalid/contact",
+      "finalUrl": "https://example.invalid/contact/",
+      "status": "captured",
+      "category": "enquiry-or-contact",
+      "capturedAt": "2026-08-20T01:02:03Z",
+      "browser": "Chromium 128.0",
+      "automationTool": "synthetic-harness 1.0.0",
+      "viewport": { "width": 1280, "height": 800 },
+      "locale": "en-NZ",
+      "redirects": ["https://example.invalid/contact"],
+      "htmlSha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    {
+      "agency": "Synthetic Agency Two",
+      "website": "Synthetic Site Two",
+      "originalUrl": "https://example.invalid/login",
+      "status": "excluded",
+      "exclusionReason": "every form requires signing in"
+    }
+  ]
+}

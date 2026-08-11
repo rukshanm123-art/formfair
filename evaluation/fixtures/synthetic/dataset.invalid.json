@@ -1,0 +1,11 @@
+{
+  "instrument": "main",
+  "pages": [
+    {
+      "pageId": "synthetic-bad",
+      "controls": [
+        { "controlId": "synthetic-bad#1:1", "isNameControl": true, "rules": { "FF-01": "positive" } }
+      ]
+    }
+  ]
+}

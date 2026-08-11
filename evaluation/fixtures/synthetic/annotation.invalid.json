@@ -1,0 +1,25 @@
+{
+  "annotator": "synthetic-annotator-b",
+  "instrument": "evaluation-v1.0.0",
+  "pages": [
+    {
+      "pageId": "synthetic-001",
+      "controls": [
+        {
+          "controlId": "synthetic-001#12:4",
+          "inputType": "email",
+          "stageOne": { "label": "declined", "reason": "not sure", "evidence": "<input>" },
+          "rules": {
+            "FF-01": { "label": "positive", "reason": "", "evidence": "x" }
+          }
+        },
+        {
+          "controlId": "synthetic-001#28:4",
+          "inputType": "text",
+          "stageOne": { "label": "negative", "reason": "search box", "evidence": "<input>" },
+          "rules": { "FF-01": { "label": "negative", "reason": "r", "evidence": "e" } }
+        }
+      ]
+    }
+  ]
+}

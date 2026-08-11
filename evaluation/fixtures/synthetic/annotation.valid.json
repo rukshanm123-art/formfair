@@ -1,0 +1,28 @@
+{
+  "annotator": "synthetic-annotator-a",
+  "instrument": "evaluation-v1.0.0",
+  "pages": [
+    {
+      "pageId": "synthetic-001",
+      "controls": [
+        {
+          "controlId": "synthetic-001#12:4",
+          "inputType": "text",
+          "stageOne": { "label": "positive", "reason": "labelled First name", "evidence": "<input name=\"firstName\">" },
+          "rules": {
+            "FF-01": { "label": "positive", "reason": "class is A-Za-z only", "evidence": "pattern=\"[A-Za-z]+\"" },
+            "FF-02": { "label": "negative", "reason": "subsumed by FF-01", "evidence": "pattern=\"[A-Za-z]+\"" },
+            "FF-03": { "label": "negative", "reason": "no fixture pair separated", "evidence": "no maxlength" },
+            "FF-04": { "label": "positive", "reason": "no apostrophe admitted", "evidence": "pattern=\"[A-Za-z]+\"" },
+            "FF-05": { "label": "positive", "reason": "minlength above one", "evidence": "minlength=\"2\"" }
+          }
+        },
+        {
+          "controlId": "synthetic-001#28:4",
+          "inputType": "search",
+          "stageOne": { "label": "negative", "reason": "site search box", "evidence": "<input type=\"search\" name=\"q\">" }
+        }
+      ]
+    }
+  ]
+}
