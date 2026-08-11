@@ -89,7 +89,7 @@ const BASIC_LATIN_ONLY: Rule = {
       'critical',
       control,
       'This field declares a constraint that rejects names outside the Basic Latin (ASCII) range.',
-      `pattern="${control.pattern}" admits letters in U+0041–U+005A and U+0061–U+007A and no letter outside that range.`,
+      `pattern="${control.pattern}" admits letters in U+0041-U+005A and U+0061-U+007A and no letter outside that range.`,
       'Draw the permitted characters from the CLDR exemplar sets for the languages the form serves, or use a Unicode-aware class such as \\p{L} with the punctuation names require.'
     );
   },
@@ -224,7 +224,7 @@ const NORMALISATION_ASYMMETRY: Rule = {
 const REJECTS_PUNCTUATION: Rule = {
   id: 'FF-04',
   severity: 'high',
-  basis: 'UTS #35 Part 8; names such as O’Brien, Anne-Marie and van der Berg require these characters.',
+  basis: "UTS #35 Part 8; names such as O'Brien, Anne-Marie and van der Berg require these characters.",
   evaluate(control) {
     const g = gate(control);
     if (isOutcome(g)) return g;
@@ -237,7 +237,7 @@ const REJECTS_PUNCTUATION: Rule = {
     if (missing.length === 0) return clean;
 
     const rejected = PUNCTUATED_NAMES.filter((p) => missing.includes(p.char));
-    const sample = rejected.map((p) => `${p.character} ${p.codePoint} — "${p.name}"`).join('; ');
+    const sample = rejected.map((p) => `${p.character} ${p.codePoint} - "${p.name}"`).join('; ');
     return finding(
       'FF-04',
       'high',

@@ -7,7 +7,7 @@ import type { Advisory, NameControl } from '../types.js';
  * when the declared constraints demonstrably treat a supported real-name fixture
  * differently; an advisory fires when a constraint makes such treatment constructible
  * without any fixture witnessing it. Folding the second into the first would change
- * what the accuracy figures measure — a precision denominator counting how many
+ * what the accuracy figures measure - a precision denominator counting how many
  * controls declare `maxlength` is not a measure of cultural exclusion.
  */
 export interface AdvisoryCheck {
@@ -18,7 +18,7 @@ export interface AdvisoryCheck {
 /**
  * `maxlength` counts UTF-16 code units (HTML Standard, via Infra's definition of string
  * length). Decomposing a name can add a combining mark, so for any finite maximum M at
- * least one value exists whose NFC form is M units and whose NFD form is M+1 — accepted
+ * least one value exists whose NFC form is M units and whose NFD form is M+1 - accepted
  * in one encoding and rejected in the other.
  *
  * This is valid for every M >= 1 and is therefore not evidence about a particular

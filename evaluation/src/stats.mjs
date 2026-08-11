@@ -53,7 +53,7 @@ export function wilson(successes, total, z = Z_95) {
  * label counts the protocol also requires.
  *
  * Returns not estimable when expected agreement is 1, which is what happens when both
- * annotators used a single category — the case the protocol names explicitly.
+ * annotators used a single category - the case the protocol names explicitly.
  */
 export function cohensKappa(a, b) {
   if (a.length !== b.length) throw new RangeError('rater vectors must be the same length');

@@ -12,7 +12,7 @@ which fixes all of them at once.
 
 | Element | Where it is recorded |
 |---|---|
-| Exact commit | the tag's target — `git rev-parse evaluation-v1.0.0^{}` |
+| Exact commit | the tag's target - `git rev-parse evaluation-v1.0.0^{}` |
 | Resolved dependency tree | `package-lock.json` at that commit; its SHA-256 is in the tag message |
 | Catalogue version | `CATALOGUE_VERSION` in `src/rules/index.ts`, and every report |
 | FormFair package version | `package.json`, and every report |

@@ -5,7 +5,7 @@
  * parse5 and axe-core. This entry adds the jsdom-backed accessibility provider, which
  * needs a DOM implementation the core package does not carry. jsdom is an optional peer
  * dependency: install it alongside FormFair to use this entry, and note that jsdom
- * requires a newer Node than the core package does — Node ^22.22.2, ^24.15.0 or >=26,
+ * requires a newer Node than the core package does - Node ^22.22.2, ^24.15.0 or >=26,
  * against the core package's Node 20.
  */
 

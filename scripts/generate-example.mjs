@@ -1,6 +1,6 @@
 /**
  * Regenerates examples/sample-report.html from the built package, so the committed
- * example cannot drift from what the analyser actually emits — and so generating it
+ * example cannot drift from what the analyser actually emits - and so generating it
  * exercises dist/ rather than the sources.
  */
 

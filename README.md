@@ -8,7 +8,7 @@ and robust; it does not check whether the field can hold the name of the person 
 it in. FormFair checks the second property.
 
 The analyser reads HTML, identifies personal-name controls, and reports constraints that
-exclude legitimate names — with the source evidence that triggered each finding, an
+exclude legitimate names - with the source evidence that triggered each finding, an
 explanation, and a concrete remediation. Analysis runs entirely client-side; markup is
 never transmitted.
 
@@ -23,14 +23,14 @@ deployed form ultimately accepts a given name.
 
 | ID | Constraint detected | Severity |
 |---|---|---|
-| FF-01 | Character class admits letters only from Basic Latin (U+0041–U+005A, U+0061–U+007A) | Critical |
+| FF-01 | Character class admits letters only from Basic Latin (U+0041-U+005A, U+0061-U+007A) | Critical |
 | FF-02 | Admits letters beyond Basic Latin but rejects precomposed diacritics | Critical |
 | FF-03 | Accept/reject outcomes differ for canonically equivalent NFC and NFD forms | High |
 | FF-04 | Excludes apostrophe, hyphen-minus or internal space | High |
 | FF-05 | Minimum accepted length exceeds one character | Medium |
 
 FF-01 subsumes FF-02: a class restricted to Basic Latin necessarily excludes every
-precomposed diacritic, so where FF-01 fires FF-02 adds nothing. FF-04 is independent —
+precomposed diacritic, so where FF-01 fires FF-02 adds nothing. FF-04 is independent -
 a pattern may reject diacritics while admitting punctuation, or the reverse.
 
 FF-01, FF-02 and FF-04 are decided from the character sets the pattern parses into,
@@ -54,7 +54,7 @@ The stronger claim is true but is not a finding. `maxlength` counts UTF-16 code 
 for any finite maximum M at least one value exists whose NFC form is M units and whose
 NFD form is M+1. Scoring that would change FF-03 from *this control demonstrably treats a
 supported real-name fixture differently under NFC and NFD* to *some constructible string
-could cross this boundary* — a different research construct, noisy at large limits, and
+could cross this boundary* - a different research construct, noisy at large limits, and
 one whose precision denominator would largely measure the presence of `maxlength`. It is
 reported instead as the unscored advisory `ADV-NORM-BOUNDARY`.
 
@@ -73,7 +73,7 @@ Whether a control is labelled and named is delegated to axe-core rather than
 reimplemented: `label`, `form-field-multiple-labels`, `autocomplete-valid`,
 `aria-input-field-name` and `select-name`. Error-message association is not among them
 and is not checked. Delegated findings are reported under their own heading, labelled
-with the engine and version, and excluded from FormFair's accuracy figures — they are
+with the engine and version, and excluded from FormFair's accuracy figures - they are
 another tool's results, not this catalogue's.
 
 ## Identifying name controls
@@ -82,8 +82,8 @@ Before any rule runs, a control has to be recognised as holding a personal name.
 are weighed and summed against a threshold rather than allowed to veto one another: an
 `autocomplete` token, the `name` and `id` attributes, the associated label text, the
 placeholder and `aria-label`, and the class list each contribute, positively or
-negatively. Label text is read from all three ways markup associates one — an enclosing
-`<label>`, a `<label for>` elsewhere in the document, and `aria-labelledby` — because
+negatively. Label text is read from all three ways markup associates one - an enclosing
+`<label>`, a `<label for>` elsewhere in the document, and `aria-labelledby` - because
 where the attributes name the widget, the label is often the only place the human-facing
 word appears.
 
@@ -98,8 +98,8 @@ and matches the entire value, so patterns are treated as fully anchored; a redun
 leading `^` or trailing `$` is stripped before analysis.
 
 Reasoning about arbitrary patterns is not attempted. The supported subset is a top-level
-concatenation of atoms — a literal, an enumerated character class, a Unicode property
-escape, or a predefined class — each optionally quantified. Alternation, groups carrying
+concatenation of atoms - a literal, an enumerated character class, a Unicode property
+escape, or a predefined class - each optionally quantified. Alternation, groups carrying
 quantifiers, lookaround, backreferences and `v`-flag set operations are **declined**:
 no finding is emitted, and the decline is recorded so decision coverage can be reported
 alongside accuracy. Silence and a clean result are different outcomes.
@@ -127,8 +127,8 @@ npm run test:delegated  # 13 tests; needs jsdom's Node floor, see below
 ```
 
 The delegated suite runs axe-core inside jsdom, whose bundled undici calls a Node
-internal that Node 20 does not provide. It needs jsdom's own floor —
-`^22.22.2 || ^24.15.0 || >=26` — which constrains the test harness only; the analyser
+internal that Node 20 does not provide. It needs jsdom's own floor -
+`^22.22.2 || ^24.15.0 || >=26` - which constrains the test harness only; the analyser
 itself runs on Node 20. CI verifies the package on both versions and runs the delegated
 suite on 22.
 
@@ -154,7 +154,7 @@ exercises both entry points as a consumer would. CI runs it on Node 20 and 22.
 ## Reproducing a result
 
 Every JSON report carries an `instrument` block naming the catalogue version, the
-package version, the parse5 and axe-core versions, and the runtime — because a catalogue
+package version, the parse5 and axe-core versions, and the runtime - because a catalogue
 version alone does not reproduce a result. Held-out analysis is run from the
 `evaluation-v1.0.0` tag, which fixes the commit, the locked dependency tree and all of
 the above together. See [docs/evaluation/README.md](docs/evaluation/README.md).
@@ -192,7 +192,7 @@ cannot drift from what the analyser emits.
 The Unicode-aware pattern a careful developer reaches for is not sufficient on its own:
 
 ```
-pattern="[\p{L}\u0027 \x2D]+"        FF-03 — accepts "Tāwhiao" but rejects its decomposed form
+pattern="[\p{L}\u0027 \x2D]+"        FF-03 - accepts "Tāwhiao" but rejects its decomposed form
 pattern="[\p{L}\p{M}\u0027 \x2D]+"   clean
 ```
 

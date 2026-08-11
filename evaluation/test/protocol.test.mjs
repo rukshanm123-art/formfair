@@ -34,7 +34,7 @@ describe('draw order (protocol section 2)', () => {
     assert.notDeepEqual(a, b);
   });
 
-  test('is not alphabetical — that is the whole point', () => {
+  test('is not alphabetical - that is the whole point', () => {
     const drawn = drawOrder(AGENCIES, FRAME_SHA).map((r) => r.agency);
     assert.notDeepEqual(drawn, [...AGENCIES].sort());
   });

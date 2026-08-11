@@ -34,8 +34,8 @@ export function drawOrder(agencies, frameSha256, tag = DRAW_TAG) {
 /**
  * Reads the first field of a CSV line, honouring quoting.
  *
- * Splitting on the first comma silently truncates any agency whose name contains one —
- * "Ministry of Business, Innovation and Employment" becomes "Ministry of Business" —
+ * Splitting on the first comma silently truncates any agency whose name contains one -
+ * "Ministry of Business, Innovation and Employment" becomes "Ministry of Business" -
  * and since the draw key is computed from the exact name, that would corrupt the frozen
  * order without any visible error.
  */

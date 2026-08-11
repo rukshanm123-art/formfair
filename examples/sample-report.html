@@ -50,7 +50,7 @@ h2 { font-size: .95rem; margin: 2.5rem 0 .3rem; }
   </div>
   <p class="msg">This field declares a constraint that rejects names outside the Basic Latin (ASCII) range.</p>
   <dl>
-    <dt>Evidence</dt><dd>pattern=&quot;[A-Za-z]{2,40}&quot; admits letters in U+0041–U+005A and U+0061–U+007A and no letter outside that range.</dd>
+    <dt>Evidence</dt><dd>pattern=&quot;[A-Za-z]{2,40}&quot; admits letters in U+0041-U+005A and U+0061-U+007A and no letter outside that range.</dd>
     <dt>Remediation</dt><dd>Draw the permitted characters from the CLDR exemplar sets for the languages the form serves, or use a Unicode-aware class such as \p{L} with the punctuation names require.</dd>
     <dt>Basis</dt><dd>UTS #35 Part 8 advises drawing permitted characters from CLDR exemplar sets rather than restricting to ASCII.</dd>
   </dl>
@@ -64,9 +64,9 @@ h2 { font-size: .95rem; margin: 2.5rem 0 .3rem; }
   </div>
   <p class="msg">Legitimate name punctuation is rejected.</p>
   <dl>
-    <dt>Evidence</dt><dd>No position in pattern=&quot;[A-Za-z]{2,40}&quot; admits: apostrophe U+0027 — &quot;O'Brien&quot;; right single quotation mark U+2019 — &quot;O’Brien&quot;; hyphen-minus U+002D — &quot;Anne-Marie&quot;; space U+0020 — &quot;van der Berg&quot;.</dd>
+    <dt>Evidence</dt><dd>No position in pattern=&quot;[A-Za-z]{2,40}&quot; admits: apostrophe U+0027 - &quot;O'Brien&quot;; right single quotation mark U+2019 - &quot;O’Brien&quot;; hyphen-minus U+002D - &quot;Anne-Marie&quot;; space U+0020 - &quot;van der Berg&quot;.</dd>
     <dt>Remediation</dt><dd>Admit apostrophes, hyphens and internal spaces. Escaping on output is the defence against injection; input restriction is not.</dd>
-    <dt>Basis</dt><dd>UTS #35 Part 8; names such as O’Brien, Anne-Marie and van der Berg require these characters.</dd>
+    <dt>Basis</dt><dd>UTS #35 Part 8; names such as O'Brien, Anne-Marie and van der Berg require these characters.</dd>
   </dl>
   <pre>&lt;input id=&quot;fn&quot; name=&quot;firstName&quot; pattern=&quot;[A-Za-z]{2,40}&quot; minlength=&quot;2&quot; maxlength=&quot;40&quot;&gt;</pre>
 </div>

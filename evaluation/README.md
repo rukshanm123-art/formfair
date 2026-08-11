@@ -20,21 +20,21 @@ npm run seal:verify      # protocol section 10 gate
 | Path | |
 |---|---|
 | `src/stats.mjs` | Wilson intervals, Cohen's kappa, seeded cluster bootstrap |
-| `src/draw-order.mjs` | protocol section 2 — deterministic agency ordering |
-| `src/metrics.mjs` | protocol section 9 — stage one, stage two, end to end |
-| `src/seal.mjs` | protocol section 10 — the gate that must pass before FormFair runs |
+| `src/draw-order.mjs` | protocol section 2 - deterministic agency ordering |
+| `src/metrics.mjs` | protocol section 9 - stage one, stage two, end to end |
+| `src/seal.mjs` | protocol section 10 - the gate that must pass before FormFair runs |
 | `src/schema.mjs` | shapes of the ground-truth, capture and adjudication records |
-| `fixtures/synthetic/` | development material — never a captured page |
+| `fixtures/synthetic/` | development material - never a captured page |
 | `data/` | **git-ignored.** Captured markup and annotation files live here |
 
 ## Order of operations
 
 1. Capture the frame, build `frame.csv`, hash it.
-2. `npm run draw-order` — before visiting any form.
+2. `npm run draw-order` - before visiting any form.
 3. Capture forms in that order, one page per agency.
 4. Annotate, independently. Lock and hash each annotator's file.
 5. Compute kappa, adjudicate, lock the adjudication file.
-6. `npm run seal:verify` — must pass.
+6. `npm run seal:verify` - must pass.
 7. Only then run FormFair, once, at `evaluation-v1.0.0`.
 8. `npm run metrics`.
 

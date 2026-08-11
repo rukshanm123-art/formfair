@@ -130,7 +130,7 @@ describe('analysed markup is never executed', () => {
       expect(w['__formfairScriptRan']).toBeUndefined();
       expect(w['__formfairHandlerRan']).toBeUndefined();
       expect(w['__formfairInlineRan']).toBeUndefined();
-      // The script element is present in the tree — parsed, but inert.
+      // The script element is present in the tree - parsed, but inert.
       expect(dom.window.document.querySelectorAll('script')).toHaveLength(1);
     } finally {
       dom.window.close();

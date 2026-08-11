@@ -1,6 +1,6 @@
 # Rule catalogue
 
-**Version 1.0.0 — frozen.** Tagged `catalogue-v1.0.0`.
+**Version 1.0.0 - frozen.** Tagged `catalogue-v1.0.0`.
 
 The catalogue is versioned independently of the tool because rule changes alter
 reported results. Every report records the catalogue version that produced it, so
@@ -9,7 +9,7 @@ evaluation partition is analysed; any revision after that point is reported sepa
 and labelled post hoc.
 
 > **Erratum, 11 August 2026.** This document continued to describe the catalogue as
-> "Version 0.1.0 — unfrozen" after the freeze, and stated the FF-01, FF-02 and FF-04
+> "Version 0.1.0 - unfrozen" after the freeze, and stated the FF-01, FF-02 and FF-04
 > triggers in terms of an earlier implementation that decided them by testing whole
 > example names. It also omitted the frozen FF-03 wording and the advisory. The
 > descriptions below are the corrected record. No rule behaviour changed in this
@@ -24,8 +24,8 @@ the compiled pattern.
 The distinction is not cosmetic. `pattern="[A-Za-z]{1,3}"` rejects every name in the
 fixture set, but rejects them for their length; reading that as a statement about
 characters attributes the wrong defect to the field. Conversely
-`pattern="[\p{L}\p{M}'’ \x2D]{1,5}"` rejects the fixture names too, while
-excluding no character any of them needs.
+`pattern="[\p{L}\p{M}\u0027\u2019 \x2D]{1,5}"` rejects the fixture names too,
+while excluding no character any of them needs.
 
 The fixture set therefore **illustrates** a finding and supplies its evidence. It does
 not determine whether the finding fires.
@@ -38,10 +38,10 @@ no fallback to `u` or to no flag: an expression that only compiles under looser
 semantics is not a valid HTML `pattern`, and analysing it would describe something no
 browser runs. Such a control is declined, and the decline is recorded.
 
-## FF-01 — Basic Latin only
+## FF-01 - Basic Latin only
 
 **Trigger.** A decidable pattern on an identified name control that admits at least one
-letter in U+0041–U+005A or U+0061–U+007A and no letter outside that range, established
+letter in U+0041-U+005A or U+0061-U+007A and no letter outside that range, established
 by enumerating the parsed character sets.
 
 **Basis.** UTS #35 Part 8 advises drawing permitted characters from the CLDR exemplar
@@ -61,10 +61,10 @@ rather than reported clean.
 **Verification.** Enumeration of the parsed sets, with the fixture set supplying the
 evidence string. Mutation injection into known-clean forms.
 
-## FF-02 — Rejects diacritics
+## FF-02 - Rejects diacritics
 
 **Trigger.** A decidable pattern admitting letters beyond Basic Latin, where at least
-one precomposed diacritic character required by a fixture name — such as U+0101 — is
+one precomposed diacritic character required by a fixture name - such as U+0101 - is
 admitted at no position in the pattern.
 
 **Basis.** UTS #35 Part 8. Diacritics are ordinary letters in te reo Māori and many
@@ -74,7 +74,7 @@ produces a different word rather than a variant spelling.
 **Interaction.** Subsumed by FF-01. Where FF-01 fires this rule adds no information and
 is listed as contributing evidence rather than emitted separately.
 
-## FF-03 — Normalisation asymmetry
+## FF-03 - Normalisation asymmetry
 
 **Trigger.** FF-03 fires when the complete set of statically observable constraints
 yields different accept/reject outcomes for at least one canonically equivalent pair in
@@ -88,11 +88,11 @@ involved.
 **Bound.** A clean result means no asymmetry was witnessed within that fixture set. It
 does **not** prove that arbitrary input is normalisation-safe.
 
-**Why the rule is not generalised.** `maxlength` counts UTF-16 code units — HTML
-Standard, via the Infra Standard's definition of string length — so for any finite
+**Why the rule is not generalised.** `maxlength` counts UTF-16 code units - HTML
+Standard, via the Infra Standard's definition of string length - so for any finite
 maximum M at least one value exists whose NFC form is M units and whose NFD form is
-M+1. The general claim is therefore true for every M ≥ 1. It is deliberately not scored,
-because doing so would change the rule from
+M+1. The general claim is therefore true for every M of 1 or more. It is deliberately
+not scored, because doing so would change the rule from
 
 > this control demonstrably treats a supported real-name fixture differently under NFC
 > and NFD
@@ -109,19 +109,19 @@ reported instead as the advisory below.
 **Basis.** UAX #15; UTS #35 Part 8 recommends normalising before validation, typically
 to NFC.
 
-## FF-04 — Rejects name punctuation
+## FF-04 - Rejects name punctuation
 
 **Trigger.** A decidable pattern admitting, at no position, at least one of apostrophe
 (U+0027), right single quotation mark (U+2019), hyphen-minus (U+002D) or space
 (U+0020), established by per-character membership.
 
-**Basis.** UTS #35 Part 8. Names such as O’Brien, Anne-Marie and van der Berg require
+**Basis.** UTS #35 Part 8. Names such as O'Brien, Anne-Marie and van der Berg require
 these characters.
 
 **Interaction.** Independent, never subsumed. A pattern may reject diacritics while
 admitting punctuation, or the reverse.
 
-## FF-05 — Minimum length above one
+## FF-05 - Minimum length above one
 
 **Trigger.** An explicit `minlength` greater than one, or a decidable pattern whose
 minimum accepted length, computed across the complete expression, exceeds one.
@@ -135,19 +135,19 @@ control is declined. A lazy or possessive quantifier is read as the language it 
 so `[A-Za-z]+?` has a minimum of one; a repetition whose maximum is below its minimum is
 declined rather than measured.
 
-## Advisories — reported, never scored
+## Advisories - reported, never scored
 
 An advisory records a constraint that *could* exclude a name without any fixture
 witnessing that it does. Advisories appear in every output format, are marked
 `scored: false` in JSON, are excluded from precision and recall by construction, and
 their prevalence is reported separately from rule accuracy.
 
-### ADV-NORM-BOUNDARY — potential normalisation boundary
+### ADV-NORM-BOUNDARY - potential normalisation boundary
 
 **Trigger.** A finite `maxlength` of 1 or more.
 
-**Statement.** A finite `maxlength` ≥ 1 can distinguish some canonically equivalent NFC
-and NFD inputs unless normalisation occurs before validation.
+**Statement.** A finite `maxlength` of 1 or more can distinguish some canonically
+equivalent NFC and NFD inputs unless normalisation occurs before validation.
 
 **Exclusion.** `maxlength="0"` raises no advisory. It rejects every non-empty name in
 both encodings, so it separates no canonically equivalent pair.
@@ -157,8 +157,8 @@ FF-03 note above for why this is an advisory rather than a finding.
 
 ## Fixture universe
 
-Characters are drawn from the CLDR exemplar sets for the declared locale list —
-mi, sm, to, en, fr, de, es, pl, cs, tr, vi — supplemented by an explicit macron set for
+Characters are drawn from the CLDR exemplar sets for the declared locale list -
+mi, sm, to, en, fr, de, es, pl, cs, tr, vi - supplemented by an explicit macron set for
 te reo Māori. The list is versioned with this catalogue. Detection is claimed only for
 characters within it.
 

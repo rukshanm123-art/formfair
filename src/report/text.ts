@@ -58,7 +58,7 @@ export function toText(result: AnalysisResult): string {
 
   if (result.advisories.length > 0) {
     out.push('');
-    out.push('Advisory — reported, not scored, and excluded from accuracy figures:');
+    out.push('Advisory - reported, not scored, and excluded from accuracy figures:');
     const seen = new Map<string, number[]>();
     for (const a of result.advisories) {
       seen.set(a.message, [...(seen.get(a.message) ?? []), a.source.line]);
@@ -70,7 +70,7 @@ export function toText(result: AnalysisResult): string {
 
   if (result.declined.length > 0) {
     out.push('');
-    out.push('Declined — not analysed, which is not the same as clean:');
+    out.push('Declined - not analysed, which is not the same as clean:');
     const reasons = new Map<string, number[]>();
     for (const d of result.declined) {
       const lines = reasons.get(d.reason) ?? [];

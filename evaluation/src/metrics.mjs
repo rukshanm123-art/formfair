@@ -4,11 +4,11 @@
  * Three different questions are asked of the same run, and they have different
  * denominators. Keeping them apart is the point:
  *
- *   Stage one   — of the controls a human called personal-name controls, how many did
+ *   Stage one   - of the controls a human called personal-name controls, how many did
  *                 FormFair find? Denominator: every supported text/search input.
- *   Stage two   — where FormFair found the control and reached a decision, was the
+ *   Stage two   - where FormFair found the control and reached a decision, was the
  *                 decision right? Denominator: decided pairs on detected controls.
- *   End to end  — what does a user actually get? Denominator: every ground-truth
+ *   End to end  - what does a user actually get? Denominator: every ground-truth
  *                 rule-control pair, including those on controls FormFair never saw.
  *
  * Stage two flatters the tool, because it conditions on the tool having succeeded
@@ -35,7 +35,7 @@ function score(counts, clusters, label) {
 }
 
 /**
- * Stage one, over every supported input in the ground truth — not merely the ones
+ * Stage one, over every supported input in the ground truth - not merely the ones
  * FormFair returned. Scoring only what the tool found would hide exactly the failure
  * this measures, which is why the protocol requires annotating all of them.
  */
@@ -65,8 +65,8 @@ export function stageOne(pages) {
 /**
  * Stage two for one rule, over decided pairs on controls FormFair detected.
  *
- * Declines are excluded from this denominator by construction — a decline is not a
- * wrong answer, it is the absence of one — and are reported as decision coverage.
+ * Declines are excluded from this denominator by construction - a decline is not a
+ * wrong answer, it is the absence of one - and are reported as decision coverage.
  */
 export function stageTwo(pages, rule) {
   const counts = emptyCounts();

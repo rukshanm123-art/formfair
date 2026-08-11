@@ -1,6 +1,6 @@
 # FormFair Held-Out Evaluation Protocol
 
-**Version 1.0 — frozen.** Tagged `protocol-v1.0.0`. Frozen before any government form was
+**Version 1.0 - frozen.** Tagged `protocol-v1.0.0`. Frozen before any government form was
 opened or captured.
 
 Instrument: [`evaluation-v1.0.0`](README.md). Catalogue: `catalogue-v1.0.0`.
@@ -23,7 +23,7 @@ Before sampling:
 Source: <https://www.digital.govt.nz/standards-and-guidance/nz-government-web-standards/centralised-web-accessibility-checker-cwac/website-scores-cwac>
 
 The population is described as **"websites of government agencies participating in the
-CWAC programme"** — not all New Zealand websites, and not all government forms.
+CWAC programme"** - not all New Zealand websites, and not all government forms.
 
 **Expected shortfall.** The CWAC agency leaderboard lists approximately 47 participating
 agencies, so 40 eligible forms may not be reachable. That is accepted in advance. Attempt
@@ -31,7 +31,7 @@ all agencies in the frozen order and report the achieved sample honestly. The fr
 **not** widened afterwards to reach 40.
 
 > **Observation, 11 August 2026, recorded when the frame was captured.** The Website
-> scores page — the frame named above — carries **45** agencies, not 47. The page renders
+> scores page - the frame named above - carries **45** agencies, not 47. The page renders
 > 47 accordions, two of which are explanatory panels rather than agencies. The leaderboard
 > figure of 47 was descriptive context; the frame is the Website scores page, and it has
 > not been substituted or widened. The target of 40 therefore allows at most 5 agencies to
@@ -67,7 +67,7 @@ An eligible form must:
 - be reached from a website listed for that agency in the CWAC frame;
 - ask for the name of a natural person;
 - display the name field without entering personal information or submitting the form;
-- be normal HTML or a browser-rendered web application — not a PDF or native application.
+- be normal HTML or a browser-rendered web application - not a PDF or native application.
 
 A publicly reachable third-party form may be included only when it is directly linked or
 embedded by a monitored agency website. Record both the agency URL and the final form host.
@@ -85,9 +85,9 @@ the results.**
 
 ## 4. Partition boundary
 
-- **Development and annotator-training set** — the synthetic fixtures and mutation cases
+- **Development and annotator-training set** - the synthetic fixtures and mutation cases
   that existed when `evaluation-v1.0.0` was tagged.
-- **Held-out set** — every newly captured real CWAC form page.
+- **Held-out set** - every newly captured real CWAC form page.
 
 There is no natural-form development subset, because the instrument is already frozen.
 This is a pre-data clarification of the proposal's "development and held-out" wording.
@@ -99,7 +99,7 @@ adjudication are complete and sealed (section 10).
 ## 5. Capturing a page
 
 A new browser profile with no account, saved data or personal information. One fixed
-medium viewport of **1280 × 800**, matching CWAC's documented medium viewport.
+medium viewport of **1280 x 800**, matching CWAC's documented medium viewport.
 
 Record for every attempt:
 
@@ -136,8 +136,8 @@ scripts.
 Before the held-out corpus is opened, both primaries pass a **synthetic calibration
 exercise**:
 
-- at least 20 stage-one decisions — 10 personal-name and 10 non-name controls;
-- at least 20 decisions for each FF rule — 10 positive and 10 negative.
+- at least 20 stage-one decisions - 10 personal-name and 10 non-name controls;
+- at least 20 decisions for each FF rule - 10 positive and 10 negative.
 
 Required Cohen's kappa is **at least 0.70** for stage one and for each individual rule.
 Below 0.70 in any category: clarify the codebook and repeat with fresh synthetic cases.
@@ -152,7 +152,7 @@ Held-out pages are never used for training.
 
 ### Stage one
 
-Annotate **every** `<input>` whose `type` is missing, empty, `text` or `search` — the only
+Annotate **every** `<input>` whose `type` is missing, empty, `text` or `search` - the only
 controls FormFair's frozen stage one considers.
 
 A **positive** control collects a natural person's name, name component, nickname,
@@ -160,7 +160,7 @@ preferred name, or an HTML name component such as given name, family name or hon
 **Excluded**: usernames, organisation names, business names, product names, pet names,
 street names, search boxes, display names.
 
-Annotating only the controls FormFair detects is **prohibited** — it would hide stage-one
+Annotating only the controls FormFair detects is **prohibited** - it would hide stage-one
 false negatives.
 
 ### Stage two
