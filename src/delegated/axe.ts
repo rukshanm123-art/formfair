@@ -82,27 +82,52 @@ export async function runAxeOnDocument(
   };
 }
 
+interface AxeGlobal {
+  version: string;
+  run(context: unknown, options: unknown): Promise<AxeResults>;
+}
+
 /**
- * Node-side provider. jsdom is a development dependency, so it is imported
- * lazily: a browser build that supplies its own Document never loads it.
+ * Node-side provider. jsdom is a development dependency, so it is imported lazily:
+ * a browser build that supplies its own Document never loads it.
+ *
+ * axe-core is evaluated inside the jsdom window rather than imported into this one.
+ * The bundle binds `window` when it loads, so importing it here and then assigning
+ * globalThis.window gave it the wrong realm and axe.run rejected its own arguments.
+ * Loading it into the window it will inspect avoids the question.
+ *
+ * `runScripts: 'outside-only'` supplies the `eval` needed to do that while leaving any
+ * script carried by the analysed markup unexecuted — this tool reads other people's
+ * pages, and it must not run them.
  */
 export function axeProvider(rules: readonly string[] = DELEGATED_RULES): AccessibilityProvider {
   return {
     engine: 'axe-core',
     engineVersion: 'resolved at run time',
     async run(html: string): Promise<DelegatedResult> {
-      const { JSDOM } = await import('jsdom');
-      const dom = new JSDOM(`<!doctype html><html><body>${html}</body></html>`);
-      const g = globalThis as Record<string, unknown>;
-      const priorWindow = g['window'];
-      const priorDocument = g['document'];
-      g['window'] = dom.window;
-      g['document'] = dom.window.document;
+      const [{ JSDOM }, { createRequire }, { readFileSync }] = await Promise.all([
+        import('jsdom'),
+        import('node:module'),
+        import('node:fs'),
+      ]);
+      const source = readFileSync(createRequire(import.meta.url).resolve('axe-core'), 'utf8');
+
+      const dom = new JSDOM(`<!doctype html><html><body>${html}</body></html>`, {
+        runScripts: 'outside-only',
+      });
       try {
-        return await runAxeOnDocument(dom.window.document as unknown as Document, rules);
+        dom.window.eval(source);
+        const axe = (dom.window as unknown as { axe: AxeGlobal }).axe;
+        const results = await axe.run(dom.window.document.documentElement, {
+          runOnly: { type: 'rule', values: [...rules] },
+          resultTypes: ['violations'],
+        });
+        return {
+          engine: 'axe-core',
+          engineVersion: axe.version,
+          findings: toFindings(results, axe.version),
+        };
       } finally {
-        g['window'] = priorWindow;
-        g['document'] = priorDocument;
         dom.window.close();
       }
     },
