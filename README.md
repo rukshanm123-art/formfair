@@ -9,15 +9,15 @@ it in. FormFair checks the second property.
 
 The analyser reads HTML, identifies personal-name controls, and reports constraints that
 exclude legitimate names - with the source evidence that triggered each finding, an
-explanation, and a concrete remediation. Analysis runs entirely client-side; markup is
-never transmitted.
+explanation, and a concrete remediation. Analysis runs locally; markup is not transmitted.
 
 ## Scope
 
-FormFair reasons about what the markup *declares*. Server-side validation, framework
-logic and script-driven mutation are not observable from markup and are out of scope by
-construction. The tool reports statically observable constraints, never whether a
-deployed form ultimately accepts a given name.
+FormFair reasons about what the markup *declares*. Scripts run while a page loads, so DOM
+mutations present when the markup is captured are analysed. Server-side validation, framework
+logic and constraints introduced only after user interaction are not observable from captured
+markup and are out of scope by construction. The tool reports statically observable
+constraints, never whether a deployed form ultimately accepts a given name.
 
 ## Rules
 
