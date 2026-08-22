@@ -1,0 +1,474 @@
+<title>FormFair in Plain Words</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+
+<style>
+/* Single-theme by design: this page is always light, on any host theme.
+   Every colour is painted explicitly so nothing is inherited from the viewer. */
+:root{
+  color-scheme:light;
+  --paper:#EDF0F3; --card:#FFFFFF; --ink:#141B23; --body:#2B3540;
+  --muted:#5E6B78; --rule:#D2D9E0; --rule-soft:#E2E7EC; --numeral:#A0ACB8;
+  --accent:#8C2F39; --accent-soft:#F2E4E5;
+  --accept:#26685B; --accept-soft:#DFEDE9;
+  --shadow:0 1px 2px rgba(20,27,35,.05), 0 8px 24px -16px rgba(20,27,35,.28);
+}
+
+*{box-sizing:border-box}
+body{
+  background:var(--paper); color:var(--body);
+  font-family:"IBM Plex Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+  font-size:17px; line-height:1.65; margin:0;
+  -webkit-font-smoothing:antialiased;
+}
+/* ---------- layout: one column on phones, contents rail on wide screens ---------- */
+.layout{
+  display:grid; grid-template-columns:minmax(0,1fr);
+  max-width:46rem; margin:0 auto;
+  padding:clamp(2rem,6vw,4.5rem) clamp(1.1rem,5vw,2rem) 4.5rem;
+  gap:0;
+}
+.col{min-width:0;}
+.toc{display:none;}
+
+@media (min-width:1040px){
+  .layout{
+    grid-template-columns:13.5rem minmax(0,44rem);
+    column-gap:4.5rem; max-width:64rem;
+    padding-left:2rem; padding-right:2rem;
+  }
+  .toc{
+    display:block; position:sticky; top:3rem; align-self:start;
+    padding-top:.4rem; max-height:calc(100vh - 6rem); overflow-y:auto;
+  }
+  .toc-h{
+    font-family:"IBM Plex Mono",monospace; font-size:.66rem; font-weight:500;
+    letter-spacing:.16em; text-transform:uppercase; color:var(--muted);
+    margin:0 0 .9rem; padding-bottom:.6rem; border-bottom:1px solid var(--rule);
+  }
+  .toc ol{list-style:none; margin:0; padding:0; counter-reset:toc;}
+  .toc li{margin:0; counter-increment:toc;}
+  .toc a{
+    display:flex; gap:.55rem; padding:.3rem 0; font-size:.8rem; line-height:1.35;
+    color:var(--muted); text-decoration:none; border-left:2px solid transparent;
+    padding-left:.7rem; margin-left:-.7rem;
+  }
+  .toc a::before{
+    content:counter(toc,decimal-leading-zero);
+    font-family:"IBM Plex Mono",monospace; font-size:.66rem; color:var(--numeral);
+    flex:none; padding-top:.1rem;
+  }
+  .toc a:hover{color:var(--ink); border-left-color:var(--accent);}
+  .toc a:hover::before{color:var(--accent);}
+  .toc a:focus-visible{outline:2px solid var(--accent); outline-offset:2px;}
+}
+@media (min-width:1500px){
+  .layout{grid-template-columns:15rem minmax(0,46rem); column-gap:6rem; max-width:70rem;}
+  body{font-size:18px;}
+}
+html{scroll-behavior:smooth;}
+section{scroll-margin-top:2.5rem;}
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto;}}
+
+/* ---------- masthead ---------- */
+.eyebrow{
+  font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:.7rem; font-weight:500;
+  letter-spacing:.16em; text-transform:uppercase; color:var(--muted); margin:0 0 1.4rem;
+}
+h1{
+  font-family:Newsreader,Georgia,"Times New Roman",serif;
+  font-weight:500; font-size:clamp(2.6rem,7.5vw,4rem); line-height:1.02;
+  letter-spacing:-.02em; color:var(--ink); margin:0 0 1.2rem; text-wrap:balance;
+}
+h1 .mac{color:var(--accent); font-style:italic;}
+.standfirst{
+  font-family:Newsreader,Georgia,serif; font-size:clamp(1.2rem,2.6vw,1.4rem);
+  line-height:1.5; color:var(--body); margin:0 0 2.5rem; text-wrap:pretty;
+}
+.byline{
+  display:flex; flex-wrap:wrap; gap:.5rem 1.4rem; padding-top:1.4rem;
+  border-top:1px solid var(--rule); font-family:"IBM Plex Mono",monospace;
+  font-size:.72rem; letter-spacing:.05em; color:var(--muted);
+}
+
+/* ---------- sections ---------- */
+section{margin-top:3.4rem;}
+h2{
+  font-family:Newsreader,Georgia,serif; font-weight:500;
+  font-size:clamp(1.55rem,3.6vw,2rem); line-height:1.2; letter-spacing:-.015em;
+  color:var(--ink); margin:0 0 1.1rem; text-wrap:balance;
+}
+h3{
+  font-family:"IBM Plex Sans",sans-serif; font-weight:600; font-size:1rem;
+  color:var(--ink); margin:2rem 0 .6rem;
+}
+p{margin:0 0 1.15rem; text-wrap:pretty;}
+strong{color:var(--ink); font-weight:600;}
+em{font-style:italic;}
+a{color:var(--accent); text-decoration-thickness:1px; text-underline-offset:2px;}
+a:focus-visible{outline:2px solid var(--accent); outline-offset:3px; border-radius:2px;}
+ul{margin:0 0 1.15rem; padding-left:1.15rem;}
+li{margin-bottom:.5rem;}
+li::marker{color:var(--muted);}
+
+.lead-in{
+  font-family:Newsreader,Georgia,serif; font-size:1.28rem; line-height:1.5;
+  color:var(--ink); border-left:2px solid var(--accent);
+  padding:.15rem 0 .15rem 1.15rem; margin:0 0 1.6rem;
+}
+
+/* ---------- the form-field motif ---------- */
+.field{
+  background:var(--card); border:1px solid var(--rule); border-radius:5px;
+  padding:1.15rem 1.25rem 1.25rem; margin:0 0 1.4rem; box-shadow:var(--shadow);
+}
+.field-label{
+  font-size:.78rem; font-weight:600; color:var(--ink);
+  display:block; margin-bottom:.4rem;
+}
+.field-box{
+  border:1px solid var(--rule); border-radius:3px; background:var(--paper);
+  padding:.55rem .7rem; font-size:.95rem; color:var(--body);
+  font-family:"IBM Plex Sans",sans-serif;
+}
+.field-rule{
+  font-family:"IBM Plex Mono",monospace; font-size:.76rem; color:var(--muted);
+  margin-top:.6rem; overflow-x:auto; white-space:nowrap; padding-bottom:.15rem;
+}
+.verdicts{
+  list-style:none; margin:.9rem 0 0; padding:.9rem 0 0;
+  border-top:1px solid var(--rule-soft); display:flex; flex-direction:column; gap:.4rem;
+}
+.verdicts li{margin:0; display:flex; gap:.6rem; align-items:baseline; font-size:.9rem;}
+.tick{
+  font-family:"IBM Plex Mono",monospace; font-size:.68rem; font-weight:500;
+  letter-spacing:.06em; padding:.12rem .42rem; border-radius:3px; flex:none;
+  min-width:4.6rem; text-align:center;
+}
+.no{background:var(--accent-soft); color:var(--accent);}
+.yes{background:var(--accept-soft); color:var(--accept);}
+.nm{font-weight:500; color:var(--ink);}
+.why{color:var(--muted); font-size:.85rem;}
+
+/* ---------- callouts ---------- */
+.note{
+  background:var(--card); border:1px solid var(--rule); border-left:2px solid var(--accent);
+  border-radius:0 4px 4px 0; padding:1.05rem 1.25rem; margin:1.6rem 0;
+}
+.note p:last-child{margin-bottom:0;}
+.note-h{
+  font-family:"IBM Plex Mono",monospace; font-size:.68rem; font-weight:500;
+  letter-spacing:.14em; text-transform:uppercase; color:var(--accent);
+  display:block; margin-bottom:.5rem;
+}
+
+/* ---------- status list ---------- */
+.status{list-style:none; margin:0; padding:0; display:flex; flex-direction:column;}
+.status li{
+  display:flex; gap:.9rem; align-items:baseline; margin:0;
+  padding:.7rem 0; border-bottom:1px solid var(--rule-soft); font-size:.95rem;
+}
+.status li:first-child{border-top:1px solid var(--rule-soft);}
+.state{
+  font-family:"IBM Plex Mono",monospace; font-size:.66rem; font-weight:500;
+  letter-spacing:.08em; text-transform:uppercase; flex:none; min-width:5.6rem;
+}
+.done{color:var(--accept);} .pending{color:var(--accent);}
+
+/* ---------- scripts for speaking ---------- */
+.script{
+  background:var(--card); border:1px solid var(--rule); border-radius:5px;
+  padding:1.35rem 1.4rem; margin:0 0 1.2rem; box-shadow:var(--shadow);
+}
+.script-h{
+  font-family:"IBM Plex Mono",monospace; font-size:.68rem; font-weight:500;
+  letter-spacing:.14em; text-transform:uppercase; color:var(--muted);
+  display:block; margin-bottom:.7rem;
+}
+.script p{
+  font-family:Newsreader,Georgia,serif; font-size:1.1rem; line-height:1.55;
+  color:var(--ink);
+}
+.script p:last-child{margin-bottom:0;}
+
+hr{border:0; border-top:1px solid var(--rule); margin:3.4rem 0 0;}
+footer{
+  margin-top:2rem; font-family:"IBM Plex Mono",monospace;
+  font-size:.72rem; line-height:1.7; color:var(--muted);
+}
+
+/* ---------- phones ---------- */
+@media (max-width:600px){
+  body{font-size:16px; line-height:1.6;}
+  h1{font-size:clamp(2.1rem,9vw,2.8rem);}
+  .standfirst{font-size:1.1rem;}
+  .lead-in{font-size:1.12rem; padding-left:.95rem;}
+  section{margin-top:2.6rem;}
+  .field,.script{padding:1rem 1.05rem;}
+  .verdicts li{flex-wrap:wrap; row-gap:.15rem;}
+  .tick{min-width:4.2rem;}
+  .status li{flex-wrap:wrap; row-gap:.2rem;}
+  .state{min-width:0;}
+  .script p{font-size:1.02rem;}
+  .byline{gap:.35rem 1rem; font-size:.68rem;}
+}
+@media (max-width:360px){
+  .verdicts li,.status li{flex-direction:column; align-items:flex-start;}
+}
+@media (prefers-reduced-motion:reduce){*{animation:none!important; transition:none!important;}}
+</style>
+
+<div class="layout">
+<nav class="toc" aria-label="Contents">
+  <p class="toc-h">Contents</p>
+  <ol>
+    <li><a href="#one-paragraph">In one paragraph</a></li>
+    <li><a href="#problem">The problem</a></li>
+    <li><a href="#unseen">Why it goes unseen</a></li>
+    <li><a href="#built">What I built</a></li>
+    <li><a href="#insight">The key insight</a></li>
+    <li><a href="#why-nobody">Why tools miss it</a></li>
+    <li><a href="#research">Research or tool?</a></li>
+    <li><a href="#honest">Staying honest</a></li>
+    <li><a href="#who">Who it is for</a></li>
+    <li><a href="#limits">What it will not do</a></li>
+    <li><a href="#status">Where it is up to</a></li>
+    <li><a href="#origin">How it started</a></li>
+    <li><a href="#say-it">Saying it out loud</a></li>
+  </ol>
+</nav>
+<main class="col">
+
+<p class="eyebrow">Capstone project · explained without jargon</p>
+<h1>The name a form won&rsquo;t <span class="mac">let you type</span></h1>
+<p class="standfirst">A website can pass common automated accessibility checks and still refuse to accept your name. This is a tool that finds out whether it will &mdash; and a study of how often New Zealand government forms get it wrong.</p>
+<div class="byline">
+  <span>Rukshan De Silva</span><span>MSE907 Capstone</span><span>Master of Software Engineering</span>
+</div>
+
+<section id="one-paragraph">
+<h2>If you only read one paragraph</h2>
+<p class="lead-in">Every website that asks for your name has a hidden rule about what counts as a name. A programmer wrote that rule, usually based on the names they had in mind at the time. I built a program that reads those rules and reports the ones that would refuse a real person&rsquo;s name &mdash; then I&rsquo;m measuring how often it happens on New Zealand government websites.</p>
+</section>
+
+<section id="problem">
+<h2>What is the actual problem?</h2>
+<p>When you type your name into a website, something checks it before letting you continue. That check is a rule someone wrote. Here are three harmful examples:</p>
+
+<div class="field">
+  <span class="field-label">Full name</span>
+  <div class="field-box">Ngā&#772;ti&hellip;</div>
+  <div class="field-rule">rule: letters A&ndash;Z only</div>
+  <ul class="verdicts">
+    <li><span class="tick no">refused</span> <span><span class="nm">Māori</span> <span class="why">&mdash; the macron over the ā isn&rsquo;t an A&ndash;Z letter</span></span></li>
+    <li><span class="tick no">refused</span> <span><span class="nm">Zoë</span> <span class="why">&mdash; same reason</span></span></li>
+    <li><span class="tick yes">accepted</span> <span><span class="nm">Smith</span></span></li>
+  </ul>
+</div>
+
+<div class="field">
+  <span class="field-label">Full name</span>
+  <div class="field-box">O&rsquo;Brien</div>
+  <div class="field-rule">rule: no punctuation &mdash; often added as &ldquo;security&rdquo;</div>
+  <ul class="verdicts">
+    <li><span class="tick no">refused</span> <span><span class="nm">O&rsquo;Brien</span> <span class="why">&mdash; the apostrophe is part of the name</span></span></li>
+    <li><span class="tick no">refused</span> <span><span class="nm">Anne-Marie</span> <span class="why">&mdash; so is the hyphen</span></span></li>
+  </ul>
+</div>
+
+<div class="field">
+  <span class="field-label">Full name</span>
+  <div class="field-box">O</div>
+  <div class="field-rule">rule: at least 2 characters</div>
+  <ul class="verdicts">
+    <li><span class="tick no">refused</span> <span><span class="nm">O</span> <span class="why">&mdash; single-letter names are real and common in several countries</span></span></li>
+  </ul>
+</div>
+
+<p>When your name breaks the rule, you have two options: give up on the service, or type something that isn&rsquo;t your name. Most people do the second. That altered version then goes into the records &mdash; onto the account, the invoice, the appointment letter.</p>
+
+<p><strong>In New Zealand this lands hardest on te reo Māori.</strong> The macron &mdash; the bar over ā, ē, ī, ō, ū &mdash; is not decoration and not an accent you can politely drop. It marks a long vowel, and vowel length changes what a word means. Remove it and you can end up with a different word entirely. A form that strips macrons is not tidying up a name. It is changing it.</p>
+</section>
+
+<section id="unseen">
+<h2>Why hasn&rsquo;t anyone caught this already?</h2>
+<p>Two reasons, and they compound.</p>
+
+<h3>Accessibility checking asks a different question</h3>
+<p>There are established international rules for making websites usable by disabled people, and good automated tools that check them. But those tools ask: <em>can someone using a screen reader find this box, understand what it wants, and fill it in?</em></p>
+<p>They never ask: <em>will this box accept the name you were actually given?</em> There is no rule in the standard that says an input must accept the values people legitimately need to type. So a form can pass those checks and still refuse your name.</p>
+
+<h3>Normal testing doesn&rsquo;t find it either</h3>
+<p>A tester types their own name to see if the form works. If their name fits the rule, the box looks fine. The fault only shows up for people whose names the tester never thought to try &mdash; which is exactly the population least likely to be in the room.</p>
+
+<p>The result is a fault that is written down in plain sight in the website&rsquo;s own code, and nobody is looking at it.</p>
+</section>
+
+<section id="built">
+<h2>So what did you build?</h2>
+<p>A program called <strong>FormFair</strong>. You give it a web page&rsquo;s code &mdash; the instructions the browser follows to draw the page &mdash; and it does four things:</p>
+<ul>
+  <li>Finds the box that&rsquo;s asking for a person&rsquo;s name</li>
+  <li>Finds the rule attached to that box</li>
+  <li>Works out exactly which characters that rule will and won&rsquo;t allow</li>
+  <li>Reports anything that would exclude a real name &mdash; quoting the exact line of code, explaining the problem in plain English, and saying how to fix it</li>
+</ul>
+<p>It runs entirely on your own machine. Nothing is sent anywhere, so a developer can run it on work that hasn&rsquo;t been published yet.</p>
+
+<div class="note">
+  <span class="note-h">The part I&rsquo;m most pleased with</span>
+  <p>When the tool meets a rule too complicated to be certain about, it says <em>&ldquo;I can&rsquo;t decide this one&rdquo;</em> instead of guessing. Those cases are counted and shown next to the findings.</p>
+  <p>That matters more than it sounds. If a tool quietly skips what it can&rsquo;t handle, you read the silence as &ldquo;nothing wrong here&rdquo; &mdash; and that&rsquo;s worse than no tool at all.</p>
+</div>
+</section>
+
+<section id="insight">
+<h2>What&rsquo;s the clever bit?</h2>
+<p>The obvious way to test a name box is to throw a list of difficult names at it and see which ones bounce. That approach is wrong, and it took me a while to see why.</p>
+
+<p>Picture a box with two rules at once: <em>letters A&ndash;Z only</em>, and <em>maximum three characters</em>. Now throw the test names at it:</p>
+
+<div class="field">
+  <span class="field-label">Full name</span>
+  <div class="field-box">Māori</div>
+  <div class="field-rule">rule: letters A&ndash;Z only, maximum 3 characters</div>
+  <ul class="verdicts">
+    <li><span class="tick no">refused</span> <span><span class="nm">Māori</span> <span class="why">&mdash; 5 characters</span></span></li>
+    <li><span class="tick no">refused</span> <span><span class="nm">O&rsquo;Brien</span> <span class="why">&mdash; 7 characters</span></span></li>
+    <li><span class="tick no">refused</span> <span><span class="nm">Smith</span> <span class="why">&mdash; 5 characters</span></span></li>
+  </ul>
+</div>
+
+<p>Everything was refused, so you conclude the box rejects macrons and apostrophes. <strong>But it doesn&rsquo;t.</strong> It refused all three for being too long. The character problem and the length problem are two different faults with two different fixes, and testing with names has just blurred them together and pointed at the wrong one.</p>
+
+<p>So my tool doesn&rsquo;t try names. It reads the rule and works out its alphabet directly &mdash; asking <em>&ldquo;does this rule allow ā? does it allow an apostrophe?&rdquo;</em> one character at a time, separately from any question about length.</p>
+
+<p class="lead-in">It&rsquo;s the difference between trying keys in a lock to guess what fits, and reading the lock&rsquo;s specification.</p>
+
+<p>That method &mdash; not the list of faults &mdash; is the actual research contribution. The faults are things people already know are bad. Deciding them reliably, from the rule rather than from examples, is the new part.</p>
+</section>
+
+<section id="why-nobody">
+<h2>Why existing tools can miss this</h2>
+<p>Three groups work close to this problem. Each has a specific reason their approach would not surface it.</p>
+
+<h3>The accessibility tool builders</h3>
+<p>They&rsquo;re answering the can-you-perceive-and-operate-it question described above. Accepting your name was never in scope, so it&rsquo;s not an oversight on their part &mdash; it&rsquo;s a different problem.</p>
+
+<h3>The software-translation researchers</h3>
+<p>These are people who build tools to check whether an app works properly in other languages. Genuinely close to my problem. But their tools work by looking at the <em>rendered picture</em> of the page &mdash; they catch German text overflowing a button, or Arabic laid out left-to-right by mistake.</p>
+<p>A rule saying &ldquo;letters A&ndash;Z only&rdquo; looks exactly the same in every language and breaks no layout at all. Comparing pictures of pages can never see it.</p>
+
+<h3>The standards bodies</h3>
+<p>Unicode and the W3C have written genuinely good guidance saying don&rsquo;t do this to people&rsquo;s names. But guidance is advice. It isn&rsquo;t a test. Turning &ldquo;be careful with names&rdquo; into a specific check &mdash; with a severity, and a procedure a machine can run without human judgement &mdash; is the step I haven&rsquo;t found already done. That translation is the work.</p>
+
+<div class="note">
+  <span class="note-h">Said carefully</span>
+  <p>What I can honestly claim is that <strong>I haven&rsquo;t found such a tool</strong> &mdash; not that none exists. My literature search isn&rsquo;t finished; there are twelve papers I still need to read in full before I can put it more strongly than that. Saying it precisely is part of doing it properly.</p>
+</div>
+</section>
+
+<section id="research">
+<h2>Is it research, or is it just a tool?</h2>
+<p>Both, and the combination is deliberate rather than a hedge.</p>
+<p>The tool is the thing I built. The <em>research</em> is the question <strong>&ldquo;does it actually work?&rdquo;</strong> &mdash; answered with measurements rather than a demo. Anyone can show a tool working on an example they chose themselves. That proves nothing.</p>
+<p>There&rsquo;s an established way of doing this, called Design Science Research: you build something to solve a real problem, then evaluate it rigorously, and the contribution is the thing plus what you learned from testing it. That&rsquo;s the shape of this project.</p>
+<p>So there are three outputs: a working tool anyone can download and use, an honest measurement of how accurate it is, and a figure for how common this problem is across the government forms I sample.</p>
+</section>
+
+<section id="honest">
+<h2>How do you know you&rsquo;re not fooling yourself?</h2>
+<p>This is the question I&rsquo;d most want to be asked, because the risk is obvious: I built the tool <em>and</em> I&rsquo;m the one grading it. It would be very easy to keep adjusting things until the numbers looked good, without ever noticing I was doing it.</p>
+
+<p>So before collecting any data at all, I locked down and timestamped four things:</p>
+<ul>
+  <li>The exact list of faults the tool looks for</li>
+  <li>The plan for how accuracy would be measured</li>
+  <li>The list of websites I&rsquo;d sample from, and the order I&rsquo;d visit them in</li>
+  <li>The precise version of the software</li>
+</ul>
+
+<p>Then, when the data collection happens:</p>
+<ul>
+  <li>Two people go through the forms by hand and write down what they find, independently, <strong>without being shown what the tool says</strong></li>
+  <li>A third person settles any disagreement between them</li>
+  <li>Their answers are sealed with a cryptographic seal <em>before</em> the tool is allowed to run</li>
+  <li>The tool gets exactly one attempt at that data</li>
+</ul>
+
+<p class="lead-in">It&rsquo;s the same principle as sealing the exam answers before the exam starts. If I had quietly tuned anything afterwards to improve my score, the seals and the timestamps would give it away.</p>
+</section>
+
+<section id="who">
+<h2>Who&rsquo;s actually going to use it?</h2>
+<ul>
+  <li><strong>Web developers</strong> &mdash; run it over a page before it goes live and get back a list of problems, each with the offending line and a suggested fix</li>
+  <li><strong>Government digital teams</strong> &mdash; check the forms they already have in production</li>
+  <li><strong>Accessibility auditors</strong> &mdash; a check they currently have no tool for</li>
+  <li><strong>Other researchers</strong> &mdash; the measurement, and the method behind it</li>
+</ul>
+<p>Not the general public. Someone whose name keeps getting rejected doesn&rsquo;t need a tool &mdash; they need the form fixed. The tool is for the people who can fix it.</p>
+</section>
+
+<section id="limits">
+<h2>What does it deliberately not do?</h2>
+<p>Being clear about the limits is part of the work, not an apology for it.</p>
+<ul>
+  <li>It only reads rules written into the page itself. If a website does its checking on its own servers, out of sight, the tool cannot see that and doesn&rsquo;t pretend to.</li>
+  <li>It never promises that a form will accept a given name. It reports what the code declares, which isn&rsquo;t always the whole story.</li>
+  <li>It looks for <strong>five specific faults</strong>, not every possible way to mishandle a name. Five that are common, damaging, and reliably detectable.</li>
+  <li>It doesn&rsquo;t fix anything. It tells you what&rsquo;s wrong and how to fix it. A person makes the change.</li>
+</ul>
+</section>
+
+<section id="status">
+<h2>Where is it up to right now?</h2>
+<ul class="status">
+  <li><span class="state done">Done</span> <span>The tool is built, tested, and published openly for anyone to inspect</span></li>
+  <li><span class="state done">Done</span> <span>The list of faults it checks, each traced to a published standard</span></li>
+  <li><span class="state done">Done</span> <span>The measurement plan, written and locked before any data exists</span></li>
+  <li><span class="state done">Done</span> <span>The sampling list of government agencies, archived and timestamped</span></li>
+  <li><span class="state pending">Waiting</span> <span>Yoobee confirmation of the applicable ethics pathway &mdash; nothing gets collected until then</span></li>
+  <li><span class="state pending">Not yet</span> <span>Collecting the forms and having them labelled by hand</span></li>
+  <li><span class="state pending">Not yet</span> <span>Results &mdash; there are none, and there won&rsquo;t be until the steps above are finished</span></li>
+</ul>
+<p style="margin-top:1.3rem">If someone asks what you&rsquo;ve found so far, the honest answer is <em>nothing yet, by design</em>. Everything is deliberately locked so the finding, when it comes, means something.</p>
+</section>
+
+<section id="origin">
+<h2>How did you come to be doing this?</h2>
+<p>Two things had to line up: a problem that genuinely matters, and one that can actually be finished in fifteen weeks.</p>
+<p>On the first: New Zealand has an official language whose spelling depends on a mark that computers routinely throw away. Government websites here are already monitored for accessibility &mdash; so they&rsquo;re being checked regularly, just for something else entirely. That makes the gap narrow, specific, and worth closing.</p>
+<p>On the second: this fault is <em>written down</em>. You don&rsquo;t have to run the website, or guess at how it behaves, or ask anyone. The rule is sitting there in the page&rsquo;s code where a program can read it. That&rsquo;s what makes it something you can check reliably and measure honestly &mdash; and a lot of good-sounding project ideas fail exactly that test.</p>
+
+</section>
+
+<hr>
+
+<section id="say-it">
+<h2>If you need to say it out loud</h2>
+
+<div class="script">
+  <span class="script-h">Thirty seconds</span>
+  <p>&ldquo;You know how some websites reject names containing a macron, apostrophe or hyphen? I built FormFair, a tool that reads the rules behind a name box and warns developers when those rules could reject a real person&rsquo;s name. I&rsquo;m then testing it on New Zealand government forms to measure how accurate the tool is and how often the problem occurs.&rdquo;</p>
+</div>
+
+<div class="script">
+  <span class="script-h">Two minutes</span>
+  <p>&ldquo;Every website that asks for your name has a hidden rule about what counts as one. It was written with certain names in mind &mdash; English letters only, no punctuation, at least two characters.&rdquo;</p>
+  <p>&ldquo;In New Zealand that&rsquo;s a real problem, because the macron in te reo Māori changes what a word means. A form that strips it isn&rsquo;t tidying your name, it&rsquo;s changing it. And you end up either abandoning the service or typing a fake version of your own name into an official record.&rdquo;</p>
+  <p>&ldquo;The odd part is that the usual automated checks don&rsquo;t look for it. They ask whether a screen reader can find the box &mdash; not whether the box will take your name. So a form can pass them and still refuse you.&rdquo;</p>
+  <p>&ldquo;So I built a tool that reads the rule in the page&rsquo;s code and works out exactly which characters it allows, one character at a time. And because I built it myself, I locked down the whole measurement plan and sealed the answers before running it &mdash; so the result can&rsquo;t just be me marking my own homework.&rdquo;</p>
+</div>
+</section>
+
+<footer>
+  FormFair &middot; MSE907 Industry-based Capstone Research Project<br>
+  Yoobee College of Creative Innovation &middot; no results reported; evaluation not yet run<br>
+  <a href="https://github.com/rukshanm123-art/formfair">Source code and documentation</a> &middot;
+  <a href="https://github.com/rukshanm123-art">Other projects</a>
+</footer>
+
+</main>
+</div>
