@@ -1,0 +1,59 @@
+{
+  "_README": "Copy this file, rename it to annotation.<your-annotator-id>.json, replace the annotator id, and delete the two EXAMPLE controls below once you have added real ones. Validate with: npm run validate -- templates/annotation.template.json annotation. Every field marked required by the schema is present here; nothing else is permitted to be invented.",
+  "annotator": "REPLACE-WITH-YOUR-ANNOTATOR-ID",
+  "instrument": "evaluation-v1.0.0",
+  "pages": [
+    {
+      "pageId": "REPLACE-WITH-PAGE-ID",
+      "controls": [
+        {
+          "_EXAMPLE": "A control you judge to BE a personal-name control. It carries all five rule pairs - never fewer, which would shrink the denominator, and never more, which would double-count.",
+          "controlId": "REPLACE-WITH-PAGE-ID#LINE:COLUMN-of-this-control",
+          "inputType": "text",
+          "stageOne": {
+            "label": "positive",
+            "reason": "State WHY in your own words. 'Looks like a name' is not a reason.",
+            "evidence": "<input name=\"firstName\" pattern=\"[A-Za-z]+\">"
+          },
+          "rules": {
+            "FF-01": {
+              "label": "positive",
+              "reason": "Cite the catalogue clause you applied.",
+              "evidence": "pattern=\"[A-Za-z]+\""
+            },
+            "FF-02": {
+              "label": "negative",
+              "reason": "FF-01 suppresses FF-02 where the constraint is Basic-Latin-only.",
+              "evidence": "pattern=\"[A-Za-z]+\""
+            },
+            "FF-03": {
+              "label": "negative",
+              "reason": "No separated fixture pair present.",
+              "evidence": "no maxlength on either component"
+            },
+            "FF-04": {
+              "label": "negative",
+              "reason": "Apostrophe is admitted by the class.",
+              "evidence": "pattern=\"[A-Za-z']+\""
+            },
+            "FF-05": {
+              "label": "negative",
+              "reason": "Minimum accepted length is one, so FF-05 does not fire.",
+              "evidence": "no minlength attribute"
+            }
+          }
+        },
+        {
+          "_EXAMPLE": "A control you judge NOT to be a personal-name control. It carries stageOne only - no rules object at all.",
+          "controlId": "REPLACE-WITH-PAGE-ID#LINE:COLUMN-of-a-different-control",
+          "inputType": "search",
+          "stageOne": {
+            "label": "negative",
+            "reason": "Site search box, not a person's name.",
+            "evidence": "<input type=\"search\" aria-label=\"Search this site\">"
+          }
+        }
+      ]
+    }
+  ]
+}

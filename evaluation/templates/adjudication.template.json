@@ -1,0 +1,23 @@
+{
+  "_README": "Used ONLY where the two primary annotators disagree and cannot resolve it between themselves. One decision per disagreement. The adjudicator never sees FormFair output. Validate with: npm run validate -- templates/adjudication.template.json adjudication",
+  "adjudicator": "REPLACE-WITH-ADJUDICATOR-ID",
+  "decisions": [
+    {
+      "_EXAMPLE": "A stage-one disagreement: was this a personal-name control at all? Omit the rule field entirely for stage one.",
+      "pageId": "REPLACE-WITH-PAGE-ID",
+      "controlId": "REPLACE-WITH-CONTROL-ID",
+      "decision": "positive",
+      "reason": "Why this label and not the other. Name what the two annotators each relied on.",
+      "catalogueClause": "The exact clause of catalogue-v1.0.0 you applied."
+    },
+    {
+      "_EXAMPLE": "A rule disagreement. The rule field names which of FF-01..FF-05 is being decided.",
+      "pageId": "REPLACE-WITH-PAGE-ID",
+      "controlId": "REPLACE-WITH-CONTROL-ID",
+      "rule": "FF-01",
+      "decision": "negative",
+      "reason": "Why this label and not the other.",
+      "catalogueClause": "The exact clause of catalogue-v1.0.0 you applied."
+    }
+  ]
+}
