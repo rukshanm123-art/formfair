@@ -11,6 +11,12 @@
 /** Denominators below this are reported as not estimable (protocol section 9). */
 export const MIN_DENOMINATOR = 5;
 
+/**
+ * Below this proportion of resolved resamples a bootstrap is refused rather than reported.
+ * Amendment harness-v1.1.0; section 9 of the frozen protocol does not address it.
+ */
+export const STABILITY_THRESHOLD = 0.95;
+
 const Z_95 = 1.959963984540054;
 
 const notEstimable = (reason) => ({ estimable: false, reason });
@@ -143,10 +149,19 @@ export function seedFromString(text) {
   return h >>> 0;
 }
 
-export function f1From({ tp, fp, fn }) {
-  const precision = tp + fp === 0 ? null : tp / (tp + fp);
-  const recall = tp + fn === 0 ? null : tp / (tp + fn);
-  if (precision === null || recall === null || precision + recall === 0) return null;
+/**
+ * F1 over summed counts.
+ *
+ * Zero true positives is a RESULT, not an absence of one: a run that found nothing right
+ * has an F1 of 0. Returning null there would let the bootstrap discard exactly the worst
+ * resamples, which biases the lower bound upward and flatters the tool. Only a set of
+ * counts with nothing scored at all is genuinely undefined.
+ */
+export function f1From({ tp = 0, fp = 0, fn = 0 }) {
+  if (tp + fp + fn === 0) return null;
+  if (tp === 0) return 0;
+  const precision = tp / (tp + fp);
+  const recall = tp / (tp + fn);
   return (2 * precision * recall) / (precision + recall);
 }
 
@@ -190,7 +205,21 @@ export function bootstrapClustered(
   if (typeof estimate !== 'function' || typeof denominator !== 'function') {
     throw new TypeError('bootstrapClustered needs an estimate and a denominator function');
   }
-  const usable = (clusters ?? []).filter((c) => c && typeof c === 'object');
+  // Sorted into a canonical order before anything is drawn. The PRNG walks the array, so
+  // without this the published interval depends on the order the caller happened to list
+  // the pages in - the same corpus, read from a differently ordered directory, would give
+  // a different interval. Identical clusters sort together, so ties cannot reintroduce it.
+  const canonical = (c) =>
+    JSON.stringify(
+      Object.keys(c)
+        .sort()
+        .map((k) => [k, c[k]])
+    );
+  const usable = (clusters ?? [])
+    .filter((c) => c && typeof c === 'object')
+    .map((c) => [canonical(c), c])
+    .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
+    .map(([, c]) => c);
 
   const sum = (list) => {
     const acc = {};
@@ -247,15 +276,42 @@ export function bootstrapClustered(
   }
 
   // A resample can be undefined - every drawn page empty for this measure - so the
-  // proportion that resolved is reported. The protocol treats a bootstrap that mostly
-  // fails to resolve as unstable rather than as a narrow interval.
+  // proportion that resolved is reported. Amendment harness-v1.1.0 fixes the threshold at
+  // 0.95 and refuses below it; this rule is the amendment's, not something section 9 of
+  // the protocol already said, and it is recorded there as such.
   const resolved = draws.length / resamples;
   if (draws.length === 0) {
-    return { ...notEstimable('every resample was undefined'), ...raw, clusters: usable.length };
+    return {
+      ...notEstimable('every resample was undefined'),
+      ...raw,
+      counts: observed,
+      clusters: usable.length,
+      resamples,
+      resolved,
+    };
+  }
+
+  // Refused rather than reported. An unresolved bootstrap concentrates on the few draws
+  // that survived, which produces a narrow - often zero-width - interval that looks more
+  // precise than the data it rests on. That is the exact failure the denominator floor
+  // exists to prevent, arriving by a different route.
+  if (resolved < STABILITY_THRESHOLD) {
+    return {
+      estimable: false,
+      reason: `only ${(resolved * 100).toFixed(1)}% of resamples resolved, below ${STABILITY_THRESHOLD * 100}%`,
+      ...raw,
+      counts: observed,
+      clusters: usable.length,
+      resamples,
+      resolved,
+      stable: false,
+    };
   }
 
   draws.sort((x, y) => x - y);
-  const at = (q) => draws[Math.min(draws.length - 1, Math.max(0, Math.floor(q * draws.length)))];
+  // Nearest rank: the q-quantile is the ceil(q*n)-th smallest draw, one-indexed. Using
+  // floor(q*n) as a zero-indexed position would shift BOTH bounds one order statistic up.
+  const at = (q) => draws[Math.min(draws.length - 1, Math.max(0, Math.ceil(q * draws.length) - 1))];
 
   return {
     estimable: true,
@@ -263,9 +319,13 @@ export function bootstrapClustered(
     point,
     lower: at(0.025),
     upper: at(0.975),
-    resamples: draws.length,
+    // `resamples` is what the protocol fixes at 2,000. `resolvedDraws` is how many of them
+    // yielded a defined estimate; reporting the latter as `resamples` contradicted the
+    // protocol's own figure.
+    resamples,
+    resolvedDraws: draws.length,
     resolved,
-    stable: resolved >= 0.95,
+    stable: true,
     clusters: usable.length,
     ...raw,
     counts: observed,

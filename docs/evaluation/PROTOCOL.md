@@ -303,6 +303,28 @@ at both stage two and end to end, and control-level prevalence.
   `total` exactly as a Wilson result does, so nothing downstream loses them.
 - The seed string and the number of resamples.
 
+**Four decisions this amendment makes that section 9 does not address.** Recorded here
+because they are the amendment's own choices, fixed now, before any evidence exists. None
+of them can be attributed to the frozen protocol.
+
+1. **Quantile placement: nearest rank.** The q-quantile of the resample distribution is the
+   ceil(q x n)-th smallest draw, one-indexed. The earlier implementation used floor(q x n)
+   as a zero-indexed position, which shifted both bounds one order statistic upward.
+2. **An unresolved bootstrap is refused, not reported.** Where fewer than **95%** of
+   resamples yield a defined estimate, the result is "not estimable" with its counts and
+   its resolved proportion, and no interval. Concentrating on the few draws that survived
+   produces a narrow - often zero-width - interval that looks more precise than the data
+   beneath it, which is the failure the denominator floor already guards against arriving
+   by a second route.
+3. **F1 is zero when nothing was found, not undefined.** Only counts with nothing scored at
+   all are undefined. Treating a resample with no true positives as undefined would discard
+   exactly the worst draws and lift the lower bound, biasing the figure in the tool's own
+   favour.
+4. **Pages are sorted into a canonical order before resampling.** The generator walks the
+   cluster array, so without this the published interval would depend on the order the
+   pages happened to be listed in - the same corpus, read from a differently ordered
+   directory, would produce a different interval.
+
 **Why.** Section 9 was already in tension with the implementation choice recorded at the
 end of it, which states that controls within a page share markup, framework and author and
 so their errors are correlated. That reasoning was applied to F1 and not to the other
@@ -311,12 +333,22 @@ observations; controls pooled across pages are not independent, and the resultin
 is too narrow.
 
 **Evidence.** The amendment is not justified by argument alone. `evaluation/test/clustered.test.mjs`
-simulates pages carrying a page-level rate, with a known true proportion of 0.5, and counts
-how often each interval covers it. A nominal 95% Wilson interval on the pooled counts
-covers the true value **54%** of the time; the page-cluster interval covers it **93%**.
-The same file checks the converse, that with one observation per page the method does
-**not** inflate the interval - which is why retaining Wilson at form level is consistent
-rather than arbitrary.
+simulates 20 pages of 10 controls each, every page carrying its own rate, with a known true
+proportion of 0.5, and counts how often each interval covers it. Over **ten independent
+simulation seeds of 300 trials each**, a nominal 95% Wilson interval on the pooled counts
+covers the true value **54-69% of the time (mean 59%)**; the page-cluster interval covers it
+**91-97% (mean 94%)**. The range is quoted rather than a single figure because one seed
+would make the published number an accident of that seed. The test asserts against the
+**best** Wilson seed and the **worst** clustered seed, so neither can be a lucky draw, and it
+fails if the measured range moves outside what is published here.
+
+**What that evidence does and does not establish.** The simulated page rates are drawn from
+Beta(1/2, 1/2), a strong-correlation regime close to the worst case for Wilson. It
+establishes the direction and the mechanism, not the magnitude to expect on real government
+forms, which is unknown and stays unknown until the corpus exists. Under weaker within-page
+correlation the gap narrows; under none it vanishes, which is what the converse test
+measures: with one observation per page the method does **not** inflate the interval. That
+is why retaining Wilson at form level is consistent rather than arbitrary.
 
 **Status of the frozen instrument.** `evaluation-v1.0.0` is unchanged and remains the tag
 at which FormFair itself is run. This amendment touches the **analysis harness only** -

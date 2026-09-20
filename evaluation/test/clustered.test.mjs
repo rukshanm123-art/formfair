@@ -17,8 +17,10 @@ import {
   precisionFrom,
   recallFrom,
   coverageFrom,
+  f1From,
   mulberry32,
   MIN_DENOMINATOR,
+  STABILITY_THRESHOLD,
 } from '../src/stats.mjs';
 
 const asProportion = {
@@ -33,50 +35,75 @@ describe('the amendment is justified, not merely asserted', () => {
     // the arcsine distribution, whose inverse CDF is sin^2(pi*u/2) - and controls within
     // a page share it. That is exactly the correlation Wilson assumes away. The true
     // population proportion is 0.5 by construction, so coverage can be counted.
+    // Run over TEN independent simulation seeds, not one. A single seed would make the
+    // published figure an accident of that seed: measured across seeds, Wilson's coverage
+    // ranges from 54% to 69%, so quoting the low end as "the" result would overstate the
+    // case. The protocol cites the range and the mean, and this test asserts the range.
     const TRUE = 0.5;
     const PAGES = 20;
     const PER_PAGE = 10;
     const TRIALS = 300;
-    const random = mulberry32(20260920); // fixed: this test must not flake
+    const SEEDS = [1, 2, 3, 4, 5, 6, 7, 8, 20260920, 12345];
 
-    let estimable = 0;
-    let clusteredCovered = 0;
-    let wilsonCovered = 0;
+    const clusteredRates = [];
+    const wilsonRates = [];
 
-    for (let t = 0; t < TRIALS; t++) {
-      const clusters = [];
-      for (let i = 0; i < PAGES; i++) {
-        const rate = Math.sin((Math.PI * random()) / 2) ** 2;
-        let decided = 0;
-        for (let k = 0; k < PER_PAGE; k++) if (random() < rate) decided += 1;
-        clusters.push({ decided, denominator: PER_PAGE });
+    for (const seed of SEEDS) {
+      const random = mulberry32(seed);
+      let estimable = 0;
+      let clusteredCovered = 0;
+      let wilsonCovered = 0;
+
+      for (let t = 0; t < TRIALS; t++) {
+        const clusters = [];
+        for (let i = 0; i < PAGES; i++) {
+          const rate = Math.sin((Math.PI * random()) / 2) ** 2;
+          let decided = 0;
+          for (let k = 0; k < PER_PAGE; k++) if (random() < rate) decided += 1;
+          clusters.push({ decided, denominator: PER_PAGE });
+        }
+
+        const clustered = bootstrapClustered(clusters, {
+          ...asProportion,
+          resamples: 400,
+          seed: `sim-${t}`,
+        });
+        if (!clustered.estimable) continue;
+        estimable += 1;
+
+        // Wilson gets the identical pooled counts, which is the point: same data, and the
+        // only difference is what the interval assumes about how it was generated.
+        const pooled = wilson(clustered.successes, clustered.total);
+        if (clustered.lower <= TRUE && TRUE <= clustered.upper) clusteredCovered += 1;
+        if (pooled.lower <= TRUE && TRUE <= pooled.upper) wilsonCovered += 1;
       }
 
-      const clustered = bootstrapClustered(clusters, {
-        ...asProportion,
-        resamples: 400,
-        seed: `sim-${t}`,
-      });
-      if (!clustered.estimable) continue;
-      estimable += 1;
-
-      // Wilson gets the identical pooled counts, which is the point: same data, and the
-      // only difference is what the interval assumes about how it was generated.
-      const pooled = wilson(clustered.successes, clustered.total);
-      if (clustered.lower <= TRUE && TRUE <= clustered.upper) clusteredCovered += 1;
-      if (pooled.lower <= TRUE && TRUE <= pooled.upper) wilsonCovered += 1;
+      clusteredRates.push(clusteredCovered / estimable);
+      wilsonRates.push(wilsonCovered / estimable);
     }
 
-    const clusteredRate = clusteredCovered / estimable;
-    const wilsonRate = wilsonCovered / estimable;
+    const pct = (x) => `${(x * 100).toFixed(1)}%`;
+    const worstClustered = Math.min(...clusteredRates);
+    const bestWilson = Math.max(...wilsonRates);
 
+    // Asserted on the WORST clustered seed and the BEST Wilson seed, so neither figure can
+    // be a lucky draw. The protocol's published range must bracket what is measured here.
     assert.ok(
-      wilsonRate < 0.75,
-      `a nominal 95% Wilson interval should badly under-cover here; it covered ${(wilsonRate * 100).toFixed(1)}%`
+      bestWilson < 0.75,
+      `Wilson should under-cover on every seed; its best was ${pct(bestWilson)}`
     );
     assert.ok(
-      clusteredRate > 0.85,
-      `the cluster bootstrap should approach nominal coverage; it covered ${(clusteredRate * 100).toFixed(1)}%`
+      worstClustered > 0.85,
+      `the cluster bootstrap should approach nominal coverage on every seed; its worst was ${pct(worstClustered)}`
+    );
+    // The protocol states Wilson 54-69% and clustered 91-97%. Fail if reality leaves them.
+    assert.ok(
+      Math.min(...wilsonRates) >= 0.5 && bestWilson <= 0.72,
+      `protocol quotes Wilson 54-69%; measured ${pct(Math.min(...wilsonRates))}-${pct(bestWilson)}`
+    );
+    assert.ok(
+      worstClustered >= 0.88 && Math.max(...clusteredRates) <= 0.99,
+      `protocol quotes clustered 91-97%; measured ${pct(worstClustered)}-${pct(Math.max(...clusteredRates))}`
     );
   });
 
@@ -245,15 +272,65 @@ describe('it refuses to be fooled by the input', () => {
     assert.equal(a.total, b.total);
   });
 
-  test('a bootstrap that mostly fails to resolve is marked unstable, not narrow', () => {
-    // One page carries every scored observation. Most resamples draw none of it, so the
-    // estimate is undefined and the surviving draws are all identical - an interval of
-    // zero width that means nothing. The protocol wants that flagged.
+  test('the published INTERVAL does not depend on the order of the pages', () => {
+    // Stronger than the point-estimate check above, and the one that matters: the PRNG
+    // walks the cluster array, so before the canonical sort the same corpus listed in a
+    // different order produced a different published interval.
+    const clusters = Array.from({ length: 12 }, (_, i) => ({ decided: i % 4, denominator: 5 }));
+    const shuffled = [8, 3, 11, 0, 5, 9, 1, 7, 4, 10, 2, 6].map((i) => clusters[i]);
+    const a = bootstrapClustered(clusters, asProportion);
+    const b = bootstrapClustered([...clusters].reverse(), asProportion);
+    const c = bootstrapClustered(shuffled, asProportion);
+    assert.equal(a.lower, b.lower, 'reversing the pages moved the lower bound');
+    assert.equal(a.upper, b.upper, 'reversing the pages moved the upper bound');
+    assert.equal(a.lower, c.lower, 'shuffling the pages moved the lower bound');
+    assert.equal(a.upper, c.upper, 'shuffling the pages moved the upper bound');
+  });
+
+  test('the percentile bounds sit at the nearest rank, not one order statistic above', () => {
+    // With draws 1..n the 2.5th percentile is the ceil(0.025n)-th smallest. Using
+    // floor(q*n) as a zero-indexed position shifts BOTH bounds up by one, which skews the
+    // interval upward. Constructed so the draws are known exactly: 200 distinct clusters
+    // each contributing a different value would be fragile, so this checks the helper's
+    // contract through a uniform case where every resample is identical.
+    const uniform = Array.from({ length: 20 }, () => ({ decided: 3, denominator: 4 }));
+    const r = bootstrapClustered(uniform, { ...asProportion, resamples: 400 });
+    assert.equal(r.lower, 0.75);
+    assert.equal(r.upper, 0.75);
+    assert.equal(r.resamples, 400, 'resamples reports what was requested');
+    assert.equal(r.resolvedDraws, 400, 'every draw resolved here');
+  });
+
+  test('F1 is zero when nothing was found, not undefined', () => {
+    // The bias this prevents: treating F1 as undefined at tp=0 makes the bootstrap discard
+    // exactly the worst resamples, lifting the lower bound and flattering the tool.
+    assert.equal(f1From({ tp: 0, fp: 5, fn: 5 }), 0);
+    assert.equal(f1From({ tp: 0, fp: 0, fn: 3 }), 0);
+    assert.equal(f1From({ tp: 0, fp: 0, fn: 0 }), null, 'nothing scored at all is undefined');
+
+    // A corpus where most pages score zero must not come back with a lower bound above 0.
+    const clusters = Array.from({ length: 20 }, (_, i) =>
+      i < 4 ? { tp: 2, fp: 1, fn: 1 } : { tp: 0, fp: 1, fn: 1 }
+    );
+    const r = bootstrapF1(clusters, { resamples: 1000 });
+    assert.equal(r.estimable, true);
+    assert.ok(r.lower < r.point, `lower ${r.lower} should sit below the point ${r.point}`);
+  });
+
+  test('an unresolved bootstrap is refused outright, not reported as a narrow interval', () => {
+    // Before this guard the same input returned estimable:true with lower === upper, a
+    // zero-width "95% confidence interval" resting on a third of the draws.
     const clusters = Array.from({ length: 40 }, () => ({ tp: 0, fp: 0, fn: 0 }));
     clusters[0] = { tp: 6, fp: 2, fn: 1 };
     const r = bootstrapF1(clusters, { resamples: 400 });
-    assert.ok(r.resolved < 0.95, `resolved was ${r.resolved}`);
+    assert.equal(r.estimable, false);
     assert.equal(r.stable, false);
+    assert.equal(r.lower, undefined, 'no bound may be reachable on a refused bootstrap');
+    assert.equal(r.upper, undefined);
+    assert.ok(r.resolved < STABILITY_THRESHOLD);
+    assert.match(r.reason, /resolved/);
+    assert.equal(r.resamples, 400, 'the requested count, not the surviving one');
+    assert.equal(r.counts.tp, 6, 'raw counts survive the refusal');
   });
 
   test('a fully resolved bootstrap is marked stable', () => {
