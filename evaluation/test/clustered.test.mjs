@@ -232,6 +232,48 @@ describe('the estimability floor applies per measure', () => {
   });
 });
 
+describe('the floor applies to the resampling unit, not just the controls', () => {
+  const ap = {
+    estimate: coverageFrom,
+    numerator: ({ decided = 0 }) => decided,
+    denominator: ({ denominator = 0 }) => denominator,
+  };
+
+  test('a large corpus on too few pages is refused, not reported', () => {
+    // Forty controls clears section 9's floor comfortably. Two pages does not: resampling
+    // two clusters can only ever produce the handful of endpoints those two allow, and
+    // one page produces a zero-width interval that could not have been anything else.
+    // Before this guard both came back estimable, with n=40 and n=30 beside them.
+    const twoPages = bootstrapClustered(
+      [
+        { decided: 15, denominator: 20 },
+        { decided: 5, denominator: 20 },
+      ],
+      ap
+    );
+    assert.equal(twoPages.estimable, false);
+    assert.equal(twoPages.total, 40, 'the controls still clear the denominator floor');
+    assert.equal(twoPages.clusters, 2);
+    assert.match(twoPages.reason, /2 pages is below the floor of 5/);
+    assert.equal(twoPages.lower, undefined);
+
+    const onePage = bootstrapClustered([{ decided: 12, denominator: 30 }], ap);
+    assert.equal(onePage.estimable, false);
+    assert.match(onePage.reason, /1 page is below/, 'singular, not "1 pages"');
+    assert.equal(onePage.upper, undefined, 'a zero-width interval must not be reachable');
+  });
+
+  test('five pages is enough for the estimate to be reported', () => {
+    const fivePages = bootstrapClustered(
+      Array.from({ length: 5 }, (_, i) => ({ decided: i % 3, denominator: 4 })),
+      ap
+    );
+    assert.equal(fivePages.estimable, true);
+    assert.equal(fivePages.clusters, 5);
+    assert.ok(fivePages.upper > fivePages.lower, 'and it must have width');
+  });
+});
+
 describe('it refuses to be fooled by the input', () => {
   test('malformed clusters are dropped rather than poisoning the sums', () => {
     const r = bootstrapClustered(

@@ -125,11 +125,12 @@ describe('bootstrap F1', () => {
     const spread = Array.from({ length: 40 }, (_, i) =>
       i < 30 ? { tp: 1, fp: 0, fn: 0 } : { tp: 0, fp: 1, fn: 0 }
     );
+    // Eight pages, not four: harness-v1.1.0 applies the floor of five to the resampling
+    // unit, so a four-page corpus is now refused outright rather than scored. The same 40
+    // pairs - 30 true positives and 10 false positives - still concentrate on few pages.
     const clumped = [
-      { tp: 10, fp: 0, fn: 0 },
-      { tp: 10, fp: 0, fn: 0 },
-      { tp: 10, fp: 0, fn: 0 },
-      { tp: 0, fp: 10, fn: 0 },
+      ...Array.from({ length: 6 }, () => ({ tp: 5, fp: 0, fn: 0 })),
+      ...Array.from({ length: 2 }, () => ({ tp: 0, fp: 5, fn: 0 })),
     ];
     const widthOf = (r) => r.upper - r.lower;
     assert.ok(widthOf(bootstrapF1(clumped)) > widthOf(bootstrapF1(spread)));

@@ -264,6 +264,22 @@ export function bootstrapClustered(
     };
   }
 
+  // Section 9's floor applies to the unit of observation, and for a clustered estimator
+  // that unit is the PAGE, not the control. Forty controls spread over two pages are two
+  // independent observations, and resampling them yields an interval with two reachable
+  // endpoints; one page yields a zero-width interval that could not have been anything
+  // else. Applying the floor to the controls alone would publish both as confident
+  // figures, which is the same failure the floor exists to prevent.
+  if (usable.length < MIN_DENOMINATOR) {
+    return {
+      estimable: false,
+      reason: `${usable.length} page${usable.length === 1 ? '' : 's'} is below the floor of ${MIN_DENOMINATOR} for the resampling unit`,
+      ...raw,
+      counts: observed,
+      clusters: usable.length,
+    };
+  }
+
   const random = mulberry32(seedFromString(seed));
   const draws = [];
   for (let r = 0; r < resamples; r++) {

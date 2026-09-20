@@ -303,7 +303,7 @@ at both stage two and end to end, and control-level prevalence.
   `total` exactly as a Wilson result does, so nothing downstream loses them.
 - The seed string and the number of resamples.
 
-**Four decisions this amendment makes that section 9 does not address.** Recorded here
+**Five decisions this amendment makes that section 9 does not address.** Recorded here
 because they are the amendment's own choices, fixed now, before any evidence exists. None
 of them can be attributed to the frozen protocol.
 
@@ -320,7 +320,14 @@ of them can be attributed to the frozen protocol.
    all are undefined. Treating a resample with no true positives as undefined would discard
    exactly the worst draws and lift the lower bound, biasing the figure in the tool's own
    favour.
-4. **Pages are sorted into a canonical order before resampling.** The generator walks the
+4. **The floor of five applies to the number of PAGES as well as the denominator.**
+   Section 9 puts the floor on the denominator, which for these measures counts controls.
+   For a clustered estimator the unit of observation is the page, so forty controls spread
+   over two pages is two observations, not forty, and one page yields a zero-width interval
+   that could not have been anything else. Both are now refused. This is a faithful
+   application of section 9's own rule to the unit the method actually resamples, not a new
+   restriction, but it is the amendment's reading and is recorded as such.
+5. **Pages are sorted into a canonical order before resampling.** The generator walks the
    cluster array, so without this the published interval would depend on the order the
    pages happened to be listed in - the same corpus, read from a differently ordered
    directory, would produce a different interval.
