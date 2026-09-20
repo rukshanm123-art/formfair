@@ -1,0 +1,591 @@
+{
+  "exercise": "calibration-v1.0.0",
+  "catalogue": "catalogue-v1.0.0",
+  "pages": [
+    {
+      "pageId": "calibration-001",
+      "controls": [
+        {
+          "controlId": "c-A01",
+          "calibrationId": "A01",
+          "stageOne": "positive",
+          "basis": "Personal-name control. the plainest Basic-Latin class.",
+          "pattern": "[A-Za-z]+",
+          "minlength": null,
+          "maxlength": null,
+          "rules": {
+            "FF-01": "positive",
+            "FF-02": "negative",
+            "FF-03": "negative",
+            "FF-04": "positive",
+            "FF-05": "negative"
+          }
+        },
+        {
+          "controlId": "c-N01",
+          "calibrationId": "N01",
+          "stageOne": "negative",
+          "basis": "Not a natural person's name: site search."
+        },
+        {
+          "controlId": "c-A02",
+          "calibrationId": "A02",
+          "stageOne": "positive",
+          "basis": "Personal-name control. quantifier sets a minimum above one.",
+          "pattern": "[A-Za-z]{2,40}",
+          "minlength": null,
+          "maxlength": null,
+          "rules": {
+            "FF-01": "positive",
+            "FF-02": "negative",
+            "FF-03": "negative",
+            "FF-04": "positive",
+            "FF-05": "positive"
+          }
+        },
+        {
+          "controlId": "c-N02",
+          "calibrationId": "N02",
+          "stageOne": "negative",
+          "basis": "Not a natural person's name: username, not a personal name."
+        },
+        {
+          "controlId": "c-A03",
+          "calibrationId": "A03",
+          "stageOne": "positive",
+          "basis": "Personal-name control. admits apostrophe but not U+2019.",
+          "pattern": "[A-Za-z' \\-]+",
+          "minlength": null,
+          "maxlength": null,
+          "rules": {
+            "FF-01": "positive",
+            "FF-02": "negative",
+            "FF-03": "negative",
+            "FF-04": "positive",
+            "FF-05": "negative"
+          }
+        },
+        {
+          "controlId": "c-N03",
+          "calibrationId": "N03",
+          "stageOne": "negative",
+          "basis": "Not a natural person's name: organisation."
+        },
+        {
+          "controlId": "c-A04",
+          "calibrationId": "A04",
+          "stageOne": "positive",
+          "basis": "Personal-name control. all four punctuation characters admitted.",
+          "pattern": "[A-Za-z'’ \\-]+",
+          "minlength": null,
+          "maxlength": null,
+          "rules": {
+            "FF-01": "positive",
+            "FF-02": "negative",
+            "FF-03": "negative",
+            "FF-04": "negative",
+            "FF-05": "negative"
+          }
+        },
+        {
+          "controlId": "c-N04",
+          "calibrationId": "N04",
+          "stageOne": "negative",
+          "basis": "Not a natural person's name: street name."
+        }
+      ]
+    },
+    {
+      "pageId": "calibration-002",
+      "controls": [
+        {
+          "controlId": "c-A05",
+          "calibrationId": "A05",
+          "stageOne": "positive",
+          "basis": "Personal-name control. punctuation fine, minimum is two.",
+          "pattern": "[A-Za-z'’ \\-]{2,50}",
+          "minlength": null,
+          "maxlength": null,
+          "rules": {
+            "FF-01": "positive",
+            "FF-02": "negative",
+            "FF-03": "negative",
+            "FF-04": "negative",
+            "FF-05": "positive"
+          }
+        },
+        {
+          "controlId": "c-N05",
+          "calibrationId": "N05",
+          "stageOne": "negative",
+          "basis": "Not a natural person's name: not a natural person."
+        },
+        {
+          "controlId": "c-A06",
+          "calibrationId": "A06",
+          "stageOne": "positive",
+          "basis": "Personal-name control. minimum of three.",
+          "pattern": "[A-Za-z]{3,20}",
+          "minlength": null,
+          "maxlength": null,
+          "rules": {
+            "FF-01": "positive",
+            "FF-02": "negative",
+            "FF-03": "negative",
+            "FF-04": "positive",
+            "FF-05": "positive"
+          }
+        },
+        {
+          "controlId": "c-N06",
+          "calibrationId": "N06",
+          "stageOne": "negative",
+          "basis": "Not a natural person's name: product."
+        },
+        {
+          "controlId": "c-A07",
+          "calibrationId": "A07",
+          "stageOne": "positive",
+          "basis": "Personal-name control. space admitted, apostrophe and hyphen not.",
+          "pattern": "[A-Za-z ]+",
+          "minlength": null,
+          "maxlength": null,
+          "rules": {
+            "FF-01": "positive",
+            "FF-02": "negative",
+            "FF-03": "negative",
+            "FF-04": "positive",
+            "FF-05": "negative"
+          }
+        },
+        {
+          "controlId": "c-N07",
+          "calibrationId": "N07",
+          "stageOne": "negative",
+          "basis": "Not a natural person's name: place name."
+        },
+        {
+          "controlId": "c-A08",
+          "calibrationId": "A08",
+          "stageOne": "positive",
+          "basis": "Personal-name control. explicit minlength.",
+          "pattern": "[A-Za-z\\-]+",
+          "minlength": 2,
+          "maxlength": null,
+          "rules": {
+            "FF-01": "positive",
+            "FF-02": "negative",
+            "FF-03": "negative",
+            "FF-04": "positive",
+            "FF-05": "positive"
+          }
+        },
+        {
+          "controlId": "c-N08",
+          "calibrationId": "N08",
+          "stageOne": "negative",
+          "basis": "Not a natural person's name: display name, explicitly excluded."
+        }
+      ]
+    },
+    {
+      "pageId": "calibration-003",
+      "controls": [
+        {
+          "controlId": "c-A09",
+          "calibrationId": "A09",
+          "stageOne": "positive",
+          "basis": "Personal-name control. maxlength cannot cause asymmetry when both forms are already rejected.",
+          "pattern": "[A-Za-z]+",
+          "minlength": null,
+          "maxlength": 5,
+          "rules": {
+            "FF-01": "positive",
+            "FF-02": "negative",
+            "FF-03": "negative",
+            "FF-04": "positive",
+            "FF-05": "negative"
+          }
+        },
+        {
+          "controlId": "c-N09",
+          "calibrationId": "N09",
+          "stageOne": "negative",
+          "basis": "Not a natural person's name: identifier."
+        },
+        {
+          "controlId": "c-A10",
+          "calibrationId": "A10",
+          "stageOne": "positive",
+          "basis": "Personal-name control. minlength of four.",
+          "pattern": "[A-Za-z'’ \\-]+",
+          "minlength": 4,
+          "maxlength": null,
+          "rules": {
+            "FF-01": "positive",
+            "FF-02": "negative",
+            "FF-03": "negative",
+            "FF-04": "negative",
+            "FF-05": "positive"
+          }
+        },
+        {
+          "controlId": "c-N10",
+          "calibrationId": "N10",
+          "stageOne": "negative",
+          "basis": "Not a natural person's name: message subject."
+        },
+        {
+          "controlId": "c-A11",
+          "calibrationId": "A11",
+          "stageOne": "positive",
+          "basis": "Personal-name control. minimum of one, so FF-05 does not fire.",
+          "pattern": "[A-Za-z]{1,30}",
+          "minlength": null,
+          "maxlength": null,
+          "rules": {
+            "FF-01": "positive",
+            "FF-02": "negative",
+            "FF-03": "negative",
+            "FF-04": "positive",
+            "FF-05": "negative"
+          }
+        },
+        {
+          "controlId": "c-N11",
+          "calibrationId": "N11",
+          "stageOne": "negative",
+          "basis": "Not a natural person's name: business name."
+        },
+        {
+          "controlId": "c-A12",
+          "calibrationId": "A12",
+          "stageOne": "positive",
+          "basis": "Personal-name control. open-ended maximum, minimum two.",
+          "pattern": "[A-Za-z'’ \\-]{2,}",
+          "minlength": null,
+          "maxlength": null,
+          "rules": {
+            "FF-01": "positive",
+            "FF-02": "negative",
+            "FF-03": "negative",
+            "FF-04": "negative",
+            "FF-05": "positive"
+          }
+        },
+        {
+          "controlId": "c-N12",
+          "calibrationId": "N12",
+          "stageOne": "negative",
+          "basis": "Not a natural person's name: occupation."
+        }
+      ]
+    },
+    {
+      "pageId": "calibration-004",
+      "controls": [
+        {
+          "controlId": "c-B01",
+          "calibrationId": "B01",
+          "stageOne": "positive",
+          "basis": "Personal-name control. property escapes admit the macron and combining marks alike.",
+          "pattern": "[\\p{L}\\p{M}'’ \\-]+",
+          "minlength": null,
+          "maxlength": null,
+          "rules": {
+            "FF-01": "negative",
+            "FF-02": "negative",
+            "FF-03": "negative",
+            "FF-04": "negative",
+            "FF-05": "negative"
+          }
+        },
+        {
+          "controlId": "c-N13",
+          "calibrationId": "N13",
+          "stageOne": "negative",
+          "basis": "Not a natural person's name: postcode."
+        },
+        {
+          "controlId": "c-B02",
+          "calibrationId": "B02",
+          "stageOne": "positive",
+          "basis": "Personal-name control. as B01, minimum of two.",
+          "pattern": "[\\p{L}\\p{M}'’ \\-]{2,}",
+          "minlength": null,
+          "maxlength": null,
+          "rules": {
+            "FF-01": "negative",
+            "FF-02": "negative",
+            "FF-03": "negative",
+            "FF-04": "negative",
+            "FF-05": "positive"
+          }
+        },
+        {
+          "controlId": "c-N14",
+          "calibrationId": "N14",
+          "stageOne": "negative",
+          "basis": "Not a natural person's name: country."
+        },
+        {
+          "controlId": "c-B03",
+          "calibrationId": "B03",
+          "stageOne": "positive",
+          "basis": "Personal-name control. Latin-1 Supplement stops short of Latin Extended-A.",
+          "pattern": "[A-Za-zÀ-ÿ]+",
+          "minlength": null,
+          "maxlength": null,
+          "rules": {
+            "FF-01": "negative",
+            "FF-02": "positive",
+            "FF-03": "positive",
+            "FF-04": "positive",
+            "FF-05": "negative"
+          }
+        },
+        {
+          "controlId": "c-N15",
+          "calibrationId": "N15",
+          "stageOne": "negative",
+          "basis": "Not a natural person's name: department."
+        },
+        {
+          "controlId": "c-B04",
+          "calibrationId": "B04",
+          "stageOne": "positive",
+          "basis": "Personal-name control. as B03 with punctuation admitted.",
+          "pattern": "[A-Za-zÀ-ÿ'’ \\-]+",
+          "minlength": null,
+          "maxlength": null,
+          "rules": {
+            "FF-01": "negative",
+            "FF-02": "positive",
+            "FF-03": "positive",
+            "FF-04": "negative",
+            "FF-05": "negative"
+          }
+        },
+        {
+          "controlId": "c-N16",
+          "calibrationId": "N16",
+          "stageOne": "negative",
+          "basis": "Not a natural person's name: file name."
+        }
+      ]
+    },
+    {
+      "pageId": "calibration-005",
+      "controls": [
+        {
+          "controlId": "c-B05",
+          "calibrationId": "B05",
+          "stageOne": "positive",
+          "basis": "Personal-name control. as B03 with a minimum of two.",
+          "pattern": "[A-Za-zÀ-ÿ]{2,40}",
+          "minlength": null,
+          "maxlength": null,
+          "rules": {
+            "FF-01": "negative",
+            "FF-02": "positive",
+            "FF-03": "positive",
+            "FF-04": "positive",
+            "FF-05": "positive"
+          }
+        },
+        {
+          "controlId": "c-N17",
+          "calibrationId": "N17",
+          "stageOne": "negative",
+          "basis": "Not a natural person's name: registration."
+        },
+        {
+          "controlId": "c-B06",
+          "calibrationId": "B06",
+          "stageOne": "positive",
+          "basis": "Personal-name control. a hand-listed French subset.",
+          "pattern": "[A-Za-zÉéèêëàâ]+",
+          "minlength": null,
+          "maxlength": null,
+          "rules": {
+            "FF-01": "negative",
+            "FF-02": "positive",
+            "FF-03": "positive",
+            "FF-04": "positive",
+            "FF-05": "negative"
+          }
+        },
+        {
+          "controlId": "c-N18",
+          "calibrationId": "N18",
+          "stageOne": "negative",
+          "basis": "Not a natural person's name: course title."
+        },
+        {
+          "controlId": "c-B07",
+          "calibrationId": "B07",
+          "stageOne": "positive",
+          "basis": "Personal-name control. hand-listed subset, minimum two.",
+          "pattern": "[A-Za-zÉéèêë'’ \\-]{2,}",
+          "minlength": null,
+          "maxlength": null,
+          "rules": {
+            "FF-01": "negative",
+            "FF-02": "positive",
+            "FF-03": "positive",
+            "FF-04": "negative",
+            "FF-05": "positive"
+          }
+        },
+        {
+          "controlId": "c-N19",
+          "calibrationId": "N19",
+          "stageOne": "negative",
+          "basis": "Not a natural person's name: search keywords."
+        },
+        {
+          "controlId": "c-B08",
+          "calibrationId": "B08",
+          "stageOne": "positive",
+          "basis": "Personal-name control. minimum of three.",
+          "pattern": "[A-Za-zÀ-ÿ'’ \\-]{3,}",
+          "minlength": null,
+          "maxlength": null,
+          "rules": {
+            "FF-01": "negative",
+            "FF-02": "positive",
+            "FF-03": "positive",
+            "FF-04": "negative",
+            "FF-05": "positive"
+          }
+        },
+        {
+          "controlId": "c-N20",
+          "calibrationId": "N20",
+          "stageOne": "negative",
+          "basis": "Not a natural person's name: job title, and the constrained pattern is a distractor."
+        }
+      ]
+    },
+    {
+      "pageId": "calibration-006",
+      "controls": [
+        {
+          "controlId": "c-B09",
+          "calibrationId": "B09",
+          "stageOne": "positive",
+          "basis": "Personal-name control. maxlength present but not the cause of the asymmetry.",
+          "pattern": "[A-Za-zÀ-ÿ]+",
+          "minlength": null,
+          "maxlength": 8,
+          "rules": {
+            "FF-01": "negative",
+            "FF-02": "positive",
+            "FF-03": "positive",
+            "FF-04": "positive",
+            "FF-05": "negative"
+          }
+        },
+        {
+          "controlId": "c-N21",
+          "calibrationId": "N21",
+          "stageOne": "negative",
+          "basis": "Not a natural person's name: a label for an account, not a person."
+        },
+        {
+          "controlId": "c-B10",
+          "calibrationId": "B10",
+          "stageOne": "positive",
+          "basis": "Personal-name control. wide range, minimum two.",
+          "pattern": "[A-Za-zÀ-ÿ'’ \\-]{2,60}",
+          "minlength": null,
+          "maxlength": null,
+          "rules": {
+            "FF-01": "negative",
+            "FF-02": "positive",
+            "FF-03": "positive",
+            "FF-04": "negative",
+            "FF-05": "positive"
+          }
+        },
+        {
+          "controlId": "c-N22",
+          "calibrationId": "N22",
+          "stageOne": "negative",
+          "basis": "Not a natural person's name: institution."
+        },
+        {
+          "controlId": "c-B11",
+          "calibrationId": "B11",
+          "stageOne": "positive",
+          "basis": "Personal-name control. explicit minlength alongside the class.",
+          "pattern": "[A-Za-zÉéèêëàâîô'’ \\-]+",
+          "minlength": 2,
+          "maxlength": null,
+          "rules": {
+            "FF-01": "negative",
+            "FF-02": "positive",
+            "FF-03": "positive",
+            "FF-04": "negative",
+            "FF-05": "positive"
+          }
+        },
+        {
+          "controlId": "c-N23",
+          "calibrationId": "N23",
+          "stageOne": "negative",
+          "basis": "Not a natural person's name: project, and the pattern is a distractor."
+        },
+        {
+          "controlId": "c-B12",
+          "calibrationId": "B12",
+          "stageOne": "positive",
+          "basis": "Personal-name control. a hand-listed Spanish subset.",
+          "pattern": "[A-Za-zÁÉÍÓÚáéíóú'’ \\-]+",
+          "minlength": null,
+          "maxlength": null,
+          "rules": {
+            "FF-01": "negative",
+            "FF-02": "positive",
+            "FF-03": "positive",
+            "FF-04": "negative",
+            "FF-05": "negative"
+          }
+        },
+        {
+          "controlId": "c-N24",
+          "calibrationId": "N24",
+          "stageOne": "negative",
+          "basis": "Not a natural person's name: place name."
+        }
+      ]
+    }
+  ],
+  "counts": {
+    "pages": 6,
+    "stageOnePositive": 24,
+    "stageOneNegative": 24,
+    "perRule": {
+      "FF-01": {
+        "positive": 12,
+        "negative": 12
+      },
+      "FF-02": {
+        "positive": 10,
+        "negative": 14
+      },
+      "FF-03": {
+        "positive": 10,
+        "negative": 14
+      },
+      "FF-04": {
+        "positive": 12,
+        "negative": 12
+      },
+      "FF-05": {
+        "positive": 12,
+        "negative": 12
+      }
+    }
+  }
+}
