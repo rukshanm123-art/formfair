@@ -15,7 +15,17 @@
  * earlier. End to end is the honest headline. Both are reported.
  */
 
-import { bootstrapF1, cohensKappa, wilson, f1From, MIN_DENOMINATOR } from './stats.mjs';
+import {
+  bootstrapF1,
+  bootstrapClustered,
+  precisionFrom,
+  recallFrom,
+  coverageFrom,
+  cohensKappa,
+  wilson,
+  f1From,
+  MIN_DENOMINATOR,
+} from './stats.mjs';
 
 export const RULES = ['FF-01', 'FF-02', 'FF-03', 'FF-04', 'FF-05'];
 
@@ -32,8 +42,18 @@ function score(counts, clusters, label) {
   return {
     label,
     counts: { ...counts },
-    precision: wilson(counts.tp, counts.tp + counts.fp),
-    recall: wilson(counts.tp, counts.tp + counts.fn),
+    // Amendment harness-v1.1.0: precision, recall and F1 are all page-clustered. Wilson
+    // assumed independent observations, which controls on a shared page are not.
+    precision: bootstrapClustered(clusters, {
+      estimate: precisionFrom,
+      numerator: ({ tp = 0 }) => tp,
+      denominator: ({ tp = 0, fp = 0 }) => tp + fp,
+    }),
+    recall: bootstrapClustered(clusters, {
+      estimate: recallFrom,
+      numerator: ({ tp = 0 }) => tp,
+      denominator: ({ tp = 0, fn = 0 }) => tp + fn,
+    }),
     f1: bootstrapF1(clusters),
   };
 }
@@ -75,11 +95,13 @@ export function stageOne(pages) {
 export function stageTwo(pages, rule) {
   const counts = emptyCounts();
   const clusters = [];
+  const coverageClusters = [];
   let decided = 0;
   let decidable = 0;
 
   for (const page of pages) {
     const cluster = { tp: 0, fp: 0, fn: 0 };
+    const coverage = { decided: 0, denominator: 0 };
     for (const control of page.controls) {
       if (control.isNameControl !== true || control.detected !== true) continue;
       const truth = control.rules?.[rule];
@@ -87,11 +109,13 @@ export function stageTwo(pages, rule) {
       if (truth === undefined || outcome === undefined) continue;
 
       decidable += 1;
+      coverage.denominator += 1;
       if (outcome === 'declined') {
         if (truth === 'negative') counts.declinedOnNegative += 1;
         continue;
       }
       decided += 1;
+      coverage.decided += 1;
 
       const fired = outcome === 'finding';
       if (truth === 'positive' && fired) cluster.tp += 1;
@@ -103,11 +127,19 @@ export function stageTwo(pages, rule) {
     counts.fp += cluster.fp;
     counts.fn += cluster.fn;
     clusters.push(cluster);
+    coverageClusters.push(coverage);
   }
 
   return {
     ...score(counts, clusters, `stage-two:${rule}`),
-    decisionCoverage: wilson(decided, decidable),
+    // Amendment harness-v1.1.0: coverage is a proportion over rule-control pairs, which
+    // cluster by page exactly as the accuracy counts do.
+    decisionCoverage: bootstrapClustered(coverageClusters, {
+      estimate: coverageFrom,
+      numerator: ({ decided = 0 }) => decided,
+      denominator: ({ denominator = 0 }) => denominator,
+    }),
+    decisionCoverageCounts: { decided, decidable },
   };
 }
 
@@ -127,16 +159,19 @@ export function stageTwo(pages, rule) {
 export function endToEnd(pages, rule) {
   const counts = emptyCounts();
   const clusters = [];
+  const coverageClusters = [];
   let decided = 0;
   let allPairs = 0;
 
   for (const page of pages) {
     const cluster = { tp: 0, fp: 0, fn: 0 };
+    const coverage = { decided: 0, denominator: 0 };
     for (const control of page.controls) {
       if (control.isNameControl !== true) continue;
       const truth = control.rules?.[rule];
       if (truth === undefined) continue;
       allPairs += 1;
+      coverage.denominator += 1;
 
       if (control.detected !== true) {
         if (truth === 'positive') cluster.fn += 1;
@@ -151,6 +186,7 @@ export function endToEnd(pages, rule) {
         continue;
       }
       decided += 1;
+      coverage.decided += 1;
 
       const fired = outcome === 'finding';
       if (truth === 'positive' && fired) cluster.tp += 1;
@@ -162,11 +198,17 @@ export function endToEnd(pages, rule) {
     counts.fp += cluster.fp;
     counts.fn += cluster.fn;
     clusters.push(cluster);
+    coverageClusters.push(coverage);
   }
 
   return {
     ...score(counts, clusters, `end-to-end:${rule}`),
-    decisionCoverage: wilson(decided, allPairs),
+    decisionCoverage: bootstrapClustered(coverageClusters, {
+      estimate: coverageFrom,
+      numerator: ({ decided = 0 }) => decided,
+      denominator: ({ denominator = 0 }) => denominator,
+    }),
+    decisionCoverageCounts: { decided, allPairs },
   };
 }
 
@@ -203,8 +245,25 @@ export function prevalence(pages) {
     const pagesAffected = pages.filter((p) =>
       p.controls.some((c) => c.isNameControl === true && c.rules?.[rule] === 'positive')
     );
+    // Control-level prevalence pools controls that share a page, so it is clustered.
+    // Form-level prevalence counts pages, where the page IS the unit of observation and
+    // pages are independent of one another - Wilson is retained there, deliberately.
+    const controlClusters = pages.map((p) => {
+      const labelled = p.controls.filter(
+        (c) => c.isNameControl === true && c.rules?.[rule] !== undefined
+      );
+      return {
+        decided: labelled.filter((c) => c.rules[rule] === 'positive').length,
+        denominator: labelled.length,
+      };
+    });
     perRule[rule] = {
-      control: wilson(positive.length, withLabel.length),
+      control: bootstrapClustered(controlClusters, {
+        estimate: coverageFrom,
+        numerator: ({ decided = 0 }) => decided,
+        denominator: ({ denominator = 0 }) => denominator,
+      }),
+      controlCounts: { positive: positive.length, labelled: withLabel.length },
       form: wilson(pagesAffected.length, pages.length),
     };
   }

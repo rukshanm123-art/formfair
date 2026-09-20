@@ -9,7 +9,7 @@ evaluation is run with. Tests use `node:test`.
 
 ```bash
 cd evaluation
-npm test              # 195 tests, on synthetic fixtures only
+npm test              # 209 tests, on synthetic fixtures only
 npm run draw-order    # verify the frozen order still matches the frame
 npm run build-frame   # rebuild frame.csv from the archived page and re-assert its counts
 npm run metrics -- fixtures/synthetic/dataset.valid.json --synthetic
@@ -44,7 +44,8 @@ the one thing that artefact exists to prevent. Creating it takes an explicit `--
 
 | Path | |
 |---|---|
-| `src/stats.mjs` | Wilson intervals, Cohen's kappa, seeded cluster bootstrap |
+| `src/stats.mjs` | page-cluster bootstrap, Wilson intervals, Cohen's kappa |
+| `test/clustered.test.mjs` | amendment 1 - measures Wilson's under-coverage rather than asserting it |
 | `src/schema.mjs` | frozen shapes for capture, annotation, adjudication and the joined dataset |
 | `src/inventory.mjs` | protocol section 7 - the neutral control inventory annotators label |
 | `src/join.mjs` | inventory + adjudicated truth + run output -> the scored dataset |

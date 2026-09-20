@@ -151,30 +151,86 @@ export function f1From({ tp, fp, fn }) {
 }
 
 /**
- * Cluster bootstrap over pages.
- *
- * Pages are the resampling unit, not individual rule-control pairs: controls on one page
- * share markup, framework and author, so their errors are correlated and resampling
- * pairs independently would produce an interval that is too narrow. This choice is
- * recorded in the protocol rather than left to the implementation.
+ * Estimators over summed cluster counts. Each returns null where the figure is undefined
+ * for those counts, which the bootstrap treats as a draw to discard rather than a zero.
  */
-export function bootstrapF1(clusters, { resamples = 2000, seed = 'evaluation-v1.0.0' } = {}) {
-  const usable = clusters.filter((c) => c && typeof c === 'object');
-  const total = usable.reduce((n, c) => n + c.tp + c.fp + c.fn, 0);
-  if (usable.length === 0 || total === 0) return notEstimable('no scored pairs');
+export function precisionFrom({ tp = 0, fp = 0 }) {
+  return tp + fp === 0 ? null : tp / (tp + fp);
+}
 
-  const point = f1From(usable.reduce(
-    (acc, c) => ({ tp: acc.tp + c.tp, fp: acc.fp + c.fp, fn: acc.fn + c.fn }),
-    { tp: 0, fp: 0, fn: 0 }
-  ));
-  if (point === null) return notEstimable('precision and recall are both undefined');
+export function recallFrom({ tp = 0, fn = 0 }) {
+  return tp + fn === 0 ? null : tp / (tp + fn);
+}
+
+export function coverageFrom({ decided = 0, denominator = 0 }) {
+  return denominator === 0 ? null : decided / denominator;
+}
+
+/**
+ * Percentile bootstrap over CLUSTERS, resampling whole pages with replacement.
+ *
+ * The unit of resampling is the page, not the control, because controls on one page share
+ * markup, framework and author, so their errors are correlated. Treating them as
+ * independent - which is what a Wilson interval on pooled controls does - understates the
+ * width. Wilson is retained only where the page itself is the unit of observation, such as
+ * form-level prevalence.
+ *
+ * Amendment harness-v1.1.0, dated before any held-out form was captured. The protocol tag
+ * protocol-v1.0.0 specified Wilson for all proportions; that specification is superseded
+ * here and the tag is not moved.
+ *
+ * `estimate` maps summed counts to a value or null. `denominator` maps summed counts to the
+ * count the MIN_DENOMINATOR guard applies to, so that "not estimable" means the same thing
+ * it does for wilson().
+ */
+export function bootstrapClustered(
+  clusters,
+  { estimate, denominator, numerator, resamples = 2000, seed = 'evaluation-v1.0.0' } = {}
+) {
+  if (typeof estimate !== 'function' || typeof denominator !== 'function') {
+    throw new TypeError('bootstrapClustered needs an estimate and a denominator function');
+  }
+  const usable = (clusters ?? []).filter((c) => c && typeof c === 'object');
+
+  const sum = (list) => {
+    const acc = {};
+    for (const c of list) {
+      for (const [k, v] of Object.entries(c)) {
+        if (typeof v === 'number' && Number.isFinite(v)) acc[k] = (acc[k] ?? 0) + v;
+      }
+    }
+    return acc;
+  };
+
+  const observed = sum(usable);
+  const total = denominator(observed);
+  // The protocol requires raw counts beside every figure, estimable or not. Where the
+  // measure is a simple proportion the caller supplies a numerator, and the result
+  // carries successes/total exactly as wilson() does, so the two are interchangeable.
+  const raw =
+    typeof numerator === 'function' ? { successes: numerator(observed), total } : { total };
+
+  if (usable.length === 0 || total === 0) {
+    return { ...notEstimable('no scored observations'), ...raw, clusters: usable.length };
+  }
+
+  const point = estimate(observed);
+  if (point === null) {
+    return {
+      ...notEstimable('the estimate is undefined for these counts'),
+      ...raw,
+      clusters: usable.length,
+    };
+  }
 
   if (total < MIN_DENOMINATOR) {
-    // Counts only. No point estimate and no interval, for the same reason as wilson().
+    // Counts only, for the same reason as wilson(): a point estimate sitting next to
+    // estimable:false leaves the misleading number one property access away.
     return {
       estimable: false,
       reason: `denominator ${total} is below ${MIN_DENOMINATOR}`,
-      scoredPairs: total,
+      ...raw,
+      counts: observed,
       clusters: usable.length,
     };
   }
@@ -182,30 +238,47 @@ export function bootstrapF1(clusters, { resamples = 2000, seed = 'evaluation-v1.
   const random = mulberry32(seedFromString(seed));
   const draws = [];
   for (let r = 0; r < resamples; r++) {
-    let tp = 0;
-    let fp = 0;
-    let fn = 0;
+    const picked = [];
     for (let i = 0; i < usable.length; i++) {
-      const picked = usable[Math.floor(random() * usable.length)];
-      tp += picked.tp;
-      fp += picked.fp;
-      fn += picked.fn;
+      picked.push(usable[Math.floor(random() * usable.length)]);
     }
-    const value = f1From({ tp, fp, fn });
-    if (value !== null) draws.push(value);
+    const value = estimate(sum(picked));
+    if (value !== null && Number.isFinite(value)) draws.push(value);
   }
 
-  if (draws.length === 0) return notEstimable('every resample was undefined');
+  // A resample can be undefined - every drawn page empty for this measure - so the
+  // proportion that resolved is reported. The protocol treats a bootstrap that mostly
+  // fails to resolve as unstable rather than as a narrow interval.
+  const resolved = draws.length / resamples;
+  if (draws.length === 0) {
+    return { ...notEstimable('every resample was undefined'), ...raw, clusters: usable.length };
+  }
+
   draws.sort((x, y) => x - y);
   const at = (q) => draws[Math.min(draws.length - 1, Math.max(0, Math.floor(q * draws.length)))];
 
   return {
     estimable: true,
+    method: 'page-cluster bootstrap',
     point,
     lower: at(0.025),
     upper: at(0.975),
     resamples: draws.length,
+    resolved,
+    stable: resolved >= 0.95,
     clusters: usable.length,
+    ...raw,
+    counts: observed,
     seed,
   };
+}
+
+/** Kept as the F1 entry point; now a thin wrapper over the shared clustered bootstrap. */
+export function bootstrapF1(clusters, options = {}) {
+  return bootstrapClustered(clusters, {
+    ...options,
+    estimate: f1From,
+    // Scored pairs, matching the denominator the protocol applies the floor to.
+    denominator: ({ tp = 0, fp = 0, fn = 0 }) => tp + fp + fn,
+  });
 }

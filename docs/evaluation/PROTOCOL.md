@@ -224,6 +224,11 @@ Wilson 95% confidence intervals for proportions; 2,000 bootstrap resamples for F
 raw counts. **Where a denominator is below five, label the result "not estimable"** rather
 than presenting it as reliable.
 
+> **Superseded in part by [Amendment 1](#amendment-1-interval-method-for-clustered-proportions),
+> 20 September 2026, before any held-out form was captured.** The interval method above is
+> replaced for proportions computed over controls. The rest of this paragraph, including
+> the denominator floor, stands unchanged.
+
 Compute held-out Cohen's kappa for stage one, every rule, and the pooled rule pairs. Also
 report percentage agreement and label counts. Where kappa cannot be computed because both
 annotators used a single category, report **"not estimable"**.
@@ -266,3 +271,54 @@ hoc and excluded from the frozen evaluation.
 
 `npm run seal:verify` in `evaluation/` checks the seal and exits non-zero if the required
 files are missing or their hashes do not match the recorded manifest.
+
+## Amendments
+
+Version 1.0 of this protocol is frozen and its tag `protocol-v1.0.0` is **not moved**.
+Amendments are recorded here, each dated, each stating what it supersedes and why, and
+each made before the evidence it affects exists. An amendment made after seeing results
+would be worthless, so the precondition is recorded as part of the amendment itself.
+
+### Amendment 1: interval method for clustered proportions
+
+**Dated 20 September 2026. Harness tag `harness-v1.1.0`. Made before any held-out form was
+captured, and therefore before any figure this affects could be known.**
+
+**What section 9 said.** Wilson 95% confidence intervals for proportions; 2,000 bootstrap
+resamples for F1.
+
+**What is changed.** Proportions whose denominator counts **controls or rule-control
+pairs** are now reported as **page-cluster bootstrap** intervals, by the same method and
+the same seed already specified for F1. This covers precision, recall, decision coverage
+at both stage two and end to end, and control-level prevalence.
+
+**What is unchanged.**
+
+- **Form-level prevalence keeps its Wilson interval,** because there the page *is* the
+  unit of observation and pages are independent of one another. Advisory form-level
+  prevalence likewise.
+- The **denominator floor of five** and the "not estimable" rule, applied to the same
+  denominator as before, per measure.
+- The requirement to **show raw counts**. Every clustered interval carries `successes` and
+  `total` exactly as a Wilson result does, so nothing downstream loses them.
+- The seed string and the number of resamples.
+
+**Why.** Section 9 was already in tension with the implementation choice recorded at the
+end of it, which states that controls within a page share markup, framework and author and
+so their errors are correlated. That reasoning was applied to F1 and not to the other
+proportions, although it holds for them identically. A Wilson interval assumes independent
+observations; controls pooled across pages are not independent, and the resulting interval
+is too narrow.
+
+**Evidence.** The amendment is not justified by argument alone. `evaluation/test/clustered.test.mjs`
+simulates pages carrying a page-level rate, with a known true proportion of 0.5, and counts
+how often each interval covers it. A nominal 95% Wilson interval on the pooled counts
+covers the true value **54%** of the time; the page-cluster interval covers it **93%**.
+The same file checks the converse, that with one observation per page the method does
+**not** inflate the interval - which is why retaining Wilson at form level is consistent
+rather than arbitrary.
+
+**Status of the frozen instrument.** `evaluation-v1.0.0` is unchanged and remains the tag
+at which FormFair itself is run. This amendment touches the **analysis harness only** -
+how intervals are computed from the labels - and not the analyser, the rule catalogue, the
+sampling frame or any annotation. No result is recomputed, because none exists.
