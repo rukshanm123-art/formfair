@@ -26,6 +26,7 @@ import {
   f1From,
   MIN_DENOMINATOR,
 } from './stats.mjs';
+import { harnessRef } from './harness-ref.mjs';
 
 export const RULES = ['FF-01', 'FF-02', 'FF-03', 'FF-04', 'FF-05'];
 
@@ -323,6 +324,10 @@ export function report(pages) {
   return {
     protocol: 'FormFair Held-Out Evaluation Protocol v1.0',
     instrument: 'evaluation-v1.0.0',
+    // Which statistics produced these figures. The protocol and the analyser are not
+    // enough: the same labels give different intervals under harness-v1.0.6 and
+    // harness-v1.1.0, so a report that cannot name its harness cannot be checked.
+    harness: harnessRef(),
     minimumDenominator: MIN_DENOMINATOR,
     stageOne: stageOne(pages),
     perRule,

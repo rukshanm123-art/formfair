@@ -9,7 +9,7 @@ evaluation is run with. Tests use `node:test`.
 
 ```bash
 cd evaluation
-npm test              # 214 tests, on synthetic fixtures only
+npm test              # 219 tests, on synthetic fixtures only
 npm run draw-order    # verify the frozen order still matches the frame
 npm run build-frame   # rebuild frame.csv from the archived page and re-assert its counts
 npm run metrics -- fixtures/synthetic/dataset.valid.json --synthetic
@@ -49,6 +49,7 @@ the one thing that artefact exists to prevent. Creating it takes an explicit `--
 | `src/schema.mjs` | frozen shapes for capture, annotation, adjudication and the joined dataset |
 | `src/inventory.mjs` | protocol section 7 - the neutral control inventory annotators label |
 | `src/join.mjs` | inventory + adjudicated truth + run output -> the scored dataset |
+| `src/harness-ref.mjs` | provenance of the ANALYSIS harness, recorded in every report |
 | `src/instrument-ref.mjs` | resolves and verifies the frozen instrument checkout |
 | `src/cli-inventory.mjs` | build the inventory from captured pages |
 | `src/cli-join.mjs` | run the instrument under the seal and join into the dataset |

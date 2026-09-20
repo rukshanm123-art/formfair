@@ -270,13 +270,20 @@ export function bootstrapClustered(
   // endpoints; one page yields a zero-width interval that could not have been anything
   // else. Applying the floor to the controls alone would publish both as confident
   // figures, which is the same failure the floor exists to prevent.
-  if (usable.length < MIN_DENOMINATOR) {
+  //
+  // The floor counts pages that CONTRIBUTE to this measure. A page with no labelled
+  // control for a rule has a denominator of zero for it: it is in the corpus but it is not
+  // an observation of this quantity, and counting it would let three contributing pages
+  // hide inside forty and clear a floor they do not meet.
+  const contributing = usable.filter((c) => denominator(c) > 0).length;
+  if (contributing < MIN_DENOMINATOR) {
     return {
       estimable: false,
-      reason: `${usable.length} page${usable.length === 1 ? '' : 's'} is below the floor of ${MIN_DENOMINATOR} for the resampling unit`,
+      reason: `${contributing} page${contributing === 1 ? '' : 's'} contribute${contributing === 1 ? 's' : ''} to this measure, below the floor of ${MIN_DENOMINATOR} for the resampling unit`,
       ...raw,
       counts: observed,
       clusters: usable.length,
+      contributingClusters: contributing,
     };
   }
 
@@ -302,6 +309,7 @@ export function bootstrapClustered(
       ...raw,
       counts: observed,
       clusters: usable.length,
+      contributingClusters: contributing,
       resamples,
       resolved,
     };
@@ -318,6 +326,7 @@ export function bootstrapClustered(
       ...raw,
       counts: observed,
       clusters: usable.length,
+      contributingClusters: contributing,
       resamples,
       resolved,
       stable: false,
@@ -343,6 +352,7 @@ export function bootstrapClustered(
     resolved,
     stable: true,
     clusters: usable.length,
+    contributingClusters: contributing,
     ...raw,
     counts: observed,
     seed,

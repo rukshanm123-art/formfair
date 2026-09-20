@@ -254,13 +254,50 @@ describe('the floor applies to the resampling unit, not just the controls', () =
     assert.equal(twoPages.estimable, false);
     assert.equal(twoPages.total, 40, 'the controls still clear the denominator floor');
     assert.equal(twoPages.clusters, 2);
-    assert.match(twoPages.reason, /2 pages is below the floor of 5/);
+    assert.match(twoPages.reason, /2 pages contribute to this measure, below the floor of 5/);
     assert.equal(twoPages.lower, undefined);
 
     const onePage = bootstrapClustered([{ decided: 12, denominator: 30 }], ap);
     assert.equal(onePage.estimable, false);
-    assert.match(onePage.reason, /1 page is below/, 'singular, not "1 pages"');
+    assert.match(onePage.reason, /^1 page contributes/, 'singular, not "1 pages contribute"');
     assert.equal(onePage.upper, undefined, 'a zero-width interval must not be reachable');
+  });
+
+  test('pages that contribute nothing do not count toward the floor', () => {
+    // Forty pages in the corpus, three with any observation of this measure. Counting the
+    // corpus rather than the contributors let three pages clear a floor of five and report
+    // estimable: true with an interval of 0.2 to 0.8.
+    const clusters = Array.from({ length: 40 }, (_, i) =>
+      i < 3 ? { decided: i + 1, denominator: 5 } : { decided: 0, denominator: 0 }
+    );
+    const r = bootstrapClustered(clusters, ap);
+    assert.equal(r.estimable, false);
+    assert.equal(r.clusters, 40, 'the corpus size is still reported');
+    assert.equal(r.contributingClusters, 3, 'but the floor is judged on the contributors');
+    assert.match(r.reason, /3 pages contribute/);
+    assert.equal(r.lower, undefined);
+  });
+
+  test('the complete page set is still resampled once the floor is met', () => {
+    // Empty pages are not observations of this measure, but they ARE part of the corpus:
+    // drawing one contributes nothing while still consuming a draw, which is what makes a
+    // sparse corpus produce a wider interval than a dense one. Excluding them from the
+    // resampling would understate that.
+    const sparse = Array.from({ length: 40 }, (_, i) =>
+      i < 8 ? { decided: i % 4, denominator: 4 } : { decided: 0, denominator: 0 }
+    );
+    const dense = Array.from({ length: 8 }, (_, i) => ({ decided: i % 4, denominator: 4 }));
+    const sparseResult = bootstrapClustered(sparse, ap);
+    const denseResult = bootstrapClustered(dense, ap);
+
+    assert.equal(sparseResult.estimable, true);
+    assert.equal(sparseResult.clusters, 40, 'every page is resampled');
+    assert.equal(sparseResult.contributingClusters, 8);
+    assert.equal(sparseResult.total, denseResult.total, 'the same observations underlie both');
+    assert.ok(
+      sparseResult.upper - sparseResult.lower > denseResult.upper - denseResult.lower,
+      'spreading the same observations across a larger corpus must not narrow the interval'
+    );
   });
 
   test('five pages is enough for the estimate to be reported', () => {
@@ -360,19 +397,35 @@ describe('it refuses to be fooled by the input', () => {
   });
 
   test('an unresolved bootstrap is refused outright, not reported as a narrow interval', () => {
-    // Before this guard the same input returned estimable:true with lower === upper, a
-    // zero-width "95% confidence interval" resting on a third of the draws.
-    const clusters = Array.from({ length: 40 }, () => ({ tp: 0, fp: 0, fn: 0 }));
-    clusters[0] = { tp: 6, fp: 2, fn: 1 };
-    const r = bootstrapF1(clusters, { resamples: 400 });
+    // Before this guard such an input returned estimable:true with lower === upper - a
+    // zero-width "95% confidence interval" resting on a fraction of the draws.
+    //
+    // Reaching the guard now takes a deliberate construction. Once the floor requires five
+    // CONTRIBUTING pages, a resample misses all of them with probability at most about
+    // e^-5, so an estimator that is undefined only on an empty denominator resolves better
+    // than 99% of the time and can no longer be unstable. The guard survives as a backstop
+    // for estimators undefined for other reasons, and that is what is exercised here: every
+    // page clears the floor, but the estimate needs the one marked page to be defined.
+    const clusters = Array.from({ length: 40 }, (_, i) => ({
+      decided: i === 0 ? 1 : 0,
+      denominator: 1,
+      marked: i === 0 ? 1 : 0,
+    }));
+    const r = bootstrapClustered(clusters, {
+      estimate: (c) => (c.marked > 0 ? c.decided / c.denominator : null),
+      numerator: ({ decided = 0 }) => decided,
+      denominator: ({ denominator = 0 }) => denominator,
+      resamples: 400,
+    });
     assert.equal(r.estimable, false);
     assert.equal(r.stable, false);
     assert.equal(r.lower, undefined, 'no bound may be reachable on a refused bootstrap');
     assert.equal(r.upper, undefined);
-    assert.ok(r.resolved < STABILITY_THRESHOLD);
+    assert.ok(r.resolved < STABILITY_THRESHOLD, `resolved was ${r.resolved}`);
     assert.match(r.reason, /resolved/);
     assert.equal(r.resamples, 400, 'the requested count, not the surviving one');
-    assert.equal(r.counts.tp, 6, 'raw counts survive the refusal');
+    assert.equal(r.contributingClusters, 40, 'the floor was met; this is the stability rule');
+    assert.equal(r.successes, 1, 'raw counts survive the refusal');
   });
 
   test('a fully resolved bootstrap is marked stable', () => {

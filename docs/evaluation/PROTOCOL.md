@@ -320,13 +320,23 @@ of them can be attributed to the frozen protocol.
    all are undefined. Treating a resample with no true positives as undefined would discard
    exactly the worst draws and lift the lower bound, biasing the figure in the tool's own
    favour.
-4. **The floor of five applies to the number of PAGES as well as the denominator.**
-   Section 9 puts the floor on the denominator, which for these measures counts controls.
-   For a clustered estimator the unit of observation is the page, so forty controls spread
-   over two pages is two observations, not forty, and one page yields a zero-width interval
-   that could not have been anything else. Both are now refused. This is a faithful
-   application of section 9's own rule to the unit the method actually resamples, not a new
-   restriction, but it is the amendment's reading and is recorded as such.
+4. **The floor of five applies to the number of CONTRIBUTING pages as well as the
+   denominator.** Section 9 puts the floor on the denominator, which for these measures
+   counts controls. For a clustered estimator the unit of observation is the page, so forty
+   controls spread over two pages is two observations, not forty, and one page yields a
+   zero-width interval that could not have been anything else. A page counts only where its
+   denominator for that measure is greater than zero: a page with no labelled control for a
+   rule is in the corpus but is not an observation of that quantity, and counting it would
+   let three contributing pages hide inside forty. The **complete** page set is still
+   resampled, because an empty page drawn contributes nothing while still consuming a draw,
+   which is what makes a sparse corpus yield a wider interval than a dense one. This is a
+   faithful application of section 9's own rule to the unit the method actually resamples,
+   not a new restriction, but the reading is the amendment's and is recorded as such.
+
+   A consequence worth stating: once five contributing pages are required, a resample misses
+   all of them with probability at most about e^-5, so decision 2's stability rule can
+   essentially no longer fire for an estimator that is undefined only on an empty
+   denominator. It is retained as a backstop, not as an active filter.
 5. **Pages are sorted into a canonical order before resampling.** The generator walks the
    cluster array, so without this the published interval would depend on the order the
    pages happened to be listed in - the same corpus, read from a differently ordered
@@ -356,6 +366,14 @@ forms, which is unknown and stays unknown until the corpus exists. Under weaker 
 correlation the gap narrows; under none it vanishes, which is what the converse test
 measures: with one observation per page the method does **not** inflate the interval. That
 is why retaining Wilson at form level is consistent rather than arbitrary.
+
+**Provenance of the figures.** Every report records the harness that produced it: its
+version, its commit, whether the working tree was clean at the time, whether that commit
+carries the `harness-v1.1.0` tag, and the analysis constants themselves - interval method
+at each level, resample count, seed, quantile convention, both floors and the stability
+threshold. The protocol and the analyser tag alone cannot distinguish a figure computed
+under `harness-v1.0.6` from one computed under this amendment, and a report that cannot
+name its own statistics cannot be checked.
 
 **Status of the frozen instrument.** `evaluation-v1.0.0` is unchanged and remains the tag
 at which FormFair itself is run. This amendment touches the **analysis harness only** -
