@@ -25,12 +25,18 @@ export const DIACRITIC_NAMES = [
 export const MACRON_NAMES = ['Tāwhiao', 'Ngātā'];
 
 /** Names whose validity depends on punctuation an ASCII letter range excludes. */
-export const PUNCTUATED_NAMES = [
+const PUNCTUATION_SOURCES = [
   { name: "O'Brien", codePoint: 'U+0027' },
   { name: 'O’Brien', codePoint: 'U+2019' },
   { name: 'Anne-Marie', codePoint: 'U+002D' },
   { name: 'van der Berg', codePoint: 'U+0020' },
 ];
+
+/** The character each label names, derived from the label so the two cannot disagree. */
+export const PUNCTUATED_NAMES = PUNCTUATION_SOURCES.map((p) => ({
+  ...p,
+  char: String.fromCodePoint(Number.parseInt(p.codePoint.slice(2), 16)),
+}));
 
 /** Single-letter given names, which a minimum length above one excludes. */
 export const SHORT_NAMES = ['O', 'X'];

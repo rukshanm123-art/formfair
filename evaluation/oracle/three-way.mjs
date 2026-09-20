@@ -13,7 +13,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadInstrument, instrumentDirFromEnv } from '../src/instrument-ref.mjs';
-import { oracleLabels } from './oracle.mjs';
+import { suggestedLabels } from './oracle.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const RULES = ['FF-01', 'FF-02', 'FF-03', 'FF-04', 'FF-05'];
@@ -36,7 +36,7 @@ for (const page of key.pages) {
     const fired = new Set((report.findings ?? []).filter((f) => at(f) === p).map((f) => f.rule));
     const declined = new Set((report.declined ?? []).filter((d) => at(d) === p).map((d) => d.rule));
 
-    const o = oracleLabels({
+    const o = suggestedLabels({
       pattern: control.pattern,
       minlength: control.minlength ?? undefined,
       maxlength: control.maxlength ?? undefined,
