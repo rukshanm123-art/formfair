@@ -138,7 +138,9 @@ export function behaviouralWitness(control) {
 
   // A single accepted character of ANY case establishes a minimum length of one. Probing
   // only uppercase O and X would read `[a-z]{1}` as having a minimum above one.
-  const singleCharWitness = [...BASIC_LATIN_SAMPLE, ...OUTSIDE_BASIC_LATIN].find((ch) => accepts(ch));
+  const singleCharWitness = [...BASIC_LATIN_SAMPLE, ...OUTSIDE_BASIC_LATIN, ...'0123456789', ..."'\u2019 -."].find((ch) =>
+    accepts(ch)
+  );
 
   const asymmetric = NORMALISATION_PAIRS.filter((p) => accepts(p.nfc) !== accepts(p.nfd));
 
@@ -149,9 +151,15 @@ export function behaviouralWitness(control) {
     // Evidence, not ground truth. `bounded` marks a reading that rests on an absence
     // finite probing cannot prove.
     evidence: {
-      'FF-01': outsideWitnesses.length > 0
+      // The catalogue requires a pattern that admits AT LEAST ONE Basic Latin letter. A
+      // digits-only class admits none, so the rule cannot fire however few outside letters
+      // are witnessed. This witness was computed and reported but not gated on, and
+      // `[0-9]{1,5}` came back positive.
+      'FF-01': !basicLatinWitness
         ? bounded('negative', false)
-        : bounded('positive', true, 'no outside letter was witnessed, which probing cannot turn into proof that none is admitted'),
+        : outsideWitnesses.length > 0
+          ? bounded('negative', false)
+          : bounded('positive', true, 'no outside letter was witnessed, which probing cannot turn into proof that none is admitted'),
       'FF-02': outsideWitnesses.length === 0
         ? bounded('negative', true, 'suppressed by FF-01, whose own reading is bounded')
         : requiredNotWitnessed.length > 0

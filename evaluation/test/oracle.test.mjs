@@ -97,6 +97,40 @@ describe('four counterexamples that stop this being called an oracle', () => {
     assert.ok(behaviouralWitness({ pattern: '[a-z]{1}' }).witness.singleCharacterAccepted);
   });
 
+  test('FF-01 needs a Basic Latin letter admitted, not merely no outside letter', () => {
+    // Was positive: a digits-only class admits no letter outside Basic Latin, and the
+    // witness that would have caught it was computed, reported, and never gated on.
+    const r = suggestedLabels({ pattern: '[0-9]{1,5}' });
+    assert.equal(r.rules['FF-01'], 'negative');
+    assert.equal(behaviouralWitness({ pattern: '[0-9]{1,5}' }).witness.basicLatinAccepted, null);
+  });
+
+  test('FF-05 probes digits and punctuation too, not letters alone', () => {
+    // Was positive: "1" is accepted, so the minimum accepted length is one, but the
+    // single-character probe only tried letters.
+    const r = suggestedLabels({ pattern: '[0-9]{1,5}' });
+    assert.equal(r.rules['FF-05'], 'negative');
+  });
+
+  test('it answers where FormFair declines, so it is not a drop-in for the tool', () => {
+    // FormFair's UNSUPPORTED list in src/parse/pattern.ts declines alternation, groups and
+    // lookaround. A regex engine executes all three happily, so the witness returns a
+    // confident reading exactly where the tool refuses to give one. Pinned because this
+    // asymmetry is the reason the two cannot be compared decision-for-decision.
+    for (const pattern of ['(?:[A-Za-z]+ )?[A-Za-z]+', '^[A-Za-z]+$|^$', '[A-Za-z]+(?=x)']) {
+      const r = suggestedLabels({ pattern });
+      assert.equal(r.undecidable, false, `${pattern} is answered, though FormFair declines it`);
+    }
+  });
+
+  test('its probe alphabet is finite and hand-written, and misses real orthographies', () => {
+    // Danish uses o-slash and a-ring. Neither is in the probe list, so a class admitting
+    // them shows no outside witness and FF-01 reads positive. The bound is not theoretical.
+    const danish = suggestedLabels({ pattern: '[A-Za-z\u00f8\u00e5]+' });
+    assert.equal(danish.rules['FF-01'], 'positive', 'wrongly, because the probe set is incomplete');
+    assert.equal(danish.bounded['FF-01'], true, 'which is why a positive reading is always bounded');
+  });
+
   test('a positive FF-01 is always marked bounded, because absence is not provable', () => {
     // The reason this is evidence and not an oracle. Finite probing exhibits a string that
     // IS accepted; it can never exhaust the alphabet to show none is. Every rule in the
