@@ -1,0 +1,643 @@
+{
+ "harness": "browser-differential-v2",
+ "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Claude/2.2553.1 Chrome/152.0.7977.76 Safari/537.36",
+ "decisions": 828,
+ "names": [
+  {
+   "n": "Smith",
+   "k": "ascii-control",
+   "cp": null,
+   "pair": null,
+   "units": 5
+  },
+  {
+   "n": "Tāwhiao",
+   "k": "diacritic",
+   "cp": null,
+   "pair": null,
+   "units": 7
+  },
+  {
+   "n": "Ngātā",
+   "k": "diacritic",
+   "cp": null,
+   "pair": null,
+   "units": 5
+  },
+  {
+   "n": "Faʻasamoa",
+   "k": "diacritic",
+   "cp": null,
+   "pair": null,
+   "units": 9
+  },
+  {
+   "n": "Émile",
+   "k": "diacritic",
+   "cp": null,
+   "pair": null,
+   "units": 5
+  },
+  {
+   "n": "Müller",
+   "k": "diacritic",
+   "cp": null,
+   "pair": null,
+   "units": 6
+  },
+  {
+   "n": "Núñez",
+   "k": "diacritic",
+   "cp": null,
+   "pair": null,
+   "units": 5
+  },
+  {
+   "n": "Łukasz",
+   "k": "diacritic",
+   "cp": null,
+   "pair": null,
+   "units": 6
+  },
+  {
+   "n": "Dvořák",
+   "k": "diacritic",
+   "cp": null,
+   "pair": null,
+   "units": 6
+  },
+  {
+   "n": "Gültekin",
+   "k": "diacritic",
+   "cp": null,
+   "pair": null,
+   "units": 8
+  },
+  {
+   "n": "Nguyễn",
+   "k": "diacritic",
+   "cp": null,
+   "pair": null,
+   "units": 6
+  },
+  {
+   "n": "O'Brien",
+   "k": "punctuation",
+   "cp": "U+0027",
+   "pair": null,
+   "units": 7
+  },
+  {
+   "n": "O’Brien",
+   "k": "punctuation",
+   "cp": "U+2019",
+   "pair": null,
+   "units": 7
+  },
+  {
+   "n": "Anne-Marie",
+   "k": "punctuation",
+   "cp": "U+002D",
+   "pair": null,
+   "units": 10
+  },
+  {
+   "n": "van der Berg",
+   "k": "punctuation",
+   "cp": "U+0020",
+   "pair": null,
+   "units": 12
+  },
+  {
+   "n": "O",
+   "k": "short",
+   "cp": null,
+   "pair": null,
+   "units": 1
+  },
+  {
+   "n": "X",
+   "k": "short",
+   "cp": null,
+   "pair": null,
+   "units": 1
+  },
+  {
+   "n": "Tāwhiao",
+   "k": "nfc",
+   "cp": null,
+   "pair": "Tāwhiao",
+   "units": 7
+  },
+  {
+   "n": "Tāwhiao",
+   "k": "nfd",
+   "cp": null,
+   "pair": "Tāwhiao",
+   "units": 8
+  },
+  {
+   "n": "Émile",
+   "k": "nfc",
+   "cp": null,
+   "pair": "Émile",
+   "units": 5
+  },
+  {
+   "n": "Émile",
+   "k": "nfd",
+   "cp": null,
+   "pair": "Émile",
+   "units": 6
+  },
+  {
+   "n": "Müller",
+   "k": "nfc",
+   "cp": null,
+   "pair": "Müller",
+   "units": 6
+  },
+  {
+   "n": "Müller",
+   "k": "nfd",
+   "cp": null,
+   "pair": "Müller",
+   "units": 7
+  }
+ ],
+ "controls": {
+  "A01": {
+   "p": "[A-Za-z]+",
+   "ml": null,
+   "xl": null,
+   "applied": true,
+   "compiles": true,
+   "bits": "01111111111111100111111",
+   "byPat": "01111111111111100111111",
+   "admit": "111000000000000000000000000"
+  },
+  "A02": {
+   "p": "[A-Za-z]{2,40}",
+   "ml": null,
+   "xl": null,
+   "applied": true,
+   "compiles": true,
+   "bits": "01111111111111111111111",
+   "byPat": "01111111111111111111111",
+   "admit": "111000000000000000000000000"
+  },
+  "A03": {
+   "p": "[A-Za-z' \\-]+",
+   "ml": null,
+   "xl": null,
+   "applied": true,
+   "compiles": true,
+   "bits": "01111111111010000111111",
+   "byPat": "01111111111010000111111",
+   "admit": "111000000000000000000010110"
+  },
+  "A04": {
+   "p": "[A-Za-z'’ \\-]+",
+   "ml": null,
+   "xl": null,
+   "applied": true,
+   "compiles": true,
+   "bits": "01111111111000000111111",
+   "byPat": "01111111111000000111111",
+   "admit": "111000000000000000000011110"
+  },
+  "A05": {
+   "p": "[A-Za-z'’ \\-]{2,50}",
+   "ml": null,
+   "xl": null,
+   "applied": true,
+   "compiles": true,
+   "bits": "01111111111000011111111",
+   "byPat": "01111111111000011111111",
+   "admit": "111000000000000000000011110"
+  },
+  "A06": {
+   "p": "[A-Za-z]{3,20}",
+   "ml": null,
+   "xl": null,
+   "applied": true,
+   "compiles": true,
+   "bits": "01111111111111111111111",
+   "byPat": "01111111111111111111111",
+   "admit": "111000000000000000000000000"
+  },
+  "A07": {
+   "p": "[A-Za-z ]+",
+   "ml": null,
+   "xl": null,
+   "applied": true,
+   "compiles": true,
+   "bits": "01111111111111000111111",
+   "byPat": "01111111111111000111111",
+   "admit": "111000000000000000000000100"
+  },
+  "A08": {
+   "p": "[A-Za-z\\-]+",
+   "ml": 2,
+   "xl": null,
+   "applied": true,
+   "compiles": true,
+   "bits": "01111111111110111111111",
+   "byPat": "01111111111110100111111",
+   "admit": "111000000000000000000000010"
+  },
+  "A09": {
+   "p": "[A-Za-z]+",
+   "ml": null,
+   "xl": 5,
+   "applied": true,
+   "compiles": true,
+   "bits": "01111111111111100111111",
+   "byPat": "01111111111111100111111",
+   "admit": "111000000000000000000000000"
+  },
+  "A10": {
+   "p": "[A-Za-z'’ \\-]+",
+   "ml": 4,
+   "xl": null,
+   "applied": true,
+   "compiles": true,
+   "bits": "01111111111000011111111",
+   "byPat": "01111111111000000111111",
+   "admit": "111000000000000000000011110"
+  },
+  "A11": {
+   "p": "[A-Za-z]{1,30}",
+   "ml": null,
+   "xl": null,
+   "applied": true,
+   "compiles": true,
+   "bits": "01111111111111100111111",
+   "byPat": "01111111111111100111111",
+   "admit": "111000000000000000000000000"
+  },
+  "A12": {
+   "p": "[A-Za-z'’ \\-]{2,}",
+   "ml": null,
+   "xl": null,
+   "applied": true,
+   "compiles": true,
+   "bits": "01111111111000011111111",
+   "byPat": "01111111111000011111111",
+   "admit": "111000000000000000000011110"
+  },
+  "B01": {
+   "p": "[\\p{L}\\p{M}'’ \\-]+",
+   "ml": null,
+   "xl": null,
+   "applied": true,
+   "compiles": true,
+   "bits": "00000000000000000000000",
+   "byPat": "00000000000000000000000",
+   "admit": "111111111111111111111111110"
+  },
+  "B02": {
+   "p": "[\\p{L}\\p{M}'’ \\-]{2,}",
+   "ml": null,
+   "xl": null,
+   "applied": true,
+   "compiles": true,
+   "bits": "00000000000000011000000",
+   "byPat": "00000000000000011000000",
+   "admit": "111111111111111111111111110"
+  },
+  "B03": {
+   "p": "[A-Za-zÀ-ÿ]+",
+   "ml": null,
+   "xl": null,
+   "applied": true,
+   "compiles": true,
+   "bits": "01110001101111100110101",
+   "byPat": "01110001101111100110101",
+   "admit": "111000001111000011000000000"
+  },
+  "B04": {
+   "p": "[A-Za-zÀ-ÿ'’ \\-]+",
+   "ml": null,
+   "xl": null,
+   "applied": true,
+   "compiles": true,
+   "bits": "01110001101000000110101",
+   "byPat": "01110001101000000110101",
+   "admit": "111000001111000011000011110"
+  },
+  "B05": {
+   "p": "[A-Za-zÀ-ÿ]{2,40}",
+   "ml": null,
+   "xl": null,
+   "applied": true,
+   "compiles": true,
+   "bits": "01110001101111111110101",
+   "byPat": "01110001101111111110101",
+   "admit": "111000001111000011000000000"
+  },
+  "B06": {
+   "p": "[A-Za-zÉéèêëàâ]+",
+   "ml": null,
+   "xl": null,
+   "applied": true,
+   "compiles": true,
+   "bits": "01110111111111100110111",
+   "byPat": "01110111111111100110111",
+   "admit": "111000001100000000000000000"
+  },
+  "B07": {
+   "p": "[A-Za-zÉéèêë'’ \\-]{2,}",
+   "ml": null,
+   "xl": null,
+   "applied": true,
+   "compiles": true,
+   "bits": "01110111111000011110111",
+   "byPat": "01110111111000011110111",
+   "admit": "111000001100000000000011110"
+  },
+  "B08": {
+   "p": "[A-Za-zÀ-ÿ'’ \\-]{3,}",
+   "ml": null,
+   "xl": null,
+   "applied": true,
+   "compiles": true,
+   "bits": "01110001101000011110101",
+   "byPat": "01110001101000011110101",
+   "admit": "111000001111000011000011110"
+  },
+  "B09": {
+   "p": "[A-Za-zÀ-ÿ]+",
+   "ml": null,
+   "xl": 8,
+   "applied": true,
+   "compiles": true,
+   "bits": "01110001101111100110101",
+   "byPat": "01110001101111100110101",
+   "admit": "111000001111000011000000000"
+  },
+  "B10": {
+   "p": "[A-Za-zÀ-ÿ'’ \\-]{2,60}",
+   "ml": null,
+   "xl": null,
+   "applied": true,
+   "compiles": true,
+   "bits": "01110001101000011110101",
+   "byPat": "01110001101000011110101",
+   "admit": "111000001111000011000011110"
+  },
+  "B11": {
+   "p": "[A-Za-zÉéèêëàâîô'’ \\-]+",
+   "ml": 2,
+   "xl": null,
+   "applied": true,
+   "compiles": true,
+   "bits": "01110111111000011110111",
+   "byPat": "01110111111000000110111",
+   "admit": "111000001100000000000011110"
+  },
+  "B12": {
+   "p": "[A-Za-zÁÉÍÓÚáéíóú'’ \\-]+",
+   "ml": null,
+   "xl": null,
+   "applied": true,
+   "compiles": true,
+   "bits": "01110111111000000110111",
+   "byPat": "01110111111000000110111",
+   "admit": "111000001100000000000011110"
+  },
+  "H01": {
+   "p": "[A-Za-z]{6,10}",
+   "ml": null,
+   "xl": null,
+   "applied": true,
+   "compiles": true,
+   "bits": "11111111111111111111111",
+   "byPat": "11111111111111111111111",
+   "admit": "111000000000000000000000000"
+  },
+  "H02": {
+   "p": "[0-9]{1,5}",
+   "ml": null,
+   "xl": null,
+   "applied": true,
+   "compiles": true,
+   "bits": "11111111111111111111111",
+   "byPat": "11111111111111111111111",
+   "admit": "000000000000000000000000001"
+  },
+  "H03": {
+   "p": "[d]",
+   "ml": null,
+   "xl": null,
+   "applied": true,
+   "compiles": true,
+   "bits": "11111111111111111111111",
+   "byPat": "11111111111111111111111",
+   "admit": "001000000000000000000000000"
+  },
+  "H04": {
+   "p": "",
+   "ml": null,
+   "xl": null,
+   "applied": true,
+   "compiles": true,
+   "bits": "11111111111111111111111",
+   "byPat": "11111111111111111111111",
+   "admit": "000000000000000000000000000"
+  },
+  "H05": {
+   "p": null,
+   "ml": null,
+   "xl": null,
+   "applied": false,
+   "compiles": true,
+   "bits": "00000000000000000000000",
+   "byPat": "00000000000000000000000",
+   "admit": "111111111111111111111111111"
+  },
+  "H06": {
+   "p": "[A-Za-z' -]+",
+   "ml": null,
+   "xl": null,
+   "applied": false,
+   "compiles": false,
+   "bits": "00000000000000000000000",
+   "byPat": "00000000000000000000000",
+   "admit": "111111111111111111111111111"
+  },
+  "H07": {
+   "p": "(?:[A-Za-z]+ )?[A-Za-z]+",
+   "ml": null,
+   "xl": null,
+   "applied": true,
+   "compiles": true,
+   "bits": "01111111111111100111111",
+   "byPat": "01111111111111100111111",
+   "admit": "111000000000000000000000000"
+  },
+  "H08": {
+   "p": "^[A-Za-z]+$|^$",
+   "ml": null,
+   "xl": null,
+   "applied": true,
+   "compiles": true,
+   "bits": "01111111111111100111111",
+   "byPat": "01111111111111100111111",
+   "admit": "111000000000000000000000000"
+  },
+  "H09": {
+   "p": "[A-Za-zøå]+",
+   "ml": null,
+   "xl": null,
+   "applied": true,
+   "compiles": true,
+   "bits": "01111111111111100111111",
+   "byPat": "01111111111111100111111",
+   "admit": "111000000000000011000000000"
+  },
+  "H10": {
+   "p": "[\\p{L}\\p{M}]+",
+   "ml": null,
+   "xl": null,
+   "applied": true,
+   "compiles": true,
+   "bits": "00000000000111100000000",
+   "byPat": "00000000000111100000000",
+   "admit": "111111111111111111111100000"
+  },
+  "H11": {
+   "p": "[A-Za-z]+",
+   "ml": 2,
+   "xl": null,
+   "applied": true,
+   "compiles": true,
+   "bits": "01111111111111111111111",
+   "byPat": "01111111111111100111111",
+   "admit": "111000000000000000000000000"
+  },
+  "H12": {
+   "p": null,
+   "ml": null,
+   "xl": 7,
+   "applied": false,
+   "compiles": true,
+   "bits": "00010000010001100010000",
+   "byPat": "00000000000000000000000",
+   "admit": "111111111111111111111111111"
+  }
+ },
+ "capturedAt": "2026-09-22",
+ "note": "Produced by opening differential.html in the browser named in userAgent. patternMismatch is the browser verdict; length is arithmetic in UTF-16 code units, because tooLong/tooShort apply only to user-edited values.",
+ "characters": [
+  {
+   "ch": "a",
+   "k": "basic-latin"
+  },
+  {
+   "ch": "Z",
+   "k": "basic-latin"
+  },
+  {
+   "ch": "d",
+   "k": "basic-latin"
+  },
+  {
+   "ch": "ā",
+   "k": "macron"
+  },
+  {
+   "ch": "ē",
+   "k": "macron"
+  },
+  {
+   "ch": "ī",
+   "k": "macron"
+  },
+  {
+   "ch": "ō",
+   "k": "macron"
+  },
+  {
+   "ch": "ū",
+   "k": "macron"
+  },
+  {
+   "ch": "é",
+   "k": "fixture-diacritic"
+  },
+  {
+   "ch": "É",
+   "k": "fixture-diacritic"
+  },
+  {
+   "ch": "ü",
+   "k": "fixture-diacritic"
+  },
+  {
+   "ch": "ñ",
+   "k": "fixture-diacritic"
+  },
+  {
+   "ch": "ř",
+   "k": "fixture-diacritic"
+  },
+  {
+   "ch": "Ł",
+   "k": "fixture-diacritic"
+  },
+  {
+   "ch": "ễ",
+   "k": "fixture-diacritic"
+  },
+  {
+   "ch": "ʻ",
+   "k": "fixture-diacritic"
+  },
+  {
+   "ch": "ø",
+   "k": "outside-fixture-set"
+  },
+  {
+   "ch": "å",
+   "k": "outside-fixture-set"
+  },
+  {
+   "ch": "đ",
+   "k": "outside-fixture-set"
+  },
+  {
+   "ch": "ħ",
+   "k": "outside-fixture-set"
+  },
+  {
+   "ch": "α",
+   "k": "outside-fixture-set"
+  },
+  {
+   "ch": "а",
+   "k": "outside-fixture-set"
+  },
+  {
+   "ch": "'",
+   "k": "punctuation"
+  },
+  {
+   "ch": "’",
+   "k": "punctuation"
+  },
+  {
+   "ch": " ",
+   "k": "punctuation"
+  },
+  {
+   "ch": "-",
+   "k": "punctuation"
+  },
+  {
+   "ch": "0",
+   "k": "digit"
+  }
+ ],
+ "charDecisions": 972
+}

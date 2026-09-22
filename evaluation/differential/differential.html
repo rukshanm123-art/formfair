@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>FormFair browser differential</title>
+<style>
+  :root { color-scheme: light dark; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  body { margin: 0; padding: 24px; max-width: 900px; }
+  h1 { font-size: 1.1rem; margin: 0 0 4px; }
+  p { margin: 0 0 16px; font-size: .85rem; opacity: .75; line-height: 1.5; }
+  #summary { font-size: .85rem; margin-bottom: 16px; }
+  pre { font-size: .7rem; line-height: 1.4; white-space: pre-wrap; word-break: break-all;
+        border: 1px solid color-mix(in srgb, currentColor 20%, transparent);
+        padding: 12px; border-radius: 6px; max-height: 60vh; overflow: auto; }
+  #probe { position: absolute; left: -9999px; }
+</style>
+</head>
+<body>
+<h1>FormFair browser differential</h1>
+<p>
+  Asks this browser, for every benchmark control crossed with every fixture name, whether the
+  control's declared constraints reject the name. <code>patternMismatch</code> is the browser's
+  own verdict. Length is computed in UTF-16 code units, because the HTML Standard applies
+  <code>tooLong</code> and <code>tooShort</code> only to user-edited values.
+</p>
+<div id="summary">running…</div>
+<pre id="out"></pre>
+<input id="probe" type="text">
+
+<script>
+const NAMES = [{"name":"Smith","kind":"ascii-control","note":"any usable name field must accept this"},{"name":"Tāwhiao","kind":"diacritic","locale":"mi"},{"name":"Ngātā","kind":"diacritic","locale":"mi"},{"name":"Faʻasamoa","kind":"diacritic","locale":"sm"},{"name":"Émile","kind":"diacritic","locale":"fr"},{"name":"Müller","kind":"diacritic","locale":"de"},{"name":"Núñez","kind":"diacritic","locale":"es"},{"name":"Łukasz","kind":"diacritic","locale":"pl"},{"name":"Dvořák","kind":"diacritic","locale":"cs"},{"name":"Gültekin","kind":"diacritic","locale":"tr"},{"name":"Nguyễn","kind":"diacritic","locale":"vi"},{"name":"O'Brien","kind":"punctuation","codePoint":"U+0027"},{"name":"O’Brien","kind":"punctuation","codePoint":"U+2019"},{"name":"Anne-Marie","kind":"punctuation","codePoint":"U+002D"},{"name":"van der Berg","kind":"punctuation","codePoint":"U+0020"},{"name":"O","kind":"short"},{"name":"X","kind":"short"},{"name":"Tāwhiao","kind":"nfc","pair":"Tāwhiao"},{"name":"Tāwhiao","kind":"nfd","pair":"Tāwhiao"},{"name":"Émile","kind":"nfc","pair":"Émile"},{"name":"Émile","kind":"nfd","pair":"Émile"},{"name":"Müller","kind":"nfc","pair":"Müller"},{"name":"Müller","kind":"nfd","pair":"Müller"}];
+const CONTROLS = [{"id":"A01","pattern":"[A-Za-z]+","minlength":null,"maxlength":null,"note":"the plainest Basic-Latin class"},{"id":"A02","pattern":"[A-Za-z]{2,40}","minlength":null,"maxlength":null,"note":"quantifier sets a minimum above one"},{"id":"A03","pattern":"[A-Za-z' \\-]+","minlength":null,"maxlength":null,"note":"admits apostrophe but not U+2019"},{"id":"A04","pattern":"[A-Za-z'’ \\-]+","minlength":null,"maxlength":null,"note":"all four punctuation characters admitted"},{"id":"A05","pattern":"[A-Za-z'’ \\-]{2,50}","minlength":null,"maxlength":null,"note":"punctuation fine, minimum is two"},{"id":"A06","pattern":"[A-Za-z]{3,20}","minlength":null,"maxlength":null,"note":"minimum of three"},{"id":"A07","pattern":"[A-Za-z ]+","minlength":null,"maxlength":null,"note":"space admitted, apostrophe and hyphen not"},{"id":"A08","pattern":"[A-Za-z\\-]+","minlength":2,"maxlength":null,"note":"explicit minlength"},{"id":"A09","pattern":"[A-Za-z]+","minlength":null,"maxlength":5,"note":"maxlength cannot cause asymmetry when both forms are already rejected"},{"id":"A10","pattern":"[A-Za-z'’ \\-]+","minlength":4,"maxlength":null,"note":"minlength of four"},{"id":"A11","pattern":"[A-Za-z]{1,30}","minlength":null,"maxlength":null,"note":"minimum of one, so FF-05 does not fire"},{"id":"A12","pattern":"[A-Za-z'’ \\-]{2,}","minlength":null,"maxlength":null,"note":"open-ended maximum, minimum two"},{"id":"B01","pattern":"[\\p{L}\\p{M}'’ \\-]+","minlength":null,"maxlength":null,"note":"property escapes admit the macron and combining marks alike"},{"id":"B02","pattern":"[\\p{L}\\p{M}'’ \\-]{2,}","minlength":null,"maxlength":null,"note":"as B01, minimum of two"},{"id":"B03","pattern":"[A-Za-zÀ-ÿ]+","minlength":null,"maxlength":null,"note":"Latin-1 Supplement stops short of Latin Extended-A"},{"id":"B04","pattern":"[A-Za-zÀ-ÿ'’ \\-]+","minlength":null,"maxlength":null,"note":"as B03 with punctuation admitted"},{"id":"B05","pattern":"[A-Za-zÀ-ÿ]{2,40}","minlength":null,"maxlength":null,"note":"as B03 with a minimum of two"},{"id":"B06","pattern":"[A-Za-zÉéèêëàâ]+","minlength":null,"maxlength":null,"note":"a hand-listed French subset"},{"id":"B07","pattern":"[A-Za-zÉéèêë'’ \\-]{2,}","minlength":null,"maxlength":null,"note":"hand-listed subset, minimum two"},{"id":"B08","pattern":"[A-Za-zÀ-ÿ'’ \\-]{3,}","minlength":null,"maxlength":null,"note":"minimum of three"},{"id":"B09","pattern":"[A-Za-zÀ-ÿ]+","minlength":null,"maxlength":8,"note":"maxlength present but not the cause of the asymmetry"},{"id":"B10","pattern":"[A-Za-zÀ-ÿ'’ \\-]{2,60}","minlength":null,"maxlength":null,"note":"wide range, minimum two"},{"id":"B11","pattern":"[A-Za-zÉéèêëàâîô'’ \\-]+","minlength":2,"maxlength":null,"note":"explicit minlength alongside the class"},{"id":"B12","pattern":"[A-Za-zÁÉÍÓÚáéíóú'’ \\-]+","minlength":null,"maxlength":null,"note":"a hand-listed Spanish subset"},{"id":"H01","pattern":"[A-Za-z]{6,10}","minlength":null,"maxlength":null,"note":"no short probe fits; defeated probe-based reasoning"},{"id":"H02","pattern":"[0-9]{1,5}","minlength":null,"maxlength":null,"note":"admits no letters at all"},{"id":"H03","pattern":"[d]","minlength":null,"maxlength":null,"note":"a single letter outside any hand-picked sample"},{"id":"H04","pattern":"","minlength":null,"maxlength":null,"note":"present but empty: compiles to an anchored empty expression"},{"id":"H05","pattern":null,"minlength":null,"maxlength":null,"note":"absent attribute: no pattern applied"},{"id":"H06","pattern":"[A-Za-z' -]+","minlength":null,"maxlength":null,"note":"bare hyphen: does not compile under the v flag"},{"id":"H07","pattern":"(?:[A-Za-z]+ )?[A-Za-z]+","minlength":null,"maxlength":null,"note":"group: FormFair declines, a browser does not"},{"id":"H08","pattern":"^[A-Za-z]+$|^$","minlength":null,"maxlength":null,"note":"alternation: FormFair declines"},{"id":"H09","pattern":"[A-Za-zøå]+","minlength":null,"maxlength":null,"note":"Danish, outside every hand-written sample"},{"id":"H10","pattern":"[\\p{L}\\p{M}]+","minlength":null,"maxlength":null,"note":"property escapes admit supplementary-plane letters"},{"id":"H11","pattern":"[A-Za-z]+","minlength":2,"maxlength":null,"note":"length constraint with a permissive class"},{"id":"H12","pattern":null,"minlength":null,"maxlength":7,"note":"maxlength alone can split an NFC/NFD pair"}];
+const CHARACTERS = [{"ch":"a","kind":"basic-latin"},{"ch":"Z","kind":"basic-latin"},{"ch":"d","kind":"basic-latin"},{"ch":"ā","kind":"macron"},{"ch":"ē","kind":"macron"},{"ch":"ī","kind":"macron"},{"ch":"ō","kind":"macron"},{"ch":"ū","kind":"macron"},{"ch":"é","kind":"fixture-diacritic"},{"ch":"É","kind":"fixture-diacritic"},{"ch":"ü","kind":"fixture-diacritic"},{"ch":"ñ","kind":"fixture-diacritic"},{"ch":"ř","kind":"fixture-diacritic"},{"ch":"Ł","kind":"fixture-diacritic"},{"ch":"ễ","kind":"fixture-diacritic"},{"ch":"ʻ","kind":"fixture-diacritic"},{"ch":"ø","kind":"outside-fixture-set"},{"ch":"å","kind":"outside-fixture-set"},{"ch":"đ","kind":"outside-fixture-set"},{"ch":"ħ","kind":"outside-fixture-set"},{"ch":"α","kind":"outside-fixture-set"},{"ch":"а","kind":"outside-fixture-set"},{"ch":"'","kind":"punctuation"},{"ch":"’","kind":"punctuation"},{"ch":" ","kind":"punctuation"},{"ch":"-","kind":"punctuation"},{"ch":"0","kind":"digit"}];
+
+const probe = document.getElementById('probe');
+
+function compiles(pattern) {
+  if (pattern === null) return { ok: true, applied: false };
+  try { new RegExp('^(?:' + pattern + ')$', 'v'); return { ok: true, applied: true }; }
+  catch (e) { return { ok: false, applied: false, reason: String(e.message) }; }
+}
+
+/** Asks the browser. Returns true when THIS browser reports a pattern mismatch. */
+function patternRejects(pattern, value) {
+  probe.removeAttribute('pattern');
+  if (pattern !== null) probe.setAttribute('pattern', pattern);
+  probe.value = value;
+  const bad = probe.validity.patternMismatch;
+  probe.value = '';
+  return bad;
+}
+
+const results = [];
+for (const c of CONTROLS) {
+  const c1 = compiles(c.pattern);
+  for (const n of NAMES) {
+    const units = n.name.length;
+    const tooShort = c.minlength !== null && units < c.minlength;
+    const tooLong = c.maxlength !== null && units > c.maxlength;
+    // An uncompilable pattern is ignored by constraint validation: no expression applies.
+    const byPattern = c1.applied ? patternRejects(c.pattern, n.name) : false;
+    results.push({
+      control: c.id, pattern: c.pattern, minlength: c.minlength, maxlength: c.maxlength,
+      name: n.name, kind: n.kind, locale: n.locale ?? null, codePoint: n.codePoint ?? null,
+      pair: n.pair ?? null, units,
+      patternApplied: c1.applied, patternCompiles: c1.ok,
+      rejectedByPattern: byPattern, rejectedByLength: tooShort || tooLong,
+      rejected: byPattern || tooShort || tooLong,
+    });
+  }
+}
+
+// Character admission, probed at several lengths because a length attribute would
+// otherwise read as a character restriction. A hit is a WITNESS that the character is
+// admitted; a miss is only a miss, and nothing here treats it as proof of absence.
+const charResults = [];
+for (const c of CONTROLS) {
+  const c1 = compiles(c.pattern);
+  for (const t of CHARACTERS) {
+    let admitted = false;
+    if (!c1.applied) admitted = true;
+    else {
+      const lens = [1, 2, 3, 5, 6, 8, 10, c.minlength, c.maxlength].filter((n) => Number.isFinite(n) && n > 0 && n <= 32);
+      for (const n of new Set(lens)) {
+        const v = t.ch.repeat(n);
+        const tooShort = c.minlength !== null && v.length < c.minlength;
+        const tooLong = c.maxlength !== null && v.length > c.maxlength;
+        if (!tooShort && !tooLong && !patternRejects(c.pattern, v)) { admitted = true; break; }
+      }
+    }
+    charResults.push({ control: c.id, ch: t.ch, kind: t.kind, admitted });
+  }
+}
+
+const out = {
+  harness: 'browser-differential-v2',
+  userAgent: navigator.userAgent,
+  controls: CONTROLS.length,
+  names: NAMES.length,
+  decisions: results.length,
+  rejections: results.filter(r => r.rejected).length,
+  characters: CHARACTERS.length,
+  charDecisions: charResults.length,
+  results,
+  charResults,
+};
+window.RESULT = out;
+document.getElementById('out').textContent = JSON.stringify(out, null, 1);
+document.getElementById('summary').textContent =
+  out.decisions + ' decisions over ' + out.controls + ' controls x ' + out.names +
+  ' fixture names. ' + out.rejections + ' rejections. Engine: ' + navigator.userAgent;
+document.title = 'differential: ' + out.decisions + ' decisions';
+</script>
+</body>
+</html>
