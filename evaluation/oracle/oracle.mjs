@@ -1,51 +1,92 @@
 /**
  * A BEHAVIOURAL WITNESS GENERATOR for FF-01..FF-05.
  *
- * NOT a ground-truth oracle, and the distinction is load-bearing. FormFair decides these
- * rules STRUCTURALLY - it parses the pattern and enumerates the character sets it admits,
- * which can establish that a class contains no letter outside a range. This module works
- * behaviourally: it compiles the control's constraints the way a browser does and observes
- * what is accepted. Finite probing can establish that a character IS admitted, by
- * exhibiting a string that is accepted. It can never establish that NONE is, because no
- * finite set of probes exhausts the alphabet.
+ * NOT an oracle, and after this rewrite it does not pretend to be one. The conclusion the
+ * work reached is worth stating before the code, because it is what the code now encodes:
  *
- * Every rule in the catalogue fires on an EXCLUSION - no letter outside Basic Latin, no
- * macron at any position, no apostrophe anywhere, no accepted string of length one. So the
- * direction this module cannot prove is exactly the direction the rules are defined in.
- * What it produces is independent behavioural EVIDENCE: concrete strings this control
- * accepts and rejects, and a bounded reading of what they suggest. An exact independent
- * oracle would need a second regex-language analyser, which is a different artefact.
+ *   Where this module is DECISIVE it is not INDEPENDENT, and where it is INDEPENDENT it is
+ *   not DECISIVE.
  *
- * Labels carry `bounded: true` wherever the reading rests on an absence that probing
- * cannot prove. They are evidence to weigh, never ground truth to score against.
+ * FF-03 is fully decided here, because the catalogue scopes it to a frozen set of three
+ * canonically equivalent pairs and three pairs can be exhausted - but deciding it means
+ * comparing NFC and NFD acceptance, which is the same arithmetic FormFair does, so it is
+ * no second opinion. The `minlength` branch of FF-05 is likewise decided by reading an
+ * attribute, which is not an independent method either.
+ *
+ * FF-01, FF-02 and FF-04 are where genuinely independent reasoning happens, and all three
+ * fire on an ABSENCE: no letter outside Basic Latin, no macron at any position, no
+ * apostrophe anywhere. Finite probing exhibits a string that IS accepted and can never
+ * exhaust an alphabet to show none is. So in the direction those rules fire, this module
+ * can produce no established answer at all.
+ *
+ * Every result is therefore one of three states, and `unknown` is not a failure mode but
+ * the honest answer for most positive readings:
+ *
+ *   established-negative  a witness proves the rule cannot fire
+ *   established-positive  only where the rule's own scope is finite and exhaustible
+ *   unknown               no witness found, which is not proof that none exists
+ *
+ * There is one exception worth naming: "admits at least one Basic Latin letter" IS
+ * exhaustible, because that set has 52 members. Absence there is established, not
+ * unknown. The set of letters OUTSIDE Basic Latin has thousands and is not.
  *
  * HTML `pattern` semantics, per the HTML Standard: the value must match in full and the
- * expression is compiled with the `v` flag. Where it does not compile, the browser applies
- * NO pattern at all rather than rejecting every value (MDN, `pattern`), so the control's
- * effective constraint is its length attributes alone. That is recorded; the rule labels
- * are withheld, because FormFair may still correctly decline to classify such a control.
+ * expression is compiled with the `v` flag. An attribute that is PRESENT BUT EMPTY
+ * compiles to an anchored empty expression and so rejects every non-empty value; only an
+ * ABSENT attribute means no pattern is applied. Where the expression does not compile the
+ * browser applies no pattern at all rather than rejecting everything, so the control is
+ * more permissive than it looks; that is recorded and no rule state is reported.
  */
 
 import {
   DIACRITIC_NAMES,
-  MACRON_NAMES,
   PUNCTUATED_NAMES,
-  SHORT_NAMES,
-  ASCII_CONTROL,
   NORMALISATION_PAIRS,
 } from './fixtures.mjs';
+
+export const ESTABLISHED_POSITIVE = 'established-positive';
+export const ESTABLISHED_NEGATIVE = 'established-negative';
+export const UNKNOWN = 'unknown';
 
 /** UTF-16 code units, matching what minlength and maxlength count. */
 const units = (s) => s.length;
 
+/** All 52 Basic Latin letters. Finite and small, so absence here IS establishable. */
+const BASIC_LATIN_LETTERS = [
+  ...'abcdefghijklmnopqrstuvwxyz',
+  ...'ABCDEFGHIJKLMNOPQRSTUVWXYZ',
+];
+
+/** Every printable ASCII character, for establishing that some one-unit value is accepted. */
+const PRINTABLE_ASCII = Array.from({ length: 95 }, (_, i) => String.fromCharCode(32 + i));
+
 /**
- * Compiles a control's constraints into an acceptance predicate, or reports why it
- * cannot. Length limits are applied alongside the pattern because the catalogue treats
- * "the complete set of statically observable constraints" as one thing.
+ * A deliberately NON-exhaustive sample of letters outside Basic Latin, used only to find
+ * witnesses of admission. Enlarging it buys a few more established negatives and can never
+ * make absence provable, so it is not treated as complete and is not grown when a new
+ * counterexample appears - the counterexample simply returns `unknown`.
+ */
+const OUTSIDE_SAMPLE = [
+  ...'āēīōūĀĒĪŌŪ',
+  ...'éèêëÉÈÊË',
+  ...'üöäÜÖÄß',
+  ...'úñÚÑáíó',
+  ...'Łłřščžğış',
+  ...'ễâàôʻ',
+  ...'øåÆØÅæ',
+];
+
+/**
+ * Compiles a control's constraints into an acceptance predicate, or reports why it cannot.
+ *
+ * Length limits are applied alongside the pattern, because the catalogue treats "the
+ * complete set of statically observable constraints" as one thing.
  */
 export function acceptorFor({ pattern, minlength, maxlength }) {
   let re = null;
-  if (pattern !== undefined && pattern !== null && pattern !== '') {
+  // An absent attribute means no pattern. A PRESENT attribute, even empty, is compiled -
+  // `pattern=""` becomes /^(?:)$/v and rejects every non-empty value.
+  if (pattern !== undefined && pattern !== null) {
     try {
       re = new RegExp(`^(?:${pattern})$`, 'v');
     } catch (error) {
@@ -65,137 +106,115 @@ export function acceptorFor({ pattern, minlength, maxlength }) {
 }
 
 /**
- * Does this control admit a given CHARACTER anywhere?
+ * Finds a string this control accepts that contains `ch`, or null.
  *
- * Probed across several positions and lengths, because a length attribute would otherwise
- * be mistaken for a character restriction: `[A-Za-z]{1,3}` rejects "Smith" for its length,
- * not because it excludes any letter in it.
- *
- * A true result is a WITNESS - a string this control accepts that contains the character.
- * A false result means no probe succeeded, which is weaker: it is consistent with the
- * character being excluded, and also with it being admissible only in a position or length
- * these probes did not try.
+ * Probed across positions and lengths so that a length attribute is not mistaken for a
+ * character restriction: `[A-Za-z]{1,3}` rejects "Smith" for its length, not its letters.
+ * A returned string is a WITNESS. Null is weaker than it looks - it is consistent with the
+ * character being excluded, and with it being admissible somewhere these probes did not
+ * reach.
  */
-function admitsCharacter(accepts, ch) {
-  const probes = [
-    ch,
-    ch + ch,
-    ch.repeat(3),
-    'A' + ch,
-    ch + 'a',
-    'a' + ch + 'a',
-    'Sm' + ch + 'th',
-    'Ana' + ch,
-  ];
+function witnessFor(accepts, ch) {
+  const probes = [ch, ch + ch, ch.repeat(3), 'A' + ch, ch + 'a', 'a' + ch + 'a', 'Sm' + ch + 'th', 'Ana' + ch];
   for (const p of probes) if (accepts(p)) return p;
   return null;
 }
 
-/** Basic Latin letters, probed individually rather than through a five-letter name. */
-const BASIC_LATIN_SAMPLE = [...'abcmnxyzABCMNXYZ'];
+const state = (s, why, witness) => ({ state: s, why, ...(witness ? { witness } : {}) });
 
-/** Letters outside Basic Latin drawn from the declared locales, plus the macron set. */
-const OUTSIDE_BASIC_LATIN = [
-  ...'\u0101\u0113\u012b\u014d\u016b\u0100\u0112\u012a\u014c\u016a',
-  ...'\u00e9\u00e8\u00ea\u00eb\u00c9\u00c8\u00ca\u00cb',
-  ...'\u00fc\u00f6\u00e4\u00dc\u00d6\u00c4\u00df',
-  ...'\u00fa\u00f1\u00da\u00d1\u00e1\u00ed\u00f3',
-  ...'\u0141\u0142\u0159\u0161\u010d\u017e\u011f\u0131\u015f',
-  ...'\u1ec5\u00e2\u00e0\u00f4\u02bb',
-];
-
+/**
+ * What can be established about each rule for one control, by execution alone.
+ *
+ * Every branch that would need to prove an absence over an unbounded alphabet returns
+ * `unknown`. Nothing here is ground truth; it is evidence, and it says how good.
+ */
 export function behaviouralWitness(control) {
   const acc = acceptorFor(control);
   if (!acc.ok) {
     return {
       undecidable: true,
       reason: acc.reason,
-      // The browser applies no pattern in this case, so the effective constraint is the
-      // length attributes alone - the field is MORE permissive than it looks, not less.
       patternIgnoredByBrowser: true,
       effectiveConstraint: 'length attributes only',
     };
   }
   const accepts = acc.accepts;
 
-  const basicLatinWitness = BASIC_LATIN_SAMPLE.map((ch) => admitsCharacter(accepts, ch)).find(Boolean);
-  const outsideWitnesses = OUTSIDE_BASIC_LATIN.map((ch) => [ch, admitsCharacter(accepts, ch)]).filter(
-    ([, w]) => w
-  );
+  // Exhaustive over the 52 Basic Latin letters, so a null result here is established.
+  const basicLatinWitness = BASIC_LATIN_LETTERS.map((ch) => witnessFor(accepts, ch)).find(Boolean) ?? null;
+  const outsideWitnesses = OUTSIDE_SAMPLE.map((ch) => [ch, witnessFor(accepts, ch)]).filter(([, w]) => w);
 
-  // The characters each fixture name needs, which is what FF-02 is defined over - not
-  // macrons alone. A class admitting the macron but excluding the French or German
-  // fixtures still excludes a required diacritic.
   const requiredDiacritics = [
-    ...new Set(DIACRITIC_NAMES.flatMap((d) => [...d.name].filter((ch) => /\p{L}/u.test(ch) && !/[A-Za-z]/.test(ch)))),
+    ...new Set(
+      DIACRITIC_NAMES.flatMap((d) => [...d.name].filter((ch) => /\p{L}/u.test(ch) && !/[A-Za-z]/.test(ch)))
+    ),
   ];
-  const requiredAdmitted = requiredDiacritics.filter((ch) => admitsCharacter(accepts, ch));
-  const requiredNotWitnessed = requiredDiacritics.filter((ch) => !admitsCharacter(accepts, ch));
+  const requiredAdmitted = requiredDiacritics.filter((ch) => witnessFor(accepts, ch));
+  const allRequiredAdmitted = requiredAdmitted.length === requiredDiacritics.length;
 
-  // Punctuation is probed per CHARACTER, so a short maxlength cannot masquerade as a
-  // punctuation restriction: "van der Berg" is twelve units long.
-  const punctuationNotWitnessed = PUNCTUATED_NAMES.filter((p) => !admitsCharacter(accepts, p.char));
+  const punctuationAdmitted = PUNCTUATED_NAMES.filter((p) => witnessFor(accepts, p.char));
+  const allPunctuationAdmitted = punctuationAdmitted.length === PUNCTUATED_NAMES.length;
 
-  // A single accepted character of ANY case establishes a minimum length of one. Probing
-  // only uppercase O and X would read `[a-z]{1}` as having a minimum above one.
-  const singleCharWitness = [...BASIC_LATIN_SAMPLE, ...OUTSIDE_BASIC_LATIN, ...'0123456789', ..."'\u2019 -."].find((ch) =>
-    accepts(ch)
-  );
-
+  const singleUnitWitness = [...PRINTABLE_ASCII, ...OUTSIDE_SAMPLE].find((ch) => accepts(ch)) ?? null;
   const asymmetric = NORMALISATION_PAIRS.filter((p) => accepts(p.nfc) !== accepts(p.nfd));
 
-  const bounded = (label, isBounded, why) => ({ label, bounded: isBounded, ...(isBounded ? { why } : {}) });
+  const minlengthAboveOne = Number.isFinite(control?.minlength) && control.minlength > 1;
 
   return {
     undecidable: false,
-    // Evidence, not ground truth. `bounded` marks a reading that rests on an absence
-    // finite probing cannot prove.
     evidence: {
-      // The catalogue requires a pattern that admits AT LEAST ONE Basic Latin letter. A
-      // digits-only class admits none, so the rule cannot fire however few outside letters
-      // are witnessed. This witness was computed and reported but not gated on, and
-      // `[0-9]{1,5}` came back positive.
-      'FF-01': !basicLatinWitness
-        ? bounded('negative', false)
+      // Cannot ever be established positive: that needs no letter outside Basic Latin,
+      // over an alphabet probing cannot exhaust.
+      'FF-01': basicLatinWitness === null
+        ? state(ESTABLISHED_NEGATIVE, 'no Basic Latin letter is accepted, and all 52 were tried, so the rule cannot fire')
         : outsideWitnesses.length > 0
-          ? bounded('negative', false)
-          : bounded('positive', true, 'no outside letter was witnessed, which probing cannot turn into proof that none is admitted'),
-      'FF-02': outsideWitnesses.length === 0
-        ? bounded('negative', true, 'suppressed by FF-01, whose own reading is bounded')
-        : requiredNotWitnessed.length > 0
-          ? bounded('positive', true, 'rests on a required fixture diacritic not being witnessed')
-          : bounded('negative', false),
+          ? state(ESTABLISHED_NEGATIVE, 'a letter outside Basic Latin is accepted', outsideWitnesses[0][1])
+          : state(UNKNOWN, 'no outside letter was witnessed, which is not proof that none is admitted'),
+
+      'FF-02': allRequiredAdmitted
+        ? state(ESTABLISHED_NEGATIVE, 'every diacritic the fixture names require is accepted')
+        : state(UNKNOWN, 'firing needs a required diacritic admitted at NO position, which probing cannot establish'),
+
+      // The one rule fully decided here, because the catalogue scopes it to three frozen
+      // pairs. Decisive, and for that same reason not an independent method.
       'FF-03': asymmetric.length > 0
-        ? bounded('positive', false)
-        : bounded('negative', true, 'no asymmetry witnessed within the frozen pair set'),
-      'FF-04': punctuationNotWitnessed.length > 0
-        ? bounded('positive', true, 'rests on a punctuation character not being witnessed')
-        : bounded('negative', false),
-      'FF-05': singleCharWitness
-        ? bounded('negative', false)
-        : bounded('positive', true, 'no accepted single character was witnessed'),
+        ? state(ESTABLISHED_POSITIVE, 'a frozen pair is accepted in one normal form and rejected in the other', asymmetric[0].nfc)
+        : state(ESTABLISHED_NEGATIVE, 'all three frozen pairs are treated alike, which is what the catalogue scopes clean to'),
+
+      'FF-04': allPunctuationAdmitted
+        ? state(ESTABLISHED_NEGATIVE, 'all four punctuation characters are accepted')
+        : state(UNKNOWN, 'firing needs a punctuation character admitted at NO position, which probing cannot establish'),
+
+      // Read from the attribute, not probed - and therefore not independent either.
+      'FF-05': minlengthAboveOne
+        ? state(ESTABLISHED_POSITIVE, `minlength is ${control.minlength}, which the catalogue makes sufficient on its own`)
+        : singleUnitWitness !== null
+          ? state(ESTABLISHED_NEGATIVE, 'a one-unit value is accepted, so the minimum accepted length is one', singleUnitWitness)
+          : state(UNKNOWN, 'no one-unit value was witnessed, which is not proof that none is accepted'),
     },
     witness: {
-      basicLatinAccepted: basicLatinWitness ?? null,
+      basicLatinAccepted: basicLatinWitness,
       outsideBasicLatinAdmitted: outsideWitnesses.map(([ch]) => ch),
       requiredDiacriticsAdmitted: requiredAdmitted,
-      requiredDiacriticsNotWitnessed: requiredNotWitnessed,
-      punctuationNotWitnessed: punctuationNotWitnessed.map((p) => `${p.name} (${p.codePoint})`),
-      singleCharacterAccepted: singleCharWitness ?? null,
+      requiredDiacriticsNotWitnessed: requiredDiacritics.filter((ch) => !requiredAdmitted.includes(ch)),
+      punctuationAdmitted: punctuationAdmitted.map((p) => `${p.name} (${p.codePoint})`),
+      punctuationNotWitnessed: PUNCTUATED_NAMES.filter((p) => !punctuationAdmitted.includes(p)).map(
+        (p) => `${p.name} (${p.codePoint})`
+      ),
+      singleUnitAccepted: singleUnitWitness,
       normalisationAsymmetries: asymmetric.map((p) => p.nfc),
-      diacriticNamesAccepted: DIACRITIC_NAMES.filter((d) => accepts(d.name)).map((d) => d.name),
     },
   };
 }
 
-/** Flattens the evidence to bare labels, for comparison only. Never ground truth. */
-export function suggestedLabels(control) {
+/** The three states per rule, for comparison. There is deliberately no binary form. */
+export function witnessStates(control) {
   const r = behaviouralWitness(control);
   if (r.undecidable) return r;
   return {
     undecidable: false,
-    rules: Object.fromEntries(Object.entries(r.evidence).map(([k, v]) => [k, v.label])),
-    bounded: Object.fromEntries(Object.entries(r.evidence).map(([k, v]) => [k, v.bounded])),
+    states: Object.fromEntries(Object.entries(r.evidence).map(([k, v]) => [k, v.state])),
+    why: Object.fromEntries(Object.entries(r.evidence).map(([k, v]) => [k, v.why])),
     witness: r.witness,
   };
 }
