@@ -26,9 +26,11 @@
  *   established-positive  only where the rule's own scope is finite and exhaustible
  *   unknown               no witness found, which is not proof that none exists
  *
- * There is one exception worth naming: "admits at least one Basic Latin letter" IS
- * exhaustible, because that set has 52 members. Absence there is established, not
- * unknown. The set of letters OUTSIDE Basic Latin has thousands and is not.
+ * An earlier version claimed one exception: that "admits at least one Basic Latin letter"
+ * is exhaustible because the set has 52 members. That was wrong. The ALPHABET is finite,
+ * but each letter can only be tried in finitely many contexts, and a pattern such as
+ * `[A-Za-z]{6,10}` accepts no probe shorter than six. Absence of a witness is never
+ * establishable in any direction here, whatever the alphabet.
  *
  * HTML `pattern` semantics, per the HTML Standard: the value must match in full and the
  * expression is compiled with the `v` flag. An attribute that is PRESENT BUT EMPTY
@@ -114,8 +116,14 @@ export function acceptorFor({ pattern, minlength, maxlength }) {
  * character being excluded, and with it being admissible somewhere these probes did not
  * reach.
  */
-function witnessFor(accepts, ch) {
+function witnessFor(accepts, ch, lengths = []) {
   const probes = [ch, ch + ch, ch.repeat(3), 'A' + ch, ch + 'a', 'a' + ch + 'a', 'Sm' + ch + 'th', 'Ana' + ch];
+  // Longer forms, including any length the control's own attributes demand. `[A-Za-z]{6,10}`
+  // accepts no string shorter than six, so every probe above misses and the character looks
+  // excluded. Extra lengths only find MORE witnesses; they never turn a miss into proof.
+  for (const n of new Set([5, 6, 8, 10, 12, ...lengths])) {
+    if (n > 0 && n <= 64) probes.push(ch.repeat(n), 'a'.repeat(Math.max(0, n - 1)) + ch);
+  }
   for (const p of probes) if (accepts(p)) return p;
   return null;
 }
@@ -141,18 +149,22 @@ export function behaviouralWitness(control) {
   const accepts = acc.accepts;
 
   // Exhaustive over the 52 Basic Latin letters, so a null result here is established.
-  const basicLatinWitness = BASIC_LATIN_LETTERS.map((ch) => witnessFor(accepts, ch)).find(Boolean) ?? null;
-  const outsideWitnesses = OUTSIDE_SAMPLE.map((ch) => [ch, witnessFor(accepts, ch)]).filter(([, w]) => w);
+  // Lengths the control itself declares, so a minimum of six is probed at six.
+  const declared = [control?.minlength, control?.maxlength].filter((n) => Number.isFinite(n) && n > 0);
+  const probe = (ch) => witnessFor(accepts, ch, declared);
+
+  const basicLatinWitness = BASIC_LATIN_LETTERS.map(probe).find(Boolean) ?? null;
+  const outsideWitnesses = OUTSIDE_SAMPLE.map((ch) => [ch, probe(ch)]).filter(([, w]) => w);
 
   const requiredDiacritics = [
     ...new Set(
       DIACRITIC_NAMES.flatMap((d) => [...d.name].filter((ch) => /\p{L}/u.test(ch) && !/[A-Za-z]/.test(ch)))
     ),
   ];
-  const requiredAdmitted = requiredDiacritics.filter((ch) => witnessFor(accepts, ch));
+  const requiredAdmitted = requiredDiacritics.filter((ch) => probe(ch));
   const allRequiredAdmitted = requiredAdmitted.length === requiredDiacritics.length;
 
-  const punctuationAdmitted = PUNCTUATED_NAMES.filter((p) => witnessFor(accepts, p.char));
+  const punctuationAdmitted = PUNCTUATED_NAMES.filter((p) => probe(p.char));
   const allPunctuationAdmitted = punctuationAdmitted.length === PUNCTUATED_NAMES.length;
 
   const singleUnitWitness = [...PRINTABLE_ASCII, ...OUTSIDE_SAMPLE].find((ch) => accepts(ch)) ?? null;
@@ -165,11 +177,13 @@ export function behaviouralWitness(control) {
     evidence: {
       // Cannot ever be established positive: that needs no letter outside Basic Latin,
       // over an alphabet probing cannot exhaust.
-      'FF-01': basicLatinWitness === null
-        ? state(ESTABLISHED_NEGATIVE, 'no Basic Latin letter is accepted, and all 52 were tried, so the rule cannot fire')
-        : outsideWitnesses.length > 0
-          ? state(ESTABLISHED_NEGATIVE, 'a letter outside Basic Latin is accepted', outsideWitnesses[0][1])
-          : state(UNKNOWN, 'no outside letter was witnessed, which is not proof that none is admitted'),
+      // Only an outside-letter WITNESS can establish this. Trying all 52 Basic Latin
+      // letters is not exhaustive either, because each is tried in finitely many contexts:
+      // `[A-Za-z]{6,10}` accepts no probe shorter than six, so a missing Basic Latin
+      // witness means nothing was found, never that nothing is admitted.
+      'FF-01': outsideWitnesses.length > 0
+        ? state(ESTABLISHED_NEGATIVE, 'a letter outside Basic Latin is accepted', outsideWitnesses[0][1])
+        : state(UNKNOWN, 'no outside letter was witnessed, which is not proof that none is admitted'),
 
       'FF-02': allRequiredAdmitted
         ? state(ESTABLISHED_NEGATIVE, 'every diacritic the fixture names require is accepted')

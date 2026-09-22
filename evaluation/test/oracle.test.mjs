@@ -93,7 +93,7 @@ describe('uncertainty is never converted into a label', () => {
   });
 });
 
-describe('six counterexamples that stop this being called an oracle', () => {
+describe('seven counterexamples that stop this being called an oracle', () => {
   test('FF-01 is not decided by whether a five-letter name fits', () => {
     assert.equal(states('[A-Za-z]{1,3}')['FF-01'], UNKNOWN);
   });
@@ -118,13 +118,28 @@ describe('six counterexamples that stop this being called an oracle', () => {
     assert.ok(behaviouralWitness({ pattern: '[a-z]{1}' }).witness.singleUnitAccepted);
   });
 
-  test('a digits-only class cannot fire FF-01, and all 52 letters are tried', () => {
-    // FF-01 needs at least one Basic Latin letter admitted. That set is finite and small,
-    // so absence there IS establishable - unlike absence outside it.
-    assert.equal(states('[0-9]{1,5}')['FF-01'], ESTABLISHED_NEGATIVE);
+  test('a missing Basic Latin witness establishes nothing, in either direction', () => {
+    // The seventh defect, and the one that finally killed the "exhaustible alphabet"
+    // argument. Trying all 52 Basic Latin letters is not exhaustive, because each is tried
+    // in finitely many CONTEXTS: `[A-Za-z]{6,10}` accepts no probe shorter than six, so
+    // every letter missed and FF-01 came back established-negative on a pattern that
+    // plainly admits Basic Latin letters and which the catalogue and the analyser both
+    // report FF-01 positive for.
+    assert.equal(states('[A-Za-z]{6,10}')['FF-01'], UNKNOWN);
+    // Nor can a digits-only class establish it. FF-01 needs a Basic Latin letter admitted,
+    // and failing to witness one is not proof that none is.
+    assert.equal(states('[0-9]{1,5}')['FF-01'], UNKNOWN);
+    assert.equal(states('[d]')['FF-01'], UNKNOWN);
+    // Only an outside-letter witness can establish it, and that still works.
+    assert.equal(states('[A-Za-z\u00c0-\u00ff]+')['FF-01'], ESTABLISHED_NEGATIVE);
+  });
+
+  test('probes span the lengths a control declares, which only finds more witnesses', () => {
+    // Same class as above but with letters outside Basic Latin. Before length-aware
+    // probing this was unknown too; now the witness is found at the declared length. The
+    // semantics are untouched - a miss is still unknown.
+    assert.equal(states('[A-Za-z\u00c0-\u00ff]{6,10}')['FF-01'], ESTABLISHED_NEGATIVE);
     assert.equal(states('[0-9]{1,5}')['FF-05'], ESTABLISHED_NEGATIVE, '"1" is accepted');
-    // And a single letter outside the old hand-picked sample is now found.
-    assert.equal(states('[d]')['FF-01'], UNKNOWN, 'd IS admitted, so the rule is not ruled out');
     assert.equal(states('[d]')['FF-05'], ESTABLISHED_NEGATIVE, '"d" is a one-unit accepted value');
   });
 

@@ -41,12 +41,20 @@ FF-04 on letters being admitted.
 ## Why it matters, and how much
 
 It cannot affect a control that admits ordinary letters, so it does not touch the common
-case. It matters where stage one detects a control whose constraint admits no letters —
-either a genuine numeric field that is mislabelled, or a stage-one false positive. In both
-cases FF-02 fires where the catalogue says it should not, which inflates FF-02's false
-positives and lowers its reported precision. It is narrow, but it is in the direction that
-makes the tool look worse rather than better, and it is a contradiction between two tagged
-artefacts either way.
+case. It bites on any detected control whose constraint admits no letters at all, and there
+are three such cases, not two as this file first said:
+
+1. A **genuine personal-name field given a numeric-only or symbol-only pattern by mistake**
+   — a copied postcode or reference-number pattern left on a name input. This is the case
+   that matters most: the control really is a name field, it really is broken, and stage one
+   is right about it. FF-02 then fires with an evidence string about macrons and diacritics
+   that misdescribes what is wrong with the field.
+2. A numeric field mislabelled such that stage one detects it.
+3. A stage-one false positive.
+
+In all three FF-02 fires where the catalogue says it should not, which inflates FF-02's
+false positives and lowers its reported precision. It is narrow, it cuts against the tool
+rather than for it, and it is a contradiction between two tagged artefacts either way.
 
 ## Options
 
@@ -56,21 +64,49 @@ artefacts either way.
    say, and it weakens the FF-01/FF-02 subsumption argument that rests on the precision of
    what each admits. Requires `catalogue-v1.1.0`.
 2. **Amend the analyser** to check the precondition, which is what the catalogue as written
-   requires. This is the faithful fix. It changes the instrument, so it requires
-   `evaluation-v1.1.0`, a rebuilt frozen checkout, and a re-run of the instrument record and
-   snapshot verification. Nothing has been evaluated with the current instrument, so
-   nothing would need recomputing.
+   requires. This is the faithful fix, and it is the expensive one. It is not a one-tag
+   change: the instrument tag is pinned in code, in CI and in the protocol, and every pin
+   has to be considered separately.
+
+   | What | Where |
+   |---|---|
+   | New instrument tag `evaluation-v1.1.0` | rebuilt frozen checkout, instrument record, snapshot verification |
+   | Pinned tag **and commit** | `evaluation/src/instrument-ref.mjs` |
+   | Instrument recorded in outputs | `metrics.mjs`, `inventory.mjs`, `agreement.mjs`, `cli-seal.mjs` |
+   | Schema refusal | `schema.mjs` rejects any file not naming `evaluation-v1.0.0` |
+   | Templates and synthetic fixtures | `templates/annotation.template.json`, `fixtures/synthetic/*.json` |
+   | Setup and CI | `evaluation/scripts/setup-instrument.sh`, `.github/workflows/ci.yml` |
+   | New harness tag | the harness hard-codes the instrument, so it cannot stay at `harness-v1.1.0` |
+   | Dated protocol amendment | selecting the new instrument, since the protocol names `evaluation-v1.0.0` |
+
+   **Two pins must NOT be changed with it.**
+
+   - `DRAW_TAG` in `evaluation/src/draw-order.mjs`, and the identical string in protocol
+     section 2, which hashes `evaluation-v1.0.0|<frame-sha256>|<agency-name>`. Recomputing
+     the agency draw order under a new tag would produce a **different sample**. The draw
+     order is already frozen and must stay pinned to the original string; the amendment has
+     to say so explicitly, because the natural instinct on a version bump is to update every
+     occurrence.
+   - The bootstrap seed in `stats.mjs`, also the literal `evaluation-v1.0.0`. It is a seed,
+     not a version reference. Changing it would move every interval for no reason and would
+     be an unrelated change smuggled in under a correctness fix.
+
+   Nothing has been evaluated with the current instrument, so no figure would need
+   recomputing.
 3. **Record it as a known deviation** and neither artefact changes. Honest and cheapest,
    but it means reporting FF-02 figures from an implementation that does not match its own
    published trigger, and an examiner who reads both will find it.
 
 ## Recommendation, for the supervisor's decision
 
-Option 2. The catalogue's precondition is not decoration: the argument that FF-01 subsumes
-FF-02 turns on exactly which characters each admits, and loosening FF-02 to fire without
-any letters at all undermines it. No figure exists to be recomputed, the capture has not
-started, and this is therefore the cheapest moment this fix will ever be available. It does
-mean a new instrument tag before capture.
+Option 2, with the cost stated plainly rather than minimised. The catalogue's precondition
+is not decoration: the argument that FF-01 subsumes FF-02 turns on exactly which characters
+each admits, and loosening FF-02 to fire without any letters at all undermines it. No figure
+exists to be recomputed and capture has not started, so this is the cheapest moment the fix
+will ever be available — but "cheapest" is not "cheap". It means a new instrument tag, a new
+harness tag, a dated protocol amendment, and a careful pass over the pins above in which two
+of them are deliberately left alone. That is a day's work done carefully, and it must not be
+attempted in the same week as capture.
 
 Option 3 is acceptable only if the deviation is stated wherever FF-02 precision is
 reported, not once in a limitations section.
