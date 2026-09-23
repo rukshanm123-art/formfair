@@ -61,9 +61,8 @@ reported instead as the unscored advisory `ADV-NORM-BOUNDARY`.
 ## Advisories
 
 An advisory records a constraint that *could* exclude a name without any fixture
-witnessing that it does. Advisories are reported in every output format, marked
-`scored: false` in JSON, and excluded from precision and recall by construction; their
-prevalence is reported separately from rule accuracy.
+witnessing that it does. Advisories are reported in every output format and marked
+`scored: false` in JSON, so they cannot be mistaken for catalogue findings.
 
 | Code | Condition |
 |---|---|
@@ -73,8 +72,8 @@ Whether a control is labelled and named is delegated to axe-core rather than
 reimplemented: `label`, `form-field-multiple-labels`, `autocomplete-valid`,
 `aria-input-field-name` and `select-name`. Error-message association is not among them
 and is not checked. Delegated findings are reported under their own heading, labelled
-with the engine and version, and excluded from FormFair's accuracy figures - they are
-another tool's results, not this catalogue's.
+with the engine and version and `scored: false` - they are another tool's results, not
+this catalogue's.
 
 ## Identifying name controls
 
@@ -88,7 +87,7 @@ where the attributes name the widget, the label is often the only place the huma
 word appears.
 
 A control missed here is never examined, and its anti-patterns are silently absent from
-the output, so this stage is measured and reported separately from rule accuracy. Each
+the output, so this stage is reported separately as tool applicability. Each
 identified control carries the score and the signals that produced it.
 
 ## Decidability
@@ -102,7 +101,7 @@ concatenation of atoms - a literal, an enumerated character class, a Unicode pro
 escape, or a predefined class - each optionally quantified. Alternation, groups carrying
 quantifiers, lookaround, backreferences and `v`-flag set operations are **declined**:
 no finding is emitted, and the decline is recorded so decision coverage can be reported
-alongside accuracy. Silence and a clean result are different outcomes.
+alongside the findings. Silence and a clean result are different outcomes.
 
 ### Length units
 
@@ -119,11 +118,12 @@ Requires Node 20 or later: the analyser compiles patterns with the regular-expre
 
 ```bash
 npm install
-npm test                # 98 tests, the rule catalogue and reports
+npm test                # 100 tests, the rule catalogue and reports
 npm run typecheck
 npm run build           # dist/index.js with type declarations
 npm run example         # rebuilds, then regenerates examples/sample-report.html
 npm run test:delegated  # 13 tests; needs jsdom's Node floor, see below
+npm run verify:solo     # build, then run the no-participant technical study tests
 ```
 
 The delegated suite runs axe-core inside jsdom, whose bundled undici calls a Node
@@ -155,9 +155,11 @@ exercises both entry points as a consumer would. CI runs it on Node 20 and 22.
 
 Every JSON report carries an `instrument` block naming the catalogue version, the
 package version, the parse5 and axe-core versions, and the runtime - because a catalogue
-version alone does not reproduce a result. Held-out analysis is run from the
-`evaluation-v1.0.0` tag, which fixes the commit, the locked dependency tree and all of
-the above together. See [docs/evaluation/README.md](docs/evaluation/README.md).
+version alone does not reproduce a result. The historical participant-dependent design
+remains reproducible at `evaluation-v1.0.0`. The active no-participant technical study
+will use `evaluation-v1.1.0` after its pre-data freeze. See
+[the solo protocol](docs/evaluation/SOLO-PROTOCOL.md) and
+[the instrument record](docs/evaluation/README.md).
 
 `npm run verify:snapshots` fails if a delegated engine is bumped without recapturing the
 catalogue snapshot held as evidence for it, so the write-up cannot end up describing an
@@ -186,6 +188,21 @@ against the window the provider actually builds.
 
 `examples/sample-report.html` is generated output, produced by `npm run example` so it
 cannot drift from what the analyser emits.
+
+## Evaluation design
+
+The active capstone evaluation requires no recruited annotators. Its primary evidence is
+a pre-data software-engineering study: 25 browser-confirmed seeded constraint faults,
+five metamorphic relations, a deterministic 1,000-case robustness exercise, the package
+and delegated suites, reproducibility checks, and a runtime profile at 10, 100 and 1,000
+controls. The executable method is under [`evaluation/solo/`](evaluation/solo/README.md).
+
+A secondary scan keeps the frozen CWAC frame and agency order, hashes the selection
+ledger and every captured page, and reports applicability, declared constraints,
+tool-reported findings, declines, advisories and unscored axe-core findings. It does not
+call those findings human-confirmed defects and does not calculate precision, recall, F1,
+kappa or actual-defect prevalence. The exact claim boundary and success criteria are
+frozen in [`SOLO-PROTOCOL.md`](docs/evaluation/SOLO-PROTOCOL.md).
 
 ### A worked example
 

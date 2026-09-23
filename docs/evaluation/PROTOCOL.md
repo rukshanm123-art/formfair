@@ -379,3 +379,29 @@ name its own statistics cannot be checked.
 at which FormFair itself is run. This amendment touches the **analysis harness only** -
 how intervals are computed from the labels - and not the analyser, the rule catalogue, the
 sampling frame or any annotation. No result is recomputed, because none exists.
+
+### Amendment 2: solo software-engineering evaluation
+
+**Dated 22 September 2026, before any government form was captured, any real-form
+finding was seen, or any annotator was recruited.**
+
+The participant-dependent evaluation in sections 4 and 6 to 10 will not be run. It is
+preserved above as the historical frozen design and is not weakened, relabelled or used
+to produce figures without its required annotators and adjudicator.
+
+It is superseded for this project by
+[`SOLO-PROTOCOL.md`](SOLO-PROTOCOL.md), which defines:
+
+- a primary automated technical study using browser-confirmed seeded mutations,
+  metamorphic testing, seeded robustness, determinism and performance evidence; and
+- a secondary descriptive scan of the unchanged CWAC frame and draw order.
+
+The descriptive scan reports **tool-reported findings**, applicability, constraint
+exposure and declines. It does not report human-validated precision, recall, F1, kappa,
+cultural acceptability, or prevalence of actual defects.
+
+The analyser is corrected to enforce FF-02's existing catalogue precondition and will be
+frozen as `evaluation-v1.1.0` before capture. The catalogue remains `catalogue-v1.0.0`.
+The frame and `draw-order.csv` remain byte-identical; in particular, the draw seed stays
+the literal `evaluation-v1.0.0`, because changing it would reroll the sample. The legacy
+annotation harness and all existing tags remain unmoved.

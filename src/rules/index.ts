@@ -106,9 +106,11 @@ const REJECTS_DIACRITICS: Rule = {
     const profile = letterProfile(g.atoms);
     if (profile === null) return declined('cannot determine which letters the pattern admits');
 
-    // Where the class is Basic Latin only, FF-01 is the more general finding and
-    // subsumes this one; FF-02 is then contributing evidence, not a separate finding.
-    if (profile.basicLatin && !profile.outsideBasicLatin) return clean;
+    // The catalogue requires the constraint to admit at least one letter beyond Basic
+    // Latin before FF-02 can describe a selective diacritic exclusion. Basic-Latin-only
+    // constraints remain under FF-01, while numeric-only and symbol-only constraints do
+    // not become misleading FF-02 findings merely because they reject every diacritic.
+    if (!profile.outsideBasicLatin) return clean;
 
     const affected: { name: string; locale: string; missing: string[] }[] = [];
     for (const n of DIACRITIC_NAMES) {

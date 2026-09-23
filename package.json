@@ -34,6 +34,7 @@
     "example": "npm run build && node scripts/generate-example.mjs",
     "test:delegated": "vitest run --config vitest.delegated.config.ts",
     "verify:package": "bash scripts/verify-packed-consumer.sh",
+    "verify:solo": "npm run build && npm --prefix evaluation run test:solo",
     "instrument": "node scripts/write-instrument.mjs",
     "verify:snapshots": "node scripts/verify-snapshot-versions.mjs"
   },

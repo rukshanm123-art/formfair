@@ -1,9 +1,11 @@
 # Open conflict: FF-02 fires without the letters its trigger requires
 
-**Raised 22 September 2026. Before any held-out form was captured. Unresolved — this file
-records the conflict and the options; it does not decide.**
+**Raised and resolved 22 September 2026, before any government form was captured.** This
+file preserves the decision trail; no existing tag was moved.
 
-Two frozen artefacts disagree. Neither has been changed, and no tag has been moved.
+Two frozen artefacts disagreed. The analyser has since been corrected in the working tree
+and will be frozen as `evaluation-v1.1.0`; `catalogue-v1.0.0` is unchanged and no existing
+tag has been moved. What follows is the conflict as it stood when it was raised.
 
 ## The conflict
 
@@ -97,22 +99,24 @@ rather than for it, and it is a contradiction between two tagged artefacts eithe
    but it means reporting FF-02 figures from an implementation that does not match its own
    published trigger, and an examiner who reads both will find it.
 
-## Recommendation, for the supervisor's decision
+## Decision
 
-Option 2, with the cost stated plainly rather than minimised. The catalogue's precondition
+Option 2 was selected. The catalogue's precondition
 is not decoration: the argument that FF-01 subsumes FF-02 turns on exactly which characters
 each admits, and loosening FF-02 to fire without any letters at all undermines it. No figure
 exists to be recomputed and capture has not started, so this is the cheapest moment the fix
 will ever be available — but "cheapest" is not "cheap". It means a new instrument tag, a new
 harness tag, a dated protocol amendment, and a careful pass over the pins above in which two
 of them are deliberately left alone. That is a day's work done carefully, and it must not be
-attempted in the same week as capture.
-
-Option 3 is acceptable only if the deviation is stated wherever FF-02 precision is
-reported, not once in a limitations section.
+attempted in the same week as capture. The analyser now returns clean for FF-02 when no
+letter beyond Basic Latin is admitted, with regression cases for numeric-only,
+symbol-only, Basic-Latin-only and selectively extended classes. The change remains
+development work until the full suite passes and the exact commit is tagged
+`evaluation-v1.1.0`.
 
 ## Status
 
 - `catalogue-v1.0.0` unmoved.
 - `evaluation-v1.0.0` unmoved.
-- No form captured, no annotator has coded anything.
+- The corrected working tree is not yet the frozen `evaluation-v1.1.0` instrument.
+- No form captured and no annotator recruited.

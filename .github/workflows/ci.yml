@@ -142,3 +142,32 @@ jobs:
         env:
           FORMFAIR_INSTRUMENT_DIR: ${{ github.workspace }}/.instrument
         run: npm test
+
+  solo-evaluation:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out the working instrument and solo study
+        uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Build the working instrument
+        run: npm run build
+
+      - name: Solo study tests
+        run: npm --prefix evaluation run test:solo
+
+      # Until evaluation-v1.1.0 is frozen this is explicitly a synthetic development
+      # report. The real-form command has no equivalent bypass: --development is refused
+      # unless the corpus itself is marked synthetic.
+      - name: Exercise the technical-study CLI
+        run: npm --prefix evaluation run solo:study -- --development --out "$RUNNER_TEMP/solo-study.json"
+
+      - name: Assert the machine-readable study passed
+        run: node -e "const r=require(process.argv[1]); if(!r.passed) process.exit(1)" "$RUNNER_TEMP/solo-study.json"

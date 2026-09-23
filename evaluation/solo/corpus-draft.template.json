@@ -1,0 +1,24 @@
+{
+  "schema": "formfair/solo-corpus-draft@1",
+  "synthetic": false,
+  "frameSha256": "REPLACE-WITH-FRAME-SHA256",
+  "drawOrderSha256": "REPLACE-WITH-DRAW-ORDER-SHA256",
+  "selectionLedgerFile": "selection-ledger.csv",
+  "pages": [
+    {
+      "pageId": "agency-slug-001",
+      "agency": "Agency name",
+      "website": "https://agency.example/",
+      "originalUrl": "https://agency.example/contact",
+      "finalUrl": "https://agency.example/contact",
+      "capturedAt": "2026-09-22T00:00:00Z",
+      "browser": "Chromium REPLACE",
+      "automationTool": "REPLACE",
+      "viewport": { "width": 1280, "height": 800 },
+      "locale": "en-NZ",
+      "redirects": [],
+      "category": "enquiry-or-contact",
+      "file": "agency-slug-001.html"
+    }
+  ]
+}

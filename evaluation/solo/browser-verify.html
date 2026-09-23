@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>FormFair mutation browser verification</title>
+<style>
+  :root { color-scheme: light dark; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  body { margin: 0; padding: 24px; max-width: 900px; }
+  h1 { font-size: 1.1rem; margin: 0 0 4px; }
+  p { margin: 0 0 16px; font-size: .85rem; opacity: .75; line-height: 1.5; }
+  #summary { font-size: .85rem; margin-bottom: 16px; font-weight: 600; }
+  pre { font-size: .7rem; line-height: 1.4; white-space: pre-wrap; word-break: break-all;
+        border: 1px solid color-mix(in srgb, currentColor 20%, transparent);
+        padding: 12px; border-radius: 6px; max-height: 60vh; overflow: auto; }
+  #probe { position: absolute; left: -9999px; }
+</style>
+</head>
+<body>
+<h1>Mutation browser verification</h1>
+<p>
+  Puts every seeded mutation's expected accept/reject behaviour to THIS browser's constraint
+  validation. <code>patternMismatch</code> is the browser's verdict. Length is computed in
+  UTF-16 code units, because <code>tooLong</code> and <code>tooShort</code> apply only to
+  user-edited values. A pattern that does not compile applies no constraint at all.
+</p>
+<div id="summary">running…</div>
+<pre id="out"></pre>
+<input id="probe" type="text">
+<script>
+const SPECS = [{"id":"FF01-1","rule":"FF-01","family":"ASCII ranges","pattern":"[A-Za-z]+","minlength":null,"maxlength":null,"accepts":["Smith"],"rejects":["Tāwhiao"]},{"id":"FF01-2","rule":"FF-01","family":"hexadecimal ASCII ranges","pattern":"[\\x41-\\x5A\\x61-\\x7A]+","minlength":null,"maxlength":null,"accepts":["Ana"],"rejects":["Émile"]},{"id":"FF01-3","rule":"FF-01","family":"fixed ASCII positions","pattern":"[A-Z][a-z]+","minlength":null,"maxlength":null,"accepts":["Smith"],"rejects":["Łukasz"]},{"id":"FF01-4","rule":"FF-01","family":"lowercase ASCII only","pattern":"[a-z]+","minlength":null,"maxlength":null,"accepts":["ana"],"rejects":["ngātā"]},{"id":"FF01-5","rule":"FF-01","family":"ASCII with punctuation","pattern":"[A-Za-z\\u0027 \\x2D]+","minlength":null,"maxlength":null,"accepts":["Anne-Marie"],"rejects":["Ngātā"]},{"id":"FF02-1","rule":"FF-02","family":"macron-only extension","pattern":"[A-Za-z\\u0101]+","minlength":null,"maxlength":null,"accepts":["ā"],"rejects":["é"]},{"id":"FF02-2","rule":"FF-02","family":"Latin-1 extension only","pattern":"[A-Za-z\\u00C0-\\u00FF]+","minlength":null,"maxlength":null,"accepts":["É"],"rejects":["ā"]},{"id":"FF02-3","rule":"FF-02","family":"Polish letters only","pattern":"[A-Za-z\\u0141\\u0142]+","minlength":null,"maxlength":null,"accepts":["Ł"],"rejects":["ễ"]},{"id":"FF02-4","rule":"FF-02","family":"Vietnamese range only","pattern":"[A-Za-z\\u1E00-\\u1EFF]+","minlength":null,"maxlength":null,"accepts":["ễ"],"rejects":["ā"]},{"id":"FF02-5","rule":"FF-02","family":"modifier-letter extension only","pattern":"[A-Za-z\\u02BB]+","minlength":null,"maxlength":null,"accepts":["ʻ"],"rejects":["ü"]},{"id":"FF03-1","rule":"FF-03","family":"precomposed letters without marks","pattern":"[A-Za-z\\u00C0-\\u00FF]+","minlength":null,"maxlength":null,"accepts":["Émile"],"rejects":["Émile"]},{"id":"FF03-2","rule":"FF-03","family":"maxlength five boundary","pattern":null,"minlength":null,"maxlength":5,"accepts":["Émile"],"rejects":["Émile"]},{"id":"FF03-3","rule":"FF-03","family":"maxlength six boundary","pattern":null,"minlength":null,"maxlength":6,"accepts":["Müller"],"rejects":["Müller"]},{"id":"FF03-4","rule":"FF-03","family":"maxlength seven boundary","pattern":null,"minlength":null,"maxlength":7,"accepts":["Tāwhiao"],"rejects":["Tāwhiao"]},{"id":"FF03-5","rule":"FF-03","family":"Unicode letters without combining marks","pattern":"[\\p{L}]+","minlength":null,"maxlength":null,"accepts":["Émile"],"rejects":["Émile"]},{"id":"FF04-1","rule":"FF-04","family":"letters only","pattern":"[\\p{L}\\p{M}]+","minlength":null,"maxlength":null,"accepts":["Smith"],"rejects":["O'Brien"]},{"id":"FF04-2","rule":"FF-04","family":"space but no apostrophe or hyphen","pattern":"[\\p{L}\\p{M} ]+","minlength":null,"maxlength":null,"accepts":["van der Berg"],"rejects":["Anne-Marie"]},{"id":"FF04-3","rule":"FF-04","family":"apostrophes but no space or hyphen","pattern":"[\\p{L}\\p{M}\\u0027\\u2019]+","minlength":null,"maxlength":null,"accepts":["O'Brien"],"rejects":["van der Berg"]},{"id":"FF04-4","rule":"FF-04","family":"hyphen and space but no apostrophe","pattern":"[\\p{L}\\p{M} \\x2D]+","minlength":null,"maxlength":null,"accepts":["Anne-Marie"],"rejects":["O’Connor"]},{"id":"FF04-5","rule":"FF-04","family":"ASCII letters and space","pattern":"[A-Za-z ]+","minlength":null,"maxlength":null,"accepts":["Mary Jane"],"rejects":["Anne-Marie"]},{"id":"FF05-1","rule":"FF-05","family":"minlength two","pattern":null,"minlength":2,"maxlength":null,"accepts":["Al"],"rejects":["I"]},{"id":"FF05-2","rule":"FF-05","family":"minlength three","pattern":null,"minlength":3,"maxlength":null,"accepts":["Ana"],"rejects":["I"]},{"id":"FF05-3","rule":"FF-05","family":"bounded pattern minimum","pattern":"[A-Za-z]{2,40}","minlength":null,"maxlength":null,"accepts":["Li"],"rejects":["I"]},{"id":"FF05-4","rule":"FF-05","family":"two required positions","pattern":"[A-Za-z][A-Za-z]","minlength":null,"maxlength":null,"accepts":["Li"],"rejects":["I"]},{"id":"FF05-5","rule":"FF-05","family":"fixed length three","pattern":"[A-Za-z]{3}","minlength":null,"maxlength":null,"accepts":["Ana"],"rejects":["I"]}];
+const probe = document.getElementById('probe');
+
+function compiles(pattern) {
+  if (pattern === null) return { applied: false, ok: true };
+  try { new RegExp('^(?:' + pattern + ')$', 'v'); return { applied: true, ok: true }; }
+  catch (e) { return { applied: false, ok: false, reason: String(e.message) }; }
+}
+
+function patternRejects(pattern, value) {
+  probe.removeAttribute('pattern');
+  if (pattern !== null) probe.setAttribute('pattern', pattern);
+  probe.value = value;
+  const bad = probe.validity.patternMismatch;
+  probe.value = '';
+  return bad;
+}
+
+function verdictFor(spec, value) {
+  const c = compiles(spec.pattern);
+  const units = value.length;
+  const tooShort = spec.minlength !== null && units < spec.minlength;
+  const tooLong = spec.maxlength !== null && units > spec.maxlength;
+  const byPattern = c.applied ? patternRejects(spec.pattern, value) : false;
+  return {
+    value, units, accepted: !(byPattern || tooShort || tooLong),
+    rejectedByPattern: byPattern, rejectedByLength: tooShort || tooLong,
+    patternApplied: c.applied, patternCompiles: c.ok,
+  };
+}
+
+const cases = SPECS.map((spec) => ({
+  id: spec.id, rule: spec.rule, family: spec.family,
+  pattern: spec.pattern, minlength: spec.minlength, maxlength: spec.maxlength,
+  shouldAccept: spec.accepts.map((v) => verdictFor(spec, v)),
+  shouldReject: spec.rejects.map((v) => verdictFor(spec, v)),
+}));
+
+for (const c of cases) {
+  c.expectationHolds =
+    c.shouldAccept.every((r) => r.accepted) && c.shouldReject.every((r) => !r.accepted);
+}
+
+const out = {
+  harness: 'solo-mutation-browser-verify-v1',
+  userAgent: navigator.userAgent,
+  cases: cases.length,
+  assertions: cases.reduce((n, c) => n + c.shouldAccept.length + c.shouldReject.length, 0),
+  expectationsHeld: cases.filter((c) => c.expectationHolds).length,
+  results: cases,
+};
+window.RESULT = out;
+document.getElementById('out').textContent = JSON.stringify(out, null, 1);
+document.getElementById('summary').textContent =
+  out.expectationsHeld + ' of ' + out.cases + ' mutation expectations hold in this browser (' +
+  out.assertions + ' assertions). ' + navigator.userAgent;
+document.title = 'mutation verify: ' + out.expectationsHeld + '/' + out.cases;
+</script>
+</body></html>

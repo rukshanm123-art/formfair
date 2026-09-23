@@ -43,6 +43,17 @@ describe('FF-02 rejects diacritics', () => {
     expect(fired).not.toContain('FF-02');
   });
 
+  it('does not fire when the constraint admits no letters beyond Basic Latin', () => {
+    expect(rulesFired(input('pattern="[0-9]{1}"'))).not.toContain('FF-02');
+    const symbols = input('pattern="[\\u0021\\u0040\\u0023]+"');
+    expect(rulesFired(symbols)).not.toContain('FF-02');
+    expect(declinedFor(symbols, 'FF-02')).toBe(false);
+  });
+
+  it('still fires when an outside-Basic-Latin letter is admitted but required diacritics are excluded', () => {
+    expect(rulesFired(input('pattern="[A-Za-z\u0101]+"'))).toContain('FF-02');
+  });
+
   it('does not fire when diacritics are admitted', () => {
     expect(rulesFired(input('pattern="[\\p{L}]+"'))).not.toContain('FF-02');
   });

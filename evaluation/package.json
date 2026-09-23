@@ -5,7 +5,8 @@
   "type": "module",
   "description": "Held-out evaluation harness for FormFair. Deliberately dependency-free.",
   "scripts": {
-    "test": "node --test",
+    "test": "node --test test/cli.test.mjs test/clustered.test.mjs test/differential.test.mjs test/end-to-end.test.mjs test/harness-ref.test.mjs test/metrics.test.mjs test/oracle.test.mjs test/pipeline.test.mjs test/protocol.test.mjs test/schema.test.mjs test/seal-binding.test.mjs test/stats.test.mjs",
+    "test:solo": "node --test solo/test/descriptive.test.mjs solo/test/study.test.mjs",
     "draw-order": "node src/cli-draw-order.mjs",
     "metrics": "node src/cli-metrics.mjs",
     "seal:verify": "node src/cli-seal.mjs",
@@ -14,6 +15,9 @@
     "join": "node src/cli-join.mjs",
     "instrument:setup": "bash scripts/setup-instrument.sh",
     "ground-truth": "node src/cli-ground-truth.mjs",
-    "agreement": "node src/cli-agreement.mjs"
+    "agreement": "node src/cli-agreement.mjs",
+    "solo:study": "node solo/cli-study.mjs",
+    "solo:seal-corpus": "node solo/cli-seal-corpus.mjs",
+    "solo:descriptive": "node solo/cli-descriptive.mjs"
   }
 }

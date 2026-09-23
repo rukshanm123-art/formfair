@@ -1,6 +1,12 @@
-# Evaluation harness
+# Historical held-out evaluation harness
 
-Implements [the frozen protocol](../docs/evaluation/PROTOCOL.md) against
+> **Superseded for the active project method on 22 September 2026.** This directory's
+> annotation, adjudication, kappa and accuracy pipeline is preserved because its frozen
+> design must not be quietly weakened. It will not be run without the people it requires.
+> The active no-participant software-engineering study is under [`solo/`](solo/README.md)
+> and is governed by [`SOLO-PROTOCOL.md`](../docs/evaluation/SOLO-PROTOCOL.md).
+
+The historical pipeline implements [the frozen protocol](../docs/evaluation/PROTOCOL.md) against
 [the frozen instrument](../docs/evaluation/README.md).
 
 **This package has no dependencies, by design.** It is kept out of the analyser's
@@ -9,7 +15,7 @@ evaluation is run with. Tests use `node:test`.
 
 ```bash
 cd evaluation
-npm test              # 219 tests, on synthetic fixtures only
+npm test              # 240 tests, on synthetic fixtures only
 npm run draw-order    # verify the frozen order still matches the frame
 npm run build-frame   # rebuild frame.csv from the archived page and re-assert its counts
 npm run metrics -- fixtures/synthetic/dataset.valid.json --synthetic

@@ -1,4 +1,9 @@
-# The evaluation instrument
+# The historical evaluation instrument
+
+> `evaluation-v1.0.0` remains immutable and reproducible, but the participant-dependent
+> study it was intended for has been superseded by the solo software-engineering protocol.
+> The corrected successor will be frozen as `evaluation-v1.1.0` before any real-form
+> capture. See [`SOLO-PROTOCOL.md`](SOLO-PROTOCOL.md).
 
 A catalogue version does not reproduce a result on its own. The HTML parser decides
 which controls are seen at all, the accessibility engine decides the delegated findings,
