@@ -344,13 +344,27 @@ function doNext() {
   }
   console.log(`agency:   ${work.agency}`);
   console.log(`category: ${work.category}`);
+  if (work.blocked) {
+    console.log(`next:     resolve ${work.blocked.length} outcome(s) before any further work`);
+    work.blocked.forEach((b) => console.log(`  - ${b.approval}: ${b.url}`));
+    console.log(`reason:   ${work.reason}`);
+    return;
+  }
+  if (work.needsSetApproval) {
+    console.log(`next:     the researcher approves the locked candidate set`);
+    console.log(`reason:   ${work.reason}`);
+    (work.locked ?? []).forEach((u, i) => console.log(`  ${i + 1}. ${u}`));
+    console.log(`command:  npm --prefix capture run approve-set -- --out <dir> \\`);
+    console.log(`            --agency ${JSON.stringify(work.agency)} --category ${work.category}`);
+    return;
+  }
   if (work.needsLock) {
     console.log('next:     record discovered candidates, then lock the set');
     console.log(`terms:    ${(SEARCH_TERMS[work.category] ?? []).join(', ')}`);
-  } else {
-    console.log(`next:     assess ${work.pending.length} locked candidate(s) still without an outcome`);
-    work.pending.forEach((u) => console.log(`  - ${u}`));
+    return;
   }
+  console.log(`next:     assess ${work.pending.length} locked candidate(s) still without an outcome`);
+  work.pending.forEach((u) => console.log(`  - ${u}`));
 }
 
 const commands = { candidates: doCandidates, lock: doLock, 'approve-set': doApproveSet, next: doNext, capture: doCapture, exclude: doExclude, discovery: doDiscovery, budget: doBudget, approve: doApprove, status: doStatus, build: doBuild };
