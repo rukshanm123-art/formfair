@@ -120,6 +120,9 @@ const lockSet = async (dir, agency, category, urls) => {
   assert.equal(add.status, 0, add.stderr);
   const locked = await run(['lock', '--out', dir, '--agency', agency, '--category', category]);
   assert.equal(locked.status, 0, locked.stderr);
+  // Assessment requires the researcher to approve the set, which is its own gate.
+  const approved = await run(['approve-set', '--out', dir, '--agency', agency, '--category', category]);
+  assert.equal(approved.status, 0, approved.stderr);
   return locked;
 };
 

@@ -13,6 +13,7 @@ import {
 } from '../selection.mjs';
 import {
   emptyLog, appendAttempt, ELIGIBILITY_CRITERIA, deriveLedger, recordCandidates, lockCandidateSet,
+  approveCandidateSet,
 } from '../run.mjs';
 
 const nullEligibility = () => Object.fromEntries(ELIGIBILITY_CRITERIA.map((c) => [c, null]));
@@ -27,6 +28,9 @@ function prepare(log, agency, category, count) {
   const urls = Array.from({ length: count }, (_, i) => `https://w.govt.nz/${encodeURIComponent(agency)}/${category}/${i}`);
   recordCandidates(log, { agency, category, urls });
   lockCandidateSet(log, { agency, category });
+  // Assessment now requires the researcher to approve the candidate set; that gate has its
+  // own tests in approval.test.mjs.
+  approveCandidateSet(log, { agency, category, approved: true });
   return urls;
 }
 const candidate = (agency, category, n) => ({
@@ -132,12 +136,14 @@ describe('the effort bound', () => {
     for (let i = 0; i < MAX_CANDIDATES_PER_CATEGORY; i++) {
       appendAttempt(log, candidate('TPK', 'enquiry-or-contact', i));
     }
-    for (const kind of DISCOVERY_KINDS) {
+    DISCOVERY_KINDS.forEach((kind, i) => {
+      const navigatedAt = new Date(Date.UTC(2026, 8, 24, 1, i * 10)).toISOString().replace(/\.\d{3}Z$/, 'Z');
       appendAttempt(log, {
-        examinedAt: '2026-09-24T00:00:00Z', agency: 'TPK', website: 'https://w.govt.nz/',
+        examinedAt: navigatedAt, agency: 'TPK', website: 'https://w.govt.nz/',
         url: `https://w.govt.nz/discovery/${kind}`, status: 'discovery', discoveryKind: kind,
+        navigatedAt,
       });
-    }
+    });
     assert.equal(log.attempts.length, MAX_CANDIDATES_PER_CATEGORY + DISCOVERY_KINDS.length);
     // And they reach the ledger, so the search is auditable, not just its outcome.
     const ledger = deriveLedger(log);

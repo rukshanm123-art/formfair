@@ -21,7 +21,7 @@ import { LEDGER_HEADER, recordExamination, CATEGORIES } from './capture.mjs';
 import { POLICY } from './politeness.mjs';
 import {
   DISCOVERY_KINDS, remainingBudget, MAX_CANDIDATES_PER_CATEGORY, MAX_CANDIDATES_PER_AGENCY,
-  canonicalise, setKey, MAX_QUALIFIED_AGENCIES, CATEGORY_ORDER, lockCandidates,
+  canonicalise, setKey, MAX_QUALIFIED_AGENCIES, CATEGORY_ORDER, lockCandidates, isSuperseded,
 } from './selection.mjs';
 
 export const LOG_SCHEMA = 'formfair/capture-log@1';
@@ -38,6 +38,18 @@ export const ELIGIBILITY_CRITERIA = Object.freeze([
 export const APPROVAL = Object.freeze({ PENDING: 'pending', APPROVED: 'approved', REJECTED: 'rejected' });
 
 const sha256 = (v) => createHash('sha256').update(v).digest('hex');
+
+const isoUtcish = (v) => typeof v === 'string' && !Number.isNaN(Date.parse(v)) && v.endsWith('Z');
+
+/** The most recent recorded top-level navigation, whatever produced it. */
+function lastNavigation(log) {
+  const times = log.attempts
+    .map((a) => a.navigatedAt ?? a.capturedAt ?? null)
+    .filter(Boolean)
+    .map((t) => Date.parse(t))
+    .filter((n) => !Number.isNaN(n));
+  return times.length ? Math.max(...times) : null;
+}
 
 export function emptyLog() {
   return { schema: LOG_SCHEMA, politeness: { ...POLICY }, attempts: [], candidateSets: {}, exhausted: [] };
@@ -66,8 +78,16 @@ function checkAttempt(attempt) {
   if (!['captured', 'excluded', 'failed', 'discovery'].includes(attempt.status)) {
     problems.push('status must be captured, excluded, failed or discovery');
   }
-  if (attempt.status === 'discovery' && !DISCOVERY_KINDS.includes(attempt.discoveryKind)) {
-    problems.push(`a discovery record needs discoveryKind from ${DISCOVERY_KINDS.join(', ')}`);
+  if (attempt.status === 'discovery') {
+    if (!DISCOVERY_KINDS.includes(attempt.discoveryKind)) {
+      problems.push(`a discovery record needs discoveryKind from ${DISCOVERY_KINDS.join(', ')}`);
+    }
+    // Discovery browsing is not performed by the capture harness, so its pacing cannot be
+    // enforced by the pacer. It is recorded instead, and checked against the previous
+    // navigation, so a run that went too fast is visible rather than merely promised.
+    if (!isoUtcish(attempt.navigatedAt)) {
+      problems.push('a discovery record needs navigatedAt as a UTC timestamp');
+    }
   }
   if (attempt.status !== 'discovery') {
     for (const c of ELIGIBILITY_CRITERIA) {
@@ -114,8 +134,20 @@ export function appendAttempt(log, attempt) {
   }
   // Per AGENCY, not globally: a third-party form linked by two agencies is genuine
   // evidence for both, and refusing to record it for the second would hide that.
-  if (log.attempts.some((a) => a.agency === attempt.agency && a.url === attempt.url)) {
-    throw new Error(`url ${attempt.url} is already recorded for ${attempt.agency}`);
+  const priorForUrl = log.attempts.filter((a) => a.agency === attempt.agency && a.url === attempt.url);
+  if (priorForUrl.length > 0) {
+    // A rejected decision is corrected by recording a NEW attempt that supersedes it. The
+    // original stays in the log: a correction that erases what it corrected is not a
+    // correction, and the ledger has to show what was decided first.
+    const rejected = priorForUrl.filter((a) => a.approval === APPROVAL.REJECTED && !isSuperseded(log, a));
+    if (attempt.supersedes !== attempt.url || rejected.length === 0) {
+      throw new Error(
+        `url ${attempt.url} is already recorded for ${attempt.agency}` +
+          (rejected.length
+            ? '. Its decision was rejected; record the correction with supersedes set to the same URL.'
+            : '')
+      );
+    }
   }
   if (attempt.status === 'captured') {
     const canonical = canonicalise(attempt.finalUrl ?? attempt.url);
@@ -130,6 +162,20 @@ export function appendAttempt(log, attempt) {
       );
     }
   }
+  // The five-second minimum between top-level navigations, checked rather than trusted.
+  const at = Date.parse(attempt.navigatedAt ?? attempt.capturedAt ?? '');
+  const previous = lastNavigation(log);
+  if (!Number.isNaN(at) && previous !== null) {
+    const gap = at - previous;
+    if (gap < POLICY.minDelayBetweenNavigationsMs) {
+      throw new Error(
+        `only ${gap} ms since the previous navigation; the policy requires at least ` +
+          `${POLICY.minDelayBetweenNavigationsMs} ms between top-level navigations.`
+      );
+    }
+    attempt.msSincePreviousNavigation = gap;
+  }
+
   // Only a URL from the locked candidate set may be assessed. Locking happens after
   // canonicalisation, deduplication and sorting, so the set cannot grow once its members
   // start producing outcomes - which is what makes the ordering rule operational.
@@ -139,6 +185,13 @@ export function appendAttempt(log, attempt) {
       throw new Error(
         `no locked candidate set for ${attempt.agency} / ${attempt.category}. ` +
           'Record the discovered URLs and lock the set before assessing any of them.'
+      );
+    }
+    if (set.approval !== APPROVAL.APPROVED) {
+      throw new Error(
+        `the candidate set for ${attempt.agency} / ${attempt.category} is ` +
+          `${set.approval ?? 'pending'}. The researcher approves the candidate set before ` +
+          'any of it is assessed, because that set is where the judgement sits.'
       );
     }
     if (!set.locked.includes(canonicalise(attempt.url))) {
@@ -175,7 +228,9 @@ export function appendAttempt(log, attempt) {
 export function recordCandidates(log, { agency, category, urls }) {
   if (!CATEGORY_ORDER.includes(category)) throw new Error(`unknown category ${category}`);
   const key = setKey(agency, category);
-  const set = (log.candidateSets[key] ??= { agency, category, discovered: [], locked: [], lockedAt: null });
+  const set = (log.candidateSets[key] ??= {
+    agency, category, discovered: [], locked: [], lockedAt: null, approval: APPROVAL.PENDING,
+  });
   if (set.lockedAt) {
     throw new Error(
       `the candidate set for ${agency} / ${category} was locked at ${set.lockedAt} and cannot grow`
@@ -201,6 +256,23 @@ export function lockCandidateSet(log, { agency, category }) {
   set.locked = locked;
   set.lockedAt = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
   set.droppedBeyondBound = ordered.slice(locked.length);
+  return set;
+}
+
+/**
+ * The researcher approves the locked candidate set before anything in it is assessed.
+ *
+ * The candidate set is where judgement actually sits: which links looked like a form, which
+ * search results were worth opening. Approving only the verdicts would leave that judgement
+ * unreviewed, and no code can check it - so it is approved explicitly, as its own step.
+ */
+export function approveCandidateSet(log, { agency, category, approved, note }) {
+  const set = log.candidateSets[setKey(agency, category)];
+  if (!set) throw new Error(`no candidate set for ${agency} / ${category}`);
+  if (!set.lockedAt) throw new Error('the set must be locked before it can be approved');
+  set.approval = approved ? APPROVAL.APPROVED : APPROVAL.REJECTED;
+  set.approvedAt = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
+  if (note) set.approvalNote = note;
   return set;
 }
 

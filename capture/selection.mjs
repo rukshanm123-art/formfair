@@ -132,8 +132,11 @@ export function lockCandidates(discovered) {
  * category cannot be reached before a higher one is finished.
  */
 export function nextWork(log, drawOrder) {
+  // Only an APPROVED capture qualifies an agency. Counting a pending one would let forty
+  // unreviewed captures end the scan, which is the opposite of what the approval gate is
+  // for. A rejected capture does not qualify anything either.
   const qualified = new Set(
-    log.attempts.filter((a) => a.status === 'captured' && a.approval !== 'rejected').map((a) => a.agency)
+    log.attempts.filter((a) => a.status === 'captured' && a.approval === 'approved').map((a) => a.agency)
   );
   if (qualified.size >= MAX_QUALIFIED_AGENCIES) {
     return { done: true, reason: `${MAX_QUALIFIED_AGENCIES} agencies have qualified` };
@@ -141,18 +144,47 @@ export function nextWork(log, drawOrder) {
   for (const row of drawOrder) {
     if (qualified.has(row.agency)) continue;
     if (log.exhausted?.includes(row.agency)) continue;
+
+    // An attempt that is pending or rejected is unfinished business for this agency, and
+    // work does not move past it - not to the next candidate, not to the next category and
+    // not to the next agency. A rejected decision must be superseded by a corrected one.
+    const unresolved = log.attempts.filter(
+      (a) => a.agency === row.agency && a.status !== 'discovery' &&
+        (a.approval === 'pending' || (a.approval === 'rejected' && !isSuperseded(log, a)))
+    );
+    if (unresolved.length > 0) {
+      return {
+        agency: row.agency,
+        category: unresolved[0].category,
+        blocked: unresolved.map((a) => ({ url: a.url, approval: a.approval })),
+        reason: 'outcomes are pending or rejected and must be resolved before work continues',
+      };
+    }
+
     for (const category of CATEGORY_ORDER) {
       const set = log.candidateSets?.[setKey(row.agency, category)];
       if (!set?.lockedAt) return { agency: row.agency, category, needsLock: true };
+      if (set.approval !== 'approved') {
+        return {
+          agency: row.agency, category, needsSetApproval: true,
+          locked: set.locked,
+          reason: `the locked candidate set is ${set.approval ?? 'pending'} and must be approved before assessment`,
+        };
+      }
       const outcomes = new Set(
         log.attempts.filter((a) => a.agency === row.agency && a.status !== 'discovery').map((a) => a.url)
       );
       const pending = set.locked.filter((u) => !outcomes.has(u));
       if (pending.length > 0) return { agency: row.agency, category, pending };
-      // Every locked candidate has an outcome and none qualified: move to the next
-      // category. The category is finished, not abandoned.
+      // Every locked candidate has an approved outcome and none qualified: the category is
+      // finished, not abandoned, so the next one may be searched.
     }
     return { agency: row.agency, exhaustedAgency: true };
   }
   return { done: true, reason: 'all agencies in the frozen order have been attempted' };
+}
+
+/** A rejected decision is resolved only by a later attempt that explicitly supersedes it. */
+export function isSuperseded(log, attempt) {
+  return log.attempts.some((a) => a.supersedes === attempt.url && a.agency === attempt.agency);
 }

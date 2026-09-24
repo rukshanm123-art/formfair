@@ -404,3 +404,42 @@ and is approved as such. The discovered candidate set is therefore the part of t
 procedure that rests on judgement rather than on code, and the limitation above applies to
 it directly.
 
+## Amendment 3: the approval state machine
+
+**Dated 24 September 2026. Precondition: no held-out page has been visited or captured.**
+`solo-protocol-v1.0.0`, `capture-v1.0.0` and `selection-v1.0.0` are not moved. Frozen as
+`selection-v1.0.1`.
+
+Amendment 2 made the selection rule enforceable. A further review found that its approval
+states were still walkable, in five ways, each of which would have let the scan proceed on
+something nobody had confirmed.
+
+**The candidate set is approved before anything in it is assessed.** Amendment 2 said the
+discovered candidate set is where judgement sits and no code can check it; it then left
+that judgement unreviewed, approving only the verdicts on candidates. A locked set is now
+`pending` until the researcher approves it, assessment of an unapproved or rejected set is
+refused, and a rejected set means discovery for that category is redone.
+
+**Only an approved capture qualifies an agency.** Qualification counted anything not
+rejected, so forty captures still awaiting review would have ended the scan - the exact
+opposite of what the approval gate exists for.
+
+**Work does not advance past an unresolved outcome.** A pending or rejected outcome blocks
+the next candidate, the next category and the next agency for that agency, rather than
+being stepped over.
+
+**A rejected decision is corrected, not erased.** The correction is a new attempt that
+explicitly supersedes the rejected one, and the original stays in the log with its
+rejection. A correction that erases what it corrected is not a correction, and the ledger
+has to show what was decided first.
+
+**Discovery pacing is recorded and checked.** Discovery browsing is not performed by the
+capture harness, so the pacer cannot pace it. Every top-level discovery page now carries
+its navigation timestamp, the gap from the previous navigation is checked against the
+five-second minimum, and the measured gap is stored on the record. A run that went too fast
+is visible rather than merely promised. This closes a gap in `capture-v1.0.0`, whose
+politeness policy reads as covering the whole scan while only the capture step was paced.
+
+All five are covered by tests written from the defect that found them. The capture package
+has 54 tests.
+

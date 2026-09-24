@@ -12,7 +12,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
   emptyLog, appendAttempt, ELIGIBILITY_CRITERIA, recordCandidates, lockCandidateSet,
-  categorySettled, deriveDraft, APPROVAL,
+  categorySettled, deriveDraft, APPROVAL, approveCandidateSet,
 } from '../run.mjs';
 import {
   parseDrawOrder, nextWork, CATEGORY_ORDER, MAX_CANDIDATES_PER_CATEGORY, MAX_QUALIFIED_AGENCIES,
@@ -29,6 +29,7 @@ function preparedLog(agency, category, n = MAX_CANDIDATES_PER_CATEGORY) {
   const urls = Array.from({ length: n }, (_, i) => `https://w.govt.nz/${category}/${i}`);
   recordCandidates(log, { agency, category, urls });
   lockCandidateSet(log, { agency, category });
+  approveCandidateSet(log, { agency, category, approved: true });
   return { log, urls: log.candidateSets[`${agency}\u0000${category}`].locked };
 }
 
@@ -119,10 +120,15 @@ describe('agency and category order', () => {
   });
 
   test('a lower-priority category is not offered until the higher one is settled', () => {
-    const { log, urls } = preparedLog(drawOrder[0].agency, 'account-registration');
-    appendAttempt(log, excluded(drawOrder[0].agency, 'account-registration', urls[0]));
+    const agency = drawOrder[0].agency;
+    const { log, urls } = preparedLog(agency, 'account-registration');
+    appendAttempt(log, excluded(agency, 'account-registration', urls[0]));
+    log.attempts.at(-1).approval = APPROVAL.APPROVED;
     assert.equal(nextWork(log, drawOrder).category, 'account-registration', 'still the first category');
-    for (const url of urls.slice(1)) appendAttempt(log, excluded(drawOrder[0].agency, 'account-registration', url));
+    for (const url of urls.slice(1)) {
+      appendAttempt(log, excluded(agency, 'account-registration', url));
+      log.attempts.at(-1).approval = APPROVAL.APPROVED;
+    }
     assert.equal(nextWork(log, drawOrder).category, 'service-application', 'now the second');
   });
 
@@ -188,6 +194,7 @@ describe('a third-party form shared by two agencies', () => {
     for (const agency of ['TPK', 'Ministry of Health']) {
       recordCandidates(log, { agency, category: 'enquiry-or-contact', urls: [shared] });
       lockCandidateSet(log, { agency, category: 'enquiry-or-contact' });
+      approveCandidateSet(log, { agency, category: 'enquiry-or-contact', approved: true });
       appendAttempt(log, excluded(agency, 'enquiry-or-contact', shared));
     }
     assert.equal(log.attempts.filter((a) => a.url === shared).length, 2);
@@ -204,6 +211,7 @@ describe('a third-party form shared by two agencies', () => {
     for (const agency of ['TPK', 'Ministry of Health']) {
       recordCandidates(log, { agency, category: 'enquiry-or-contact', urls: [shared] });
       lockCandidateSet(log, { agency, category: 'enquiry-or-contact' });
+      approveCandidateSet(log, { agency, category: 'enquiry-or-contact', approved: true });
     }
     appendAttempt(log, capturedAttempt('TPK'));
     assert.throws(

@@ -24,7 +24,7 @@ import { capturePage, validateUrl, validatePageId, CATEGORIES } from './capture.
 import { POLICY, parseRobots, isAllowed, createPacer } from './politeness.mjs';
 import {
   readLog, writeLog, appendAttempt, writeDerived, ELIGIBILITY_CRITERIA, APPROVAL,
-  recordCandidates, lockCandidateSet, categorySettled,
+  recordCandidates, lockCandidateSet, categorySettled, approveCandidateSet,
 } from './run.mjs';
 import {
   DISCOVERY_KINDS, remainingBudget, canonicalise, SEARCH_TERMS, parseDrawOrder, nextWork,
@@ -46,9 +46,11 @@ const USAGE = `usage:
   cli-capture.mjs exclude --out <dir> --agency <name> --website <url> --url <url>
                           --reason "<why it was not captured>" --category <c>
   cli-capture.mjs discovery --out <dir> --agency <name> --website <url> --url <url>
-                          --kind <${DISCOVERY_KINDS.join('|')}>
+                          --kind <${DISCOVERY_KINDS.join('|')}> --navigated-at <ISO8601Z>
   cli-capture.mjs candidates --out <dir> --agency <name> --category <c> --add <url>[,<url>...]
   cli-capture.mjs lock    --out <dir> --agency <name> --category <c>
+  cli-capture.mjs approve-set --out <dir> --agency <name> --category <c>
+                          [--reject] [--note "<why>"]
   cli-capture.mjs next    --out <dir>
   cli-capture.mjs budget  --out <dir> --agency <name> [--category <c>]
   cli-capture.mjs approve --out <dir> --url <url> [--reject --reason "<why>"]
@@ -266,11 +268,31 @@ function doDiscovery() {
   appendAttempt(log, {
     examinedAt: now(), agency: require_('agency'), website: require_('website'),
     url: require_('url'), status: 'discovery', discoveryKind: kind,
+    // Discovery browsing happens outside the capture harness, so its navigation time is
+    // recorded and checked against the previous one rather than paced by the pacer.
+    navigatedAt: require_('navigated-at'),
     approval: APPROVAL.APPROVED, // a page inspected to find links is not a judgement to approve
   });
   writeLog(logPath, log);
   writeDerived({ log, dir, frameSha256: flag('frame-sha256'), drawOrderSha256: flag('draw-order-sha256'), synthetic: has('synthetic') });
   console.log(`recorded discovery page (${kind})`);
+}
+
+function doApproveSet() {
+  const dir = require_('out');
+  const logPath = logPathFor(dir);
+  const log = readLog(logPath);
+  const set = approveCandidateSet(log, {
+    agency: require_('agency'), category: require_('category'),
+    approved: !has('reject'), note: flag('note'),
+  });
+  writeLog(logPath, log);
+  console.log(`candidate set ${set.approval} for ${set.agency} / ${set.category} at ${set.approvedAt}`);
+  if (set.approval === APPROVAL.APPROVED) {
+    console.log(`${set.locked.length} candidate(s) may now be assessed.`);
+  } else {
+    console.log('Nothing in this set may be assessed. Re-run discovery for this category.');
+  }
 }
 
 function doBudget() {
@@ -331,7 +353,7 @@ function doNext() {
   }
 }
 
-const commands = { candidates: doCandidates, lock: doLock, next: doNext, capture: doCapture, exclude: doExclude, discovery: doDiscovery, budget: doBudget, approve: doApprove, status: doStatus, build: doBuild };
+const commands = { candidates: doCandidates, lock: doLock, 'approve-set': doApproveSet, next: doNext, capture: doCapture, exclude: doExclude, discovery: doDiscovery, budget: doBudget, approve: doApprove, status: doStatus, build: doBuild };
 if (!commands[command]) die(USAGE);
 try {
   await commands[command]();
