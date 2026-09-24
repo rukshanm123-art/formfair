@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 import { FUZZ_PATTERNS, METAMORPHIC_CASES, MUTATION_CASES, RULE_IDS, form } from './cases.mjs';
+import { browserSpecDigest } from './spec-hash.mjs';
 
 export const SOLO_PROTOCOL = 'solo-protocol-v1.0.0';
 export const FUZZ_SEED = 'formfair-solo-v1.0.0';
@@ -31,31 +32,62 @@ function outcomes(result) {
  * browser. A case with no recorded verdict THROWS rather than falling back, so the
  * evidence path cannot silently degrade to a reimplementation again.
  */
-const VERDICTS = JSON.parse(
-  readFileSync(new URL('./browser-verdicts.json', import.meta.url), 'utf8')
-);
+/**
+ * The browser's COMPLETE raw result, not a condensed summary of it.
+ *
+ * An earlier version stored only per-case booleans. Keeping the raw result means the
+ * per-value detail - units, whether the rejection came from the pattern or from a length
+ * limit, whether the pattern applied at all - survives for anyone checking the study, and
+ * there is no second file that can drift from the first.
+ *
+ * `solo/browser-raw.json` is produced by opening `solo/browser-verify.html` in a browser.
+ */
+const RAW = JSON.parse(readFileSync(new URL('./browser-raw.json', import.meta.url), 'utf8'));
+const VERDICTS = new Map((RAW.results ?? []).map((r) => [r.id, r]));
+
+/**
+ * Refuses verdicts recorded against a different corpus.
+ *
+ * Looking a verdict up by case ID alone let an edited case keep an old pass: change
+ * FF03-2's pattern or its example values, keep the ID, and the study still reported
+ * twenty-five of twenty-five about a corpus that no longer existed. The digest closes that,
+ * and both sides compute it with the same function in spec-hash.mjs.
+ */
+function assertVerdictsMatchCorpus() {
+  const expected = browserSpecDigest(MUTATION_CASES);
+  if (RAW.specDigest !== expected) {
+    throw new Error(
+      'recorded browser verdicts were produced for a different mutation corpus.\n' +
+        `  recorded digest: ${RAW.specDigest ?? '(none)'}\n` +
+        `  current digest:  ${expected}\n` +
+        'Run `node solo/build-browser-verify.mjs`, open solo/browser-verify.html in a ' +
+        'browser, and record the new result. The study will not reuse verdicts for cases ' +
+        'it cannot prove were the ones tested.'
+    );
+  }
+}
 
 function browserCheck(spec, caseId) {
-  const recorded = VERDICTS.results?.[caseId];
+  const recorded = VERDICTS.get(caseId);
   if (!recorded) {
     throw new Error(
       `no recorded browser verdict for mutation case ${caseId}. ` +
         'Run `node solo/build-browser-verify.mjs`, open solo/browser-verify.html in a ' +
-        'browser, and record the result in solo/browser-verdicts.json. This study will ' +
-        'not substitute a Node reimplementation of constraint validation.'
+        'browser, and record the result. This study will not substitute a Node ' +
+        'reimplementation of constraint validation.'
     );
   }
   return {
     passed: recorded.expectationHolds,
-    engine: VERDICTS.engine,
-    capturedAt: VERDICTS.capturedAt,
-    assertions: recorded.assertions,
-    acceptsConfirmed: recorded.acceptsConfirmed,
-    rejectsConfirmed: recorded.rejectsConfirmed,
+    engine: RAW.userAgent,
+    specDigest: RAW.specDigest,
+    accepted: recorded.shouldAccept,
+    rejected: recorded.shouldReject,
   };
 }
 
 export function runMutationStudy(analyse) {
+  assertVerdictsMatchCorpus();
   const cases = MUTATION_CASES.map((testCase) => {
     const baseline = analyse(testCase.baselineHtml);
     const mutant = analyse(testCase.mutantHtml);

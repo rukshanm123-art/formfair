@@ -75,17 +75,29 @@ describe('the evidence path cannot silently degrade', () => {
     // substituting a reimplementation - which has been wrong six times in this project.
     const { readFileSync } = await import('node:fs');
     const verdicts = JSON.parse(
-      readFileSync(new URL('../browser-verdicts.json', import.meta.url), 'utf8')
+      readFileSync(new URL('../browser-raw.json', import.meta.url), 'utf8')
     );
     const { MUTATION_CASES } = await import('../cases.mjs');
+    const { browserSpecDigest } = await import('../spec-hash.mjs');
+    const byId = new Map(verdicts.results.map((r) => [r.id, r]));
     for (const c of MUTATION_CASES) {
       assert.ok(
-        verdicts.results[c.id],
+        byId.get(c.id),
         `mutation case ${c.id} has no recorded browser verdict; re-run solo/browser-verify.html`
       );
     }
     assert.equal(verdicts.cases, MUTATION_CASES.length, 'every case is recorded, and no extras');
-    assert.match(verdicts.engine, /Chrome\/\d+/, 'the engine that produced the verdicts is named');
+    assert.match(verdicts.userAgent, /Chrome\/\d+/, 'the engine that produced the verdicts is named');
     assert.equal(verdicts.expectationsHeld, verdicts.cases, 'every seeded fault behaves as intended');
+    // The binding: verdicts must have been produced for THIS corpus.
+    assert.equal(
+      verdicts.specDigest,
+      browserSpecDigest(MUTATION_CASES),
+      'recorded verdicts were produced for a different mutation corpus'
+    );
+    // And the raw per-value detail survives, not just a boolean.
+    const sample = byId.get('FF03-2');
+    assert.equal(sample.shouldReject[0].rejectedByLength, true, 'raw detail is preserved');
+    assert.equal(sample.shouldReject[0].rejectedByPattern, false);
   });
 });

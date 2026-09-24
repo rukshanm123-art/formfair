@@ -1,0 +1,785 @@
+{
+ "harness": "solo-mutation-browser-verify-v2",
+ "specDigest": "722a145e0ff0587c1b11f93008b2431a5d2b0d4f5c6c6f8b2618f864ba6e3710",
+ "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Claude/2.7032.0 Chrome/152.0.7977.130 Safari/537.36",
+ "cases": 25,
+ "assertions": 50,
+ "expectationsHeld": 25,
+ "results": [
+  {
+   "id": "FF01-1",
+   "rule": "FF-01",
+   "family": "ASCII ranges",
+   "pattern": "[A-Za-z]+",
+   "minlength": null,
+   "maxlength": null,
+   "shouldAccept": [
+    {
+     "value": "Smith",
+     "units": 5,
+     "accepted": true,
+     "rejectedByPattern": false,
+     "rejectedByLength": false,
+     "patternApplied": true,
+     "patternCompiles": true
+    }
+   ],
+   "shouldReject": [
+    {
+     "value": "Tāwhiao",
+     "units": 7,
+     "accepted": false,
+     "rejectedByPattern": true,
+     "rejectedByLength": false,
+     "patternApplied": true,
+     "patternCompiles": true
+    }
+   ],
+   "expectationHolds": true
+  },
+  {
+   "id": "FF01-2",
+   "rule": "FF-01",
+   "family": "hexadecimal ASCII ranges",
+   "pattern": "[\\x41-\\x5A\\x61-\\x7A]+",
+   "minlength": null,
+   "maxlength": null,
+   "shouldAccept": [
+    {
+     "value": "Ana",
+     "units": 3,
+     "accepted": true,
+     "rejectedByPattern": false,
+     "rejectedByLength": false,
+     "patternApplied": true,
+     "patternCompiles": true
+    }
+   ],
+   "shouldReject": [
+    {
+     "value": "Émile",
+     "units": 5,
+     "accepted": false,
+     "rejectedByPattern": true,
+     "rejectedByLength": false,
+     "patternApplied": true,
+     "patternCompiles": true
+    }
+   ],
+   "expectationHolds": true
+  },
+  {
+   "id": "FF01-3",
+   "rule": "FF-01",
+   "family": "fixed ASCII positions",
+   "pattern": "[A-Z][a-z]+",
+   "minlength": null,
+   "maxlength": null,
+   "shouldAccept": [
+    {
+     "value": "Smith",
+     "units": 5,
+     "accepted": true,
+     "rejectedByPattern": false,
+     "rejectedByLength": false,
+     "patternApplied": true,
+     "patternCompiles": true
+    }
+   ],
+   "shouldReject": [
+    {
+     "value": "Łukasz",
+     "units": 6,
+     "accepted": false,
+     "rejectedByPattern": true,
+     "rejectedByLength": false,
+     "patternApplied": true,
+     "patternCompiles": true
+    }
+   ],
+   "expectationHolds": true
+  },
+  {
+   "id": "FF01-4",
+   "rule": "FF-01",
+   "family": "lowercase ASCII only",
+   "pattern": "[a-z]+",
+   "minlength": null,
+   "maxlength": null,
+   "shouldAccept": [
+    {
+     "value": "ana",
+     "units": 3,
+     "accepted": true,
+     "rejectedByPattern": false,
+     "rejectedByLength": false,
+     "patternApplied": true,
+     "patternCompiles": true
+    }
+   ],
+   "shouldReject": [
+    {
+     "value": "ngātā",
+     "units": 5,
+     "accepted": false,
+     "rejectedByPattern": true,
+     "rejectedByLength": false,
+     "patternApplied": true,
+     "patternCompiles": true
+    }
+   ],
+   "expectationHolds": true
+  },
+  {
+   "id": "FF01-5",
+   "rule": "FF-01",
+   "family": "ASCII with punctuation",
+   "pattern": "[A-Za-z\\u0027 \\x2D]+",
+   "minlength": null,
+   "maxlength": null,
+   "shouldAccept": [
+    {
+     "value": "Anne-Marie",
+     "units": 10,
+     "accepted": true,
+     "rejectedByPattern": false,
+     "rejectedByLength": false,
+     "patternApplied": true,
+     "patternCompiles": true
+    }
+   ],
+   "shouldReject": [
+    {
+     "value": "Ngātā",
+     "units": 5,
+     "accepted": false,
+     "rejectedByPattern": true,
+     "rejectedByLength": false,
+     "patternApplied": true,
+     "patternCompiles": true
+    }
+   ],
+   "expectationHolds": true
+  },
+  {
+   "id": "FF02-1",
+   "rule": "FF-02",
+   "family": "macron-only extension",
+   "pattern": "[A-Za-z\\u0101]+",
+   "minlength": null,
+   "maxlength": null,
+   "shouldAccept": [
+    {
+     "value": "ā",
+     "units": 1,
+     "accepted": true,
+     "rejectedByPattern": false,
+     "rejectedByLength": false,
+     "patternApplied": true,
+     "patternCompiles": true
+    }
+   ],
+   "shouldReject": [
+    {
+     "value": "é",
+     "units": 1,
+     "accepted": false,
+     "rejectedByPattern": true,
+     "rejectedByLength": false,
+     "patternApplied": true,
+     "patternCompiles": true
+    }
+   ],
+   "expectationHolds": true
+  },
+  {
+   "id": "FF02-2",
+   "rule": "FF-02",
+   "family": "Latin-1 extension only",
+   "pattern": "[A-Za-z\\u00C0-\\u00FF]+",
+   "minlength": null,
+   "maxlength": null,
+   "shouldAccept": [
+    {
+     "value": "É",
+     "units": 1,
+     "accepted": true,
+     "rejectedByPattern": false,
+     "rejectedByLength": false,
+     "patternApplied": true,
+     "patternCompiles": true
+    }
+   ],
+   "shouldReject": [
+    {
+     "value": "ā",
+     "units": 1,
+     "accepted": false,
+     "rejectedByPattern": true,
+     "rejectedByLength": false,
+     "patternApplied": true,
+     "patternCompiles": true
+    }
+   ],
+   "expectationHolds": true
+  },
+  {
+   "id": "FF02-3",
+   "rule": "FF-02",
+   "family": "Polish letters only",
+   "pattern": "[A-Za-z\\u0141\\u0142]+",
+   "minlength": null,
+   "maxlength": null,
+   "shouldAccept": [
+    {
+     "value": "Ł",
+     "units": 1,
+     "accepted": true,
+     "rejectedByPattern": false,
+     "rejectedByLength": false,
+     "patternApplied": true,
+     "patternCompiles": true
+    }
+   ],
+   "shouldReject": [
+    {
+     "value": "ễ",
+     "units": 1,
+     "accepted": false,
+     "rejectedByPattern": true,
+     "rejectedByLength": false,
+     "patternApplied": true,
+     "patternCompiles": true
+    }
+   ],
+   "expectationHolds": true
+  },
+  {
+   "id": "FF02-4",
+   "rule": "FF-02",
+   "family": "Vietnamese range only",
+   "pattern": "[A-Za-z\\u1E00-\\u1EFF]+",
+   "minlength": null,
+   "maxlength": null,
+   "shouldAccept": [
+    {
+     "value": "ễ",
+     "units": 1,
+     "accepted": true,
+     "rejectedByPattern": false,
+     "rejectedByLength": false,
+     "patternApplied": true,
+     "patternCompiles": true
+    }
+   ],
+   "shouldReject": [
+    {
+     "value": "ā",
+     "units": 1,
+     "accepted": false,
+     "rejectedByPattern": true,
+     "rejectedByLength": false,
+     "patternApplied": true,
+     "patternCompiles": true
+    }
+   ],
+   "expectationHolds": true
+  },
+  {
+   "id": "FF02-5",
+   "rule": "FF-02",
+   "family": "modifier-letter extension only",
+   "pattern": "[A-Za-z\\u02BB]+",
+   "minlength": null,
+   "maxlength": null,
+   "shouldAccept": [
+    {
+     "value": "ʻ",
+     "units": 1,
+     "accepted": true,
+     "rejectedByPattern": false,
+     "rejectedByLength": false,
+     "patternApplied": true,
+     "patternCompiles": true
+    }
+   ],
+   "shouldReject": [
+    {
+     "value": "ü",
+     "units": 1,
+     "accepted": false,
+     "rejectedByPattern": true,
+     "rejectedByLength": false,
+     "patternApplied": true,
+     "patternCompiles": true
+    }
+   ],
+   "expectationHolds": true
+  },
+  {
+   "id": "FF03-1",
+   "rule": "FF-03",
+   "family": "precomposed letters without marks",
+   "pattern": "[A-Za-z\\u00C0-\\u00FF]+",
+   "minlength": null,
+   "maxlength": null,
+   "shouldAccept": [
+    {
+     "value": "Émile",
+     "units": 5,
+     "accepted": true,
+     "rejectedByPattern": false,
+     "rejectedByLength": false,
+     "patternApplied": true,
+     "patternCompiles": true
+    }
+   ],
+   "shouldReject": [
+    {
+     "value": "Émile",
+     "units": 6,
+     "accepted": false,
+     "rejectedByPattern": true,
+     "rejectedByLength": false,
+     "patternApplied": true,
+     "patternCompiles": true
+    }
+   ],
+   "expectationHolds": true
+  },
+  {
+   "id": "FF03-2",
+   "rule": "FF-03",
+   "family": "maxlength five boundary",
+   "pattern": null,
+   "minlength": null,
+   "maxlength": 5,
+   "shouldAccept": [
+    {
+     "value": "Émile",
+     "units": 5,
+     "accepted": true,
+     "rejectedByPattern": false,
+     "rejectedByLength": false,
+     "patternApplied": false,
+     "patternCompiles": true
+    }
+   ],
+   "shouldReject": [
+    {
+     "value": "Émile",
+     "units": 6,
+     "accepted": false,
+     "rejectedByPattern": false,
+     "rejectedByLength": true,
+     "patternApplied": false,
+     "patternCompiles": true
+    }
+   ],
+   "expectationHolds": true
+  },
+  {
+   "id": "FF03-3",
+   "rule": "FF-03",
+   "family": "maxlength six boundary",
+   "pattern": null,
+   "minlength": null,
+   "maxlength": 6,
+   "shouldAccept": [
+    {
+     "value": "Müller",
+     "units": 6,
+     "accepted": true,
+     "rejectedByPattern": false,
+     "rejectedByLength": false,
+     "patternApplied": false,
+     "patternCompiles": true
+    }
+   ],
+   "shouldReject": [
+    {
+     "value": "Müller",
+     "units": 7,
+     "accepted": false,
+     "rejectedByPattern": false,
+     "rejectedByLength": true,
+     "patternApplied": false,
+     "patternCompiles": true
+    }
+   ],
+   "expectationHolds": true
+  },
+  {
+   "id": "FF03-4",
+   "rule": "FF-03",
+   "family": "maxlength seven boundary",
+   "pattern": null,
+   "minlength": null,
+   "maxlength": 7,
+   "shouldAccept": [
+    {
+     "value": "Tāwhiao",
+     "units": 7,
+     "accepted": true,
+     "rejectedByPattern": false,
+     "rejectedByLength": false,
+     "patternApplied": false,
+     "patternCompiles": true
+    }
+   ],
+   "shouldReject": [
+    {
+     "value": "Tāwhiao",
+     "units": 8,
+     "accepted": false,
+     "rejectedByPattern": false,
+     "rejectedByLength": true,
+     "patternApplied": false,
+     "patternCompiles": true
+    }
+   ],
+   "expectationHolds": true
+  },
+  {
+   "id": "FF03-5",
+   "rule": "FF-03",
+   "family": "Unicode letters without combining marks",
+   "pattern": "[\\p{L}]+",
+   "minlength": null,
+   "maxlength": null,
+   "shouldAccept": [
+    {
+     "value": "Émile",
+     "units": 5,
+     "accepted": true,
+     "rejectedByPattern": false,
+     "rejectedByLength": false,
+     "patternApplied": true,
+     "patternCompiles": true
+    }
+   ],
+   "shouldReject": [
+    {
+     "value": "Émile",
+     "units": 6,
+     "accepted": false,
+     "rejectedByPattern": true,
+     "rejectedByLength": false,
+     "patternApplied": true,
+     "patternCompiles": true
+    }
+   ],
+   "expectationHolds": true
+  },
+  {
+   "id": "FF04-1",
+   "rule": "FF-04",
+   "family": "letters only",
+   "pattern": "[\\p{L}\\p{M}]+",
+   "minlength": null,
+   "maxlength": null,
+   "shouldAccept": [
+    {
+     "value": "Smith",
+     "units": 5,
+     "accepted": true,
+     "rejectedByPattern": false,
+     "rejectedByLength": false,
+     "patternApplied": true,
+     "patternCompiles": true
+    }
+   ],
+   "shouldReject": [
+    {
+     "value": "O'Brien",
+     "units": 7,
+     "accepted": false,
+     "rejectedByPattern": true,
+     "rejectedByLength": false,
+     "patternApplied": true,
+     "patternCompiles": true
+    }
+   ],
+   "expectationHolds": true
+  },
+  {
+   "id": "FF04-2",
+   "rule": "FF-04",
+   "family": "space but no apostrophe or hyphen",
+   "pattern": "[\\p{L}\\p{M} ]+",
+   "minlength": null,
+   "maxlength": null,
+   "shouldAccept": [
+    {
+     "value": "van der Berg",
+     "units": 12,
+     "accepted": true,
+     "rejectedByPattern": false,
+     "rejectedByLength": false,
+     "patternApplied": true,
+     "patternCompiles": true
+    }
+   ],
+   "shouldReject": [
+    {
+     "value": "Anne-Marie",
+     "units": 10,
+     "accepted": false,
+     "rejectedByPattern": true,
+     "rejectedByLength": false,
+     "patternApplied": true,
+     "patternCompiles": true
+    }
+   ],
+   "expectationHolds": true
+  },
+  {
+   "id": "FF04-3",
+   "rule": "FF-04",
+   "family": "apostrophes but no space or hyphen",
+   "pattern": "[\\p{L}\\p{M}\\u0027\\u2019]+",
+   "minlength": null,
+   "maxlength": null,
+   "shouldAccept": [
+    {
+     "value": "O'Brien",
+     "units": 7,
+     "accepted": true,
+     "rejectedByPattern": false,
+     "rejectedByLength": false,
+     "patternApplied": true,
+     "patternCompiles": true
+    }
+   ],
+   "shouldReject": [
+    {
+     "value": "van der Berg",
+     "units": 12,
+     "accepted": false,
+     "rejectedByPattern": true,
+     "rejectedByLength": false,
+     "patternApplied": true,
+     "patternCompiles": true
+    }
+   ],
+   "expectationHolds": true
+  },
+  {
+   "id": "FF04-4",
+   "rule": "FF-04",
+   "family": "hyphen and space but no apostrophe",
+   "pattern": "[\\p{L}\\p{M} \\x2D]+",
+   "minlength": null,
+   "maxlength": null,
+   "shouldAccept": [
+    {
+     "value": "Anne-Marie",
+     "units": 10,
+     "accepted": true,
+     "rejectedByPattern": false,
+     "rejectedByLength": false,
+     "patternApplied": true,
+     "patternCompiles": true
+    }
+   ],
+   "shouldReject": [
+    {
+     "value": "O’Connor",
+     "units": 8,
+     "accepted": false,
+     "rejectedByPattern": true,
+     "rejectedByLength": false,
+     "patternApplied": true,
+     "patternCompiles": true
+    }
+   ],
+   "expectationHolds": true
+  },
+  {
+   "id": "FF04-5",
+   "rule": "FF-04",
+   "family": "ASCII letters and space",
+   "pattern": "[A-Za-z ]+",
+   "minlength": null,
+   "maxlength": null,
+   "shouldAccept": [
+    {
+     "value": "Mary Jane",
+     "units": 9,
+     "accepted": true,
+     "rejectedByPattern": false,
+     "rejectedByLength": false,
+     "patternApplied": true,
+     "patternCompiles": true
+    }
+   ],
+   "shouldReject": [
+    {
+     "value": "Anne-Marie",
+     "units": 10,
+     "accepted": false,
+     "rejectedByPattern": true,
+     "rejectedByLength": false,
+     "patternApplied": true,
+     "patternCompiles": true
+    }
+   ],
+   "expectationHolds": true
+  },
+  {
+   "id": "FF05-1",
+   "rule": "FF-05",
+   "family": "minlength two",
+   "pattern": null,
+   "minlength": 2,
+   "maxlength": null,
+   "shouldAccept": [
+    {
+     "value": "Al",
+     "units": 2,
+     "accepted": true,
+     "rejectedByPattern": false,
+     "rejectedByLength": false,
+     "patternApplied": false,
+     "patternCompiles": true
+    }
+   ],
+   "shouldReject": [
+    {
+     "value": "I",
+     "units": 1,
+     "accepted": false,
+     "rejectedByPattern": false,
+     "rejectedByLength": true,
+     "patternApplied": false,
+     "patternCompiles": true
+    }
+   ],
+   "expectationHolds": true
+  },
+  {
+   "id": "FF05-2",
+   "rule": "FF-05",
+   "family": "minlength three",
+   "pattern": null,
+   "minlength": 3,
+   "maxlength": null,
+   "shouldAccept": [
+    {
+     "value": "Ana",
+     "units": 3,
+     "accepted": true,
+     "rejectedByPattern": false,
+     "rejectedByLength": false,
+     "patternApplied": false,
+     "patternCompiles": true
+    }
+   ],
+   "shouldReject": [
+    {
+     "value": "I",
+     "units": 1,
+     "accepted": false,
+     "rejectedByPattern": false,
+     "rejectedByLength": true,
+     "patternApplied": false,
+     "patternCompiles": true
+    }
+   ],
+   "expectationHolds": true
+  },
+  {
+   "id": "FF05-3",
+   "rule": "FF-05",
+   "family": "bounded pattern minimum",
+   "pattern": "[A-Za-z]{2,40}",
+   "minlength": null,
+   "maxlength": null,
+   "shouldAccept": [
+    {
+     "value": "Li",
+     "units": 2,
+     "accepted": true,
+     "rejectedByPattern": false,
+     "rejectedByLength": false,
+     "patternApplied": true,
+     "patternCompiles": true
+    }
+   ],
+   "shouldReject": [
+    {
+     "value": "I",
+     "units": 1,
+     "accepted": false,
+     "rejectedByPattern": true,
+     "rejectedByLength": false,
+     "patternApplied": true,
+     "patternCompiles": true
+    }
+   ],
+   "expectationHolds": true
+  },
+  {
+   "id": "FF05-4",
+   "rule": "FF-05",
+   "family": "two required positions",
+   "pattern": "[A-Za-z][A-Za-z]",
+   "minlength": null,
+   "maxlength": null,
+   "shouldAccept": [
+    {
+     "value": "Li",
+     "units": 2,
+     "accepted": true,
+     "rejectedByPattern": false,
+     "rejectedByLength": false,
+     "patternApplied": true,
+     "patternCompiles": true
+    }
+   ],
+   "shouldReject": [
+    {
+     "value": "I",
+     "units": 1,
+     "accepted": false,
+     "rejectedByPattern": true,
+     "rejectedByLength": false,
+     "patternApplied": true,
+     "patternCompiles": true
+    }
+   ],
+   "expectationHolds": true
+  },
+  {
+   "id": "FF05-5",
+   "rule": "FF-05",
+   "family": "fixed length three",
+   "pattern": "[A-Za-z]{3}",
+   "minlength": null,
+   "maxlength": null,
+   "shouldAccept": [
+    {
+     "value": "Ana",
+     "units": 3,
+     "accepted": true,
+     "rejectedByPattern": false,
+     "rejectedByLength": false,
+     "patternApplied": true,
+     "patternCompiles": true
+    }
+   ],
+   "shouldReject": [
+    {
+     "value": "I",
+     "units": 1,
+     "accepted": false,
+     "rejectedByPattern": true,
+     "rejectedByLength": false,
+     "patternApplied": true,
+     "patternCompiles": true
+    }
+   ],
+   "expectationHolds": true
+  }
+ ]
+}

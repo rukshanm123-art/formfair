@@ -157,7 +157,8 @@ Every JSON report carries an `instrument` block naming the catalogue version, th
 package version, the parse5 and axe-core versions, and the runtime - because a catalogue
 version alone does not reproduce a result. The historical participant-dependent design
 remains reproducible at `evaluation-v1.0.0`. The active no-participant technical study
-will use `evaluation-v1.1.0` after its pre-data freeze. See
+runs against `evaluation-v1.1.0`, frozen on 23 September 2026 before any real-form
+capture. See
 [the solo protocol](docs/evaluation/SOLO-PROTOCOL.md) and
 [the instrument record](docs/evaluation/README.md).
 

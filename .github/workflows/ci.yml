@@ -149,6 +149,9 @@ jobs:
     steps:
       - name: Check out the working instrument and solo study
         uses: actions/checkout@v7
+        with:
+          # Tags decide whether the official study may run at all, so they must be present.
+          fetch-depth: 0
 
       - uses: actions/setup-node@v7
         with:
@@ -163,11 +166,45 @@ jobs:
       - name: Solo study tests
         run: npm --prefix evaluation run test:solo
 
-      # Until evaluation-v1.1.0 is frozen this is explicitly a synthetic development
-      # report. The real-form command has no equivalent bypass: --development is refused
-      # unless the corpus itself is marked synthetic.
+      # A synthetic development report. The real-form command has no equivalent bypass:
+      # --development is refused unless the corpus itself is marked synthetic.
       - name: Exercise the technical-study CLI
         run: npm --prefix evaluation run solo:study -- --development --out "$RUNNER_TEMP/solo-study.json"
 
       - name: Assert the machine-readable study passed
         run: node -e "const r=require(process.argv[1]); if(!r.passed) process.exit(1)" "$RUNNER_TEMP/solo-study.json"
+
+      # The path the final study actually uses, exercised on every push rather than only
+      # when someone remembers to run it.
+      #
+      # It runs against a real checkout of the instrument tag rather than against HEAD,
+      # because HEAD is normally a descendant of the tag and would refuse. Faking a tag at
+      # HEAD would exercise the branch but not the discipline, so the tag is checked out
+      # properly. Both outcomes are asserted: the tagged tree must PASS, and the current
+      # tree must REFUSE and write nothing.
+      - name: Official-mode study against the frozen instrument tag
+        run: |
+          set -euo pipefail
+          TAG=evaluation-v1.1.0
+          git worktree add --detach "$RUNNER_TEMP/frozen" "$TAG"
+          ( cd "$RUNNER_TEMP/frozen" && npm ci --silent --no-audit --no-fund && npm run build --silent )
+          ( cd "$RUNNER_TEMP/frozen" && npm --prefix evaluation run solo:study -- --out "$RUNNER_TEMP/official.json" )
+          node -e "const r=require(process.argv[1]);
+            if (!r.passed) { console.error('official study did not pass'); process.exit(1); }
+            const i = r.instrument ?? {};
+            if (i.tag !== 'evaluation-v1.1.0' || i.dirty !== false || i.officialReady !== true) {
+              console.error('official study ran without a clean tagged instrument', i);
+              process.exit(1);
+            }
+            console.log('official study passed against', i.tag, 'at', i.commit);
+          " "$RUNNER_TEMP/official.json"
+
+      - name: The working tree must not be able to produce an official study
+        run: |
+          set -euo pipefail
+          if npm --prefix evaluation run solo:study -- --out "$RUNNER_TEMP/should-not-exist.json"; then
+            echo "official study ran on an untagged or modified checkout" >&2
+            exit 1
+          fi
+          test ! -f "$RUNNER_TEMP/should-not-exist.json"
+          echo "refused, and wrote nothing."

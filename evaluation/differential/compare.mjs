@@ -1,4 +1,10 @@
 /**
+ * EXPLORATORY. Excluded from the formal results - see README.md in this directory.
+ *
+ * It measures evaluation-v1.0.0, not the active evaluation-v1.1.0 instrument; its miss
+ * detection cannot see a single missed rule when another rule fired; and it is not gated by
+ * CI. No claim in the study rests on it.
+ *
  * Differential: FormFair's findings against what a real browser actually rejects.
  *
  * This is the evaluation that needs no human ground truth, and it measures the claim the
@@ -118,7 +124,8 @@ for (const [id, c] of Object.entries(browser.controls)) {
   }
 }
 
-console.log(`instrument ${instrument.tag} at ${instrument.commit.slice(0, 7)}`);
+console.log('EXPLORATORY - excluded from formal results. See differential/README.md.');
+console.log(`instrument ${instrument.tag} at ${instrument.commit.slice(0, 7)} (SUPERSEDED by evaluation-v1.1.0)`);
 console.log(`browser    ${browser.ua.match(/Chrome\/[\d.]+/)?.[0] ?? 'unknown'}, captured ${browser.capturedAt}`);
 console.log(`evidence   ${browser.decisions} name decisions + ${browser.charDecisions ?? 0} character decisions`);
 console.log('');

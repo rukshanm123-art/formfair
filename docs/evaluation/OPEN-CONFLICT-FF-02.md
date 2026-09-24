@@ -4,7 +4,7 @@
 file preserves the decision trail; no existing tag was moved.
 
 Two frozen artefacts disagreed. The analyser has since been corrected in the working tree
-and will be frozen as `evaluation-v1.1.0`; `catalogue-v1.0.0` is unchanged and no existing
+and was frozen as `evaluation-v1.1.0`; `catalogue-v1.0.0` is unchanged and no existing
 tag has been moved. What follows is the conflict as it stood when it was raised.
 
 ## The conflict
@@ -110,13 +110,12 @@ harness tag, a dated protocol amendment, and a careful pass over the pins above 
 of them are deliberately left alone. That is a day's work done carefully, and it must not be
 attempted in the same week as capture. The analyser now returns clean for FF-02 when no
 letter beyond Basic Latin is admitted, with regression cases for numeric-only,
-symbol-only, Basic-Latin-only and selectively extended classes. The change remains
-development work until the full suite passes and the exact commit is tagged
-`evaluation-v1.1.0`.
+symbol-only, Basic-Latin-only and selectively extended classes. The full suite passed and
+the commit was tagged `evaluation-v1.1.0` on 23 September 2026.
 
 ## Status
 
 - `catalogue-v1.0.0` unmoved.
 - `evaluation-v1.0.0` unmoved.
-- The corrected working tree is not yet the frozen `evaluation-v1.1.0` instrument.
+- `evaluation-v1.1.0` frozen at the corrected commit, before any form was captured.
 - No form captured and no annotator recruited.

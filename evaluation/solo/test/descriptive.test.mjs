@@ -1,12 +1,19 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
-import { analyseDescriptively, loadSealedPages, sealCorpus } from '../descriptive.mjs';
+import {
+  analyseDescriptively,
+  loadSealedPages,
+  sealCorpus,
+  FROZEN_FRAME_SHA256,
+  FROZEN_DRAW_ORDER_SHA256,
+} from '../descriptive.mjs';
 import { loadSoloInstrument, SOLO_INSTRUMENT_TAG } from '../instrument.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -28,8 +35,8 @@ function draft() {
   return {
     schema: 'formfair/solo-corpus-draft@1',
     synthetic: true,
-    frameSha256: 'a'.repeat(64),
-    drawOrderSha256: 'b'.repeat(64),
+    frameSha256: FROZEN_FRAME_SHA256,
+    drawOrderSha256: FROZEN_DRAW_ORDER_SHA256,
     selectionLedgerFile: 'selection-ledger.csv',
     pages: [
       {
@@ -147,5 +154,55 @@ describe('real-world output is deliberately descriptive', () => {
       assert.equal(report.toolOutput.findingsByRule['FF-01'], 1);
       assert.equal(report.toolOutput.delegated.scored, false);
     });
+  });
+});
+
+
+describe('the corpus seal verifies the frame rather than trusting the draft', () => {
+  test('a fabricated frame hash is refused', () => {
+    // The defect this closes: the seal checked only that the declared digests were 64 hex
+    // characters, so a draft could assert any value - including sixty-four zeros - and seal
+    // successfully. This is the same failure the evaluation seal had earlier.
+    for (const key of ['frameSha256', 'drawOrderSha256']) {
+      const bad = { ...draft(), [key]: '0'.repeat(64) };
+      const sealed = sealCorpus({ draft: bad, capturesDir: here, instrument: identity });
+      assert.ok(!sealed.manifest, `${key} was accepted when fabricated`);
+      assert.ok(
+        sealed.problems.some((p) => p.includes(key) && p.includes('hashes to')),
+        `expected ${key} to be refused by content, got: ${sealed.problems.join(' | ')}`
+      );
+    }
+  });
+
+  test('a modified frame on disk is refused even when the draft agrees with it', () => {
+    // Declaring the modified file's own hash must not launder it: the seal pins the
+    // frame-v1.0.0 content, because a different frame produces a different sample.
+    const dir = mkdtempSync(join(tmpdir(), 'formfair-frame-'));
+    writeFileSync(join(dir, 'frame.csv'), 'agency,website\nTampered,example.govt.nz\n');
+    writeFileSync(join(dir, 'draw-order.csv'), 'agency,hash\nTampered,00\n');
+    const tamperedFrame = createHash('sha256')
+      .update(readFileSync(join(dir, 'frame.csv')))
+      .digest('hex');
+    const tampered = { ...draft(), frameSha256: tamperedFrame };
+    const sealed = sealCorpus({
+      draft: tampered,
+      capturesDir: here,
+      instrument: identity,
+      frameDir: dir,
+    });
+    rmSync(dir, { recursive: true, force: true });
+    assert.ok(!sealed.manifest);
+    assert.ok(
+      sealed.problems.some((p) => p.includes('no longer the frozen one')),
+      sealed.problems.join(' | ')
+    );
+  });
+
+  test('the frozen digests are the ones recorded with the frame', () => {
+    const frameDir = new URL('../../frame/', import.meta.url);
+    const digest = (f) =>
+      createHash('sha256').update(readFileSync(new URL(f, frameDir))).digest('hex');
+    assert.equal(digest('frame.csv'), FROZEN_FRAME_SHA256);
+    assert.equal(digest('draw-order.csv'), FROZEN_DRAW_ORDER_SHA256);
   });
 });

@@ -18,8 +18,12 @@ import { writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { MUTATION_CASES } from './cases.mjs';
+import { browserSpecDigest } from './spec-hash.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
+
+// Binds the verdicts to the corpus that produced them. See spec-hash.mjs.
+const SPEC_DIGEST = browserSpecDigest(MUTATION_CASES);
 
 const SPECS = MUTATION_CASES.map((c) => ({
   id: c.id,
@@ -60,6 +64,7 @@ const page = `<!doctype html>
 <input id="probe" type="text">
 <script>
 const SPECS = ${JSON.stringify(SPECS)};
+const SPEC_DIGEST = ${JSON.stringify(SPEC_DIGEST)};
 const probe = document.getElementById('probe');
 
 function compiles(pattern) {
@@ -103,7 +108,8 @@ for (const c of cases) {
 }
 
 const out = {
-  harness: 'solo-mutation-browser-verify-v1',
+  harness: 'solo-mutation-browser-verify-v2',
+  specDigest: SPEC_DIGEST,
   userAgent: navigator.userAgent,
   cases: cases.length,
   assertions: cases.reduce((n, c) => n + c.shouldAccept.length + c.shouldReject.length, 0),
@@ -114,7 +120,7 @@ window.RESULT = out;
 document.getElementById('out').textContent = JSON.stringify(out, null, 1);
 document.getElementById('summary').textContent =
   out.expectationsHeld + ' of ' + out.cases + ' mutation expectations hold in this browser (' +
-  out.assertions + ' assertions). ' + navigator.userAgent;
+  out.assertions + ' assertions). digest ' + SPEC_DIGEST.slice(0, 12) + '. ' + navigator.userAgent;
 document.title = 'mutation verify: ' + out.expectationsHeld + '/' + out.cases;
 </script>
 </body></html>
@@ -122,3 +128,4 @@ document.title = 'mutation verify: ' + out.expectationsHeld + '/' + out.cases;
 
 writeFileSync(join(here, 'browser-verify.html'), page, 'utf8');
 console.log(`wrote browser-verify.html: ${SPECS.length} cases, ${SPECS.reduce((n, s) => n + s.accepts.length + s.rejects.length, 0)} assertions`);
+console.log(`spec digest: ${SPEC_DIGEST}`);

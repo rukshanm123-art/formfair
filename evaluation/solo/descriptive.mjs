@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { isAbsolute, join, relative, resolve } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const RULE_IDS = ['FF-01', 'FF-02', 'FF-03', 'FF-04', 'FF-05'];
 
@@ -98,19 +99,62 @@ export function loadSealedPages({ manifest, manifestPath, capturesDir }) {
   };
 }
 
+/**
+ * The frozen frame artefacts, pinned by content rather than by filename.
+ *
+ * frame-v1.0.0 fixes the sampling frame and the agency draw order, and every sampled page
+ * inherits its legitimacy from them. An earlier version of this seal checked only that the
+ * draft's declared hashes were 64 hex characters, so a draft could assert any digest -
+ * including sixty-four zeros - and seal successfully. Both files are now read and hashed on
+ * every seal, and both must match these values and the draft's declaration.
+ *
+ * Recorded in evaluation/frame/README.md. Changing either requires a new frame tag and a
+ * new draw order, which would reroll the sample.
+ */
+export const FROZEN_FRAME_SHA256 = '11a0bcd30489648050dc287775d88cc4d99c54e2c9022b7226f157796df8c3ce';
+export const FROZEN_DRAW_ORDER_SHA256 = '30dc8c27bbf601ce43da2d781c4bdff43db5dd074704268bb2532a21ce0fabf1';
+
+const FRAME_FILES = [
+  { key: 'frameSha256', file: 'frame.csv', frozen: FROZEN_FRAME_SHA256 },
+  { key: 'drawOrderSha256', file: 'draw-order.csv', frozen: FROZEN_DRAW_ORDER_SHA256 },
+];
+
 const isoUtc = (value) => typeof value === 'string' && !Number.isNaN(Date.parse(value)) && value.endsWith('Z');
 
-export function sealCorpus({ draft, capturesDir, instrument, protocol = 'solo-protocol-v1.0.0' }) {
+export function sealCorpus({ draft, capturesDir, instrument, frameDir, protocol = 'solo-protocol-v1.0.0' }) {
   const problems = [];
   if (draft?.schema !== 'formfair/solo-corpus-draft@1') {
     problems.push('draft schema must be formfair/solo-corpus-draft@1');
   }
   if (!Array.isArray(draft?.pages) || draft.pages.length === 0) problems.push('draft must contain at least one page');
-  if (typeof draft?.frameSha256 !== 'string' || !/^[0-9a-f]{64}$/.test(draft.frameSha256)) {
-    problems.push('frameSha256 must be a SHA-256 digest');
-  }
-  if (typeof draft?.drawOrderSha256 !== 'string' || !/^[0-9a-f]{64}$/.test(draft.drawOrderSha256)) {
-    problems.push('drawOrderSha256 must be a SHA-256 digest');
+  // The frame is verified by reading it, not by trusting what the draft claims about it.
+  // There is deliberately no synthetic bypass: the frame files are repository artefacts and
+  // are present in every mode, and a bypass is how the previous seal came to be weakened.
+  const frameRoot = resolve(frameDir ?? join(dirname(fileURLToPath(import.meta.url)), '..', 'frame'));
+  for (const { key, file, frozen } of FRAME_FILES) {
+    const declared = draft?.[key];
+    if (typeof declared !== 'string' || !/^[0-9a-f]{64}$/.test(declared)) {
+      problems.push(`${key} must be a SHA-256 digest`);
+      continue;
+    }
+    let actual;
+    try {
+      actual = createHash('sha256').update(readFileSync(join(frameRoot, file))).digest('hex');
+    } catch {
+      problems.push(`cannot read ${file} from ${frameRoot} to verify ${key}`);
+      continue;
+    }
+    if (actual !== frozen) {
+      problems.push(
+        `${file} on disk hashes to ${actual}, which is not the frame-v1.0.0 artefact ${frozen}. ` +
+          'The frame has been modified; the sample it produced is no longer the frozen one.'
+      );
+    } else if (declared !== actual) {
+      problems.push(
+        `${key} declares ${declared} but ${file} hashes to ${actual}. ` +
+          'The draft was not derived from the frozen frame.'
+      );
+    }
   }
   if (
     instrument?.tag !== 'evaluation-v1.1.0' ||
