@@ -1,0 +1,14 @@
+{
+  "name": "formfair-capture",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Capture harness for the solo descriptive scan. Separate from evaluation/, which is deliberately dependency-free and must stay that way.",
+  "scripts": {
+    "test": "node --test test/capture.test.mjs",
+    "capture": "node cli-capture.mjs"
+  },
+  "devDependencies": {
+    "playwright": "^1.63.0"
+  }
+}
