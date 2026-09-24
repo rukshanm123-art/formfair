@@ -271,3 +271,89 @@ and both the selection ledger and the corpus draft are derived from it. Neither 
 by hand, so a captured page cannot be missing from the ledger and a ledger row cannot name
 a page the draft does not contain.
 
+## Amendment 2: the bounded search rule
+
+**Dated 24 September 2026. Precondition: no held-out page has been visited or captured.**
+`solo-protocol-v1.0.0` and `capture-v1.0.0` are not moved. Frozen separately as
+`selection-v1.0.0`.
+
+Section 3 of the held-out protocol fixes which agency is attempted and in what order, and
+which categories are preferred. It does not fix **how hard to look inside one agency**, and
+that decides the achieved sample as much as the draw order does. Deciding effort agency by
+agency would make "attempted" mean something different each time and invite exactly the
+selection-bias question the frozen draw order exists to answer. The bound is therefore
+fixed here, before the first agency.
+
+### The rule
+
+1. Agencies are processed only in the frozen draw order.
+2. Categories are searched in the frozen priority order: account registration, service
+   application, enquiry or contact, subscription or newsletter.
+3. For each category, candidate URLs are gathered from normal navigation, the linked
+   sitemap or `/sitemap.xml`, and the first page of the agency's own internal search
+   results for that category's terms.
+4. The ten frozen terms, by category:
+
+   | Category | Terms |
+   |---|---|
+   | Account registration | `register`, `sign up` |
+   | Service application | `apply`, `application`, `tono` |
+   | Enquiry or contact | `contact`, `enquiry`, `whakapā` |
+   | Subscription or newsletter | `subscribe`, `newsletter` |
+
+5. **No external search engine.** Where an agency has no internal search, that is recorded
+   as unavailable rather than substituted, because a third-party index would introduce a
+   ranking this study does not control.
+6. Discovered URLs are canonicalised, deduplicated and sorted alphabetically.
+7. At most **five candidate form URLs per category** are examined.
+8. All five are examined - or all available, if fewer - before one is chosen.
+9. If the category yields an eligible form, the alphabetically first eligible canonical URL
+   is selected and the search of that agency stops.
+10. Otherwise the next category is searched.
+11. Maximum effort is therefore **twenty candidate form pages per agency**.
+12. If none qualifies, the agency is recorded as
+    `effort bound exhausted — no eligible form located`.
+13. The scan stops when 40 agencies have qualified or all 45 have been attempted.
+
+### Canonicalisation
+
+The page's own `<link rel="canonical">` is used when it resolves to an http or https URL;
+otherwise the final URL after redirects. Fragments are removed, scheme and hostname are
+lowercased, and a default port is removed. **Query parameters are kept**, because a
+government form is routinely identified by one and dropping them would silently merge two
+distinct forms into a single candidate. The path's case is preserved, because paths are
+case-sensitive on many servers.
+
+### Discovery pages
+
+Any navigation page, sitemap or search results page actually inspected is recorded in the
+log as a discovery page with how it was found. Discovery pages do **not** consume the
+effort bound: they are inspected to find candidates and are not themselves forms being
+assessed. Counting them would let a thorough search exhaust its bound before assessing a
+single form. Recording them is what makes the search auditable rather than only its
+outcome.
+
+### Approval
+
+Eligibility is proposed against the five frozen criteria with the evidence for an
+inclusion, and the researcher approves or rejects every decision, including exclusions and
+agencies recorded as exhausted. The corpus draft is withheld while anything is pending. No
+outside annotator is involved; this remains a solo study.
+
+### Limitation
+
+The bounded search may miss an eligible form that exists outside the discovered candidate
+set - one reachable only by a path the three discovery methods did not surface, or ranked
+below the fifth candidate in its category. The achieved sample is therefore a sample of
+what this procedure finds, not of every form an agency publishes, and it is reported that
+way. A larger bound would reduce that risk and would also make the effort per agency less
+comparable; the bound is fixed rather than tuned, because tuning it after seeing results is
+the failure this amendment exists to prevent.
+
+### Enforcement
+
+The bound is enforced by `capture/`, not remembered. A sixth candidate in a category, or a
+twenty-first in an agency, is refused with an error naming the limit. Canonicalisation,
+deduplication and ordering are implemented and tested. Discovery records are accepted after
+the bound is reached, because they never consumed it.
+

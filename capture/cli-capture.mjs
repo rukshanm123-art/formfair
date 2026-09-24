@@ -25,6 +25,7 @@ import { POLICY, parseRobots, isAllowed, createPacer } from './politeness.mjs';
 import {
   readLog, writeLog, appendAttempt, writeDerived, ELIGIBILITY_CRITERIA, APPROVAL,
 } from './run.mjs';
+import { DISCOVERY_KINDS, remainingBudget, canonicalise, SEARCH_TERMS } from './selection.mjs';
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -39,7 +40,10 @@ const USAGE = `usage:
                           --page-id <id> --category <${CATEGORIES.join('|')}>
                           --evidence "<why this page qualifies>" [--settle-ms <n>]
   cli-capture.mjs exclude --out <dir> --agency <name> --website <url> --url <url>
-                          --reason "<why it was not captured>"
+                          --reason "<why it was not captured>" [--category <c>]
+  cli-capture.mjs discovery --out <dir> --agency <name> --website <url> --url <url>
+                          --kind <${DISCOVERY_KINDS.join('|')}>
+  cli-capture.mjs budget  --out <dir> --agency <name> [--category <c>]
   cli-capture.mjs approve --out <dir> --url <url> [--reject --reason "<why>"]
   cli-capture.mjs status  --out <dir>
   cli-capture.mjs build   --out <dir> --frame-sha256 <hex> --draw-order-sha256 <hex>
@@ -195,7 +199,7 @@ function doExclude() {
   appendAttempt(log, {
     examinedAt: now(),
     agency: require_('agency'), website: require_('website'), url: require_('url'),
-    status: 'excluded', exclusionReason: require_('reason'),
+    status: 'excluded', exclusionReason: require_('reason'), category: flag('category') ?? undefined,
     eligibility: Object.fromEntries(ELIGIBILITY_CRITERIA.map((c) => [c, null])),
   });
   writeLog(logPath, log);
@@ -246,7 +250,35 @@ function doBuild() {
   console.log(r.draftHeld ? `draft held: ${r.draftHeld}` : `draft:  ${r.draftPath}`);
 }
 
-const commands = { capture: doCapture, exclude: doExclude, approve: doApprove, status: doStatus, build: doBuild };
+function doDiscovery() {
+  const dir = require_('out');
+  const kind = require_('kind');
+  if (!DISCOVERY_KINDS.includes(kind)) die(`--kind must be one of ${DISCOVERY_KINDS.join(', ')}`);
+  const logPath = logPathFor(dir);
+  const log = readLog(logPath);
+  appendAttempt(log, {
+    examinedAt: now(), agency: require_('agency'), website: require_('website'),
+    url: require_('url'), status: 'discovery', discoveryKind: kind,
+    approval: APPROVAL.APPROVED, // a page inspected to find links is not a judgement to approve
+  });
+  writeLog(logPath, log);
+  writeDerived({ log, dir, frameSha256: flag('frame-sha256'), drawOrderSha256: flag('draw-order-sha256'), synthetic: has('synthetic') });
+  console.log(`recorded discovery page (${kind})`);
+}
+
+function doBudget() {
+  const log = readLog(logPathFor(require_('out')));
+  const agency = require_('agency');
+  const category = flag('category');
+  const b = remainingBudget(log.attempts, { agency, category });
+  console.log(`agency  ${agency}`);
+  console.log(`  candidates remaining for the agency:  ${Math.max(0, b.agencyRemaining)}`);
+  if (category) console.log(`  candidates remaining for ${category}: ${Math.max(0, b.categoryRemaining)}`);
+  console.log(b.exhausted ? '  BOUND EXHAUSTED' : '  within the bound');
+  if (category && SEARCH_TERMS[category]) console.log(`  terms: ${SEARCH_TERMS[category].join(', ')}`);
+}
+
+const commands = { capture: doCapture, exclude: doExclude, discovery: doDiscovery, budget: doBudget, approve: doApprove, status: doStatus, build: doBuild };
 if (!commands[command]) die(USAGE);
 try {
   await commands[command]();

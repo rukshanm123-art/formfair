@@ -19,6 +19,7 @@ import { existsSync, readFileSync, writeFileSync, renameSync, unlinkSync, mkdirS
 import { dirname, join, resolve } from 'node:path';
 import { LEDGER_HEADER, recordExamination, CATEGORIES } from './capture.mjs';
 import { POLICY } from './politeness.mjs';
+import { DISCOVERY_KINDS, remainingBudget, MAX_CANDIDATES_PER_CATEGORY, MAX_CANDIDATES_PER_AGENCY } from './selection.mjs';
 
 export const LOG_SCHEMA = 'formfair/capture-log@1';
 
@@ -59,13 +60,18 @@ function checkAttempt(attempt) {
   if (!attempt.agency) problems.push('agency is required');
   if (!attempt.website) problems.push('website is required');
   if (!attempt.url) problems.push('url is required');
-  if (!['captured', 'excluded', 'failed'].includes(attempt.status)) {
-    problems.push('status must be captured, excluded or failed');
+  if (!['captured', 'excluded', 'failed', 'discovery'].includes(attempt.status)) {
+    problems.push('status must be captured, excluded, failed or discovery');
   }
-  for (const c of ELIGIBILITY_CRITERIA) {
-    const v = attempt.eligibility?.[c];
-    if (v !== true && v !== false && v !== null) {
-      problems.push(`eligibility.${c} must be true, false or null`);
+  if (attempt.status === 'discovery' && !DISCOVERY_KINDS.includes(attempt.discoveryKind)) {
+    problems.push(`a discovery record needs discoveryKind from ${DISCOVERY_KINDS.join(', ')}`);
+  }
+  if (attempt.status !== 'discovery') {
+    for (const c of ELIGIBILITY_CRITERIA) {
+      const v = attempt.eligibility?.[c];
+      if (v !== true && v !== false && v !== null) {
+        problems.push(`eligibility.${c} must be true, false or null`);
+      }
     }
   }
   if (attempt.status === 'captured') {
@@ -81,7 +87,7 @@ function checkAttempt(attempt) {
       problems.push('a captured attempt must satisfy all five eligibility criteria');
     }
   }
-  if (attempt.status !== 'captured' && !attempt.exclusionReason) {
+  if (attempt.status !== 'captured' && attempt.status !== 'discovery' && !attempt.exclusionReason) {
     problems.push('a non-captured attempt needs an exclusionReason');
   }
   return problems;
@@ -101,6 +107,18 @@ export function appendAttempt(log, attempt) {
   if (log.attempts.some((a) => a.url === attempt.url)) {
     throw new Error(`url ${attempt.url} is already recorded`);
   }
+  // The effort bound, enforced rather than remembered. Discovery pages do not consume it:
+  // a sitemap or a search results page is inspected to FIND candidates, it is not one.
+  if (attempt.status !== 'discovery') {
+    const budget = remainingBudget(log.attempts, { agency: attempt.agency, category: attempt.category });
+    if (budget.exhausted) {
+      throw new Error(
+        `effort bound reached for ${attempt.agency}: at most ${MAX_CANDIDATES_PER_CATEGORY} candidates ` +
+          `per category and ${MAX_CANDIDATES_PER_AGENCY} per agency. Record the agency as ` +
+          'exhausted and move to the next in the frozen order.'
+      );
+    }
+  }
   log.attempts.push({ approval: APPROVAL.PENDING, ...attempt });
   return log;
 }
@@ -116,7 +134,7 @@ export function deriveLedger(log) {
       a.finalUrl ?? '',
       a.status,
       a.category ?? '',
-      a.status === 'captured' ? a.inclusionEvidence : a.exclusionReason,
+      a.status === 'captured' ? a.inclusionEvidence : a.status === 'discovery' ? `discovery: ${a.discoveryKind}` : a.exclusionReason,
       a.pageId ?? '',
       a.htmlSha256 ?? '',
       a.approval,
