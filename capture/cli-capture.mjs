@@ -25,6 +25,7 @@ import { POLICY, parseRobots, isAllowed, createPacer } from './politeness.mjs';
 import {
   readLog, writeLog, appendAttempt, writeDerived, ELIGIBILITY_CRITERIA, APPROVAL,
   recordCandidates, lockCandidateSet, categorySettled, approveCandidateSet,
+  supersedeCandidateSet, publishProvenance,
 } from './run.mjs';
 import {
   DISCOVERY_KINDS, remainingBudget, canonicalise, SEARCH_TERMS, parseDrawOrder, nextWork,
@@ -51,6 +52,9 @@ const USAGE = `usage:
   cli-capture.mjs lock    --out <dir> --agency <name> --category <c>
   cli-capture.mjs approve-set --out <dir> --agency <name> --category <c>
                           [--reject] [--note "<why>"]
+  cli-capture.mjs supersede-set --out <dir> --agency <name> --category <c>
+                          --reason "<why the rejected set is being redone>"
+  cli-capture.mjs publish --out <dir> --to <tracked dir>
   cli-capture.mjs next    --out <dir>
   cli-capture.mjs budget  --out <dir> --agency <name> [--category <c>]
   cli-capture.mjs approve --out <dir> --url <url> [--reject --reason "<why>"]
@@ -295,6 +299,28 @@ function doApproveSet() {
   }
 }
 
+function doSupersedeSet() {
+  const dir = require_('out');
+  const logPath = logPathFor(dir);
+  const log = readLog(logPath);
+  const archived = supersedeCandidateSet(log, {
+    agency: require_('agency'), category: require_('category'), reason: require_('reason'),
+  });
+  writeLog(logPath, log);
+  console.log(`archived version ${archived.version} of ${archived.agency} / ${archived.category}`);
+  console.log(`reason: ${archived.supersededReason}`);
+  console.log('a new version may now be built by recording candidates again');
+}
+
+function doPublish() {
+  const dir = require_('out');
+  const log = readLog(logPathFor(dir));
+  const r = publishProvenance(log, { to: require_('to') });
+  console.log(`ledger:     ${r.ledgerPath}`);
+  console.log(`provenance: ${r.provenancePath}`);
+  console.log('These carry no markup and are safe to track.');
+}
+
 function doBudget() {
   const log = readLog(logPathFor(require_('out')));
   const agency = require_('agency');
@@ -367,7 +393,8 @@ function doNext() {
   work.pending.forEach((u) => console.log(`  - ${u}`));
 }
 
-const commands = { candidates: doCandidates, lock: doLock, 'approve-set': doApproveSet, next: doNext, capture: doCapture, exclude: doExclude, discovery: doDiscovery, budget: doBudget, approve: doApprove, status: doStatus, build: doBuild };
+const commands = { candidates: doCandidates, lock: doLock, 'approve-set': doApproveSet,
+  'supersede-set': doSupersedeSet, publish: doPublish, next: doNext, capture: doCapture, exclude: doExclude, discovery: doDiscovery, budget: doBudget, approve: doApprove, status: doStatus, build: doBuild };
 if (!commands[command]) die(USAGE);
 try {
   await commands[command]();

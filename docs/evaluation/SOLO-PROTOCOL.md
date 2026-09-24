@@ -443,3 +443,57 @@ politeness policy reads as covering the whole scan while only the capture step w
 All five are covered by tests written from the defect that found them. The capture package
 has 54 tests.
 
+## Amendment 4: the discovery pilot, and what it found
+
+**Dated 24 September 2026. Precondition: one agency's discovery was performed; nothing was
+assessed, captured or analysed, and no held-out markup exists.** `solo-protocol-v1.0.0`,
+`capture-v1.0.0`, `selection-v1.0.0` and `selection-v1.0.1` are not moved.
+
+### What the pilot did
+
+Discovery was run for Te Puni Kōkiri, the first agency in the frozen draw order, for the
+first category in the frozen priority order (account registration). All four of the
+agency's websites in the frame were searched. Seven discovery pages were recorded, each
+with its method and navigation timestamp, paced at or above the five-second minimum.
+
+One candidate was found: a "Create new account" link on Te Haeata leading to
+`/user/register`. The set was locked and the tool stopped at the approval gate. **Nothing
+was assessed, captured, analysed, or run through FormFair.** No held-out markup exists.
+
+Two observations, recorded because they are results rather than incidents:
+`www.tpk.govt.nz` serves a 404 page for both `robots.txt` and `sitemap.xml`, so it has
+neither; and `www.tkm.govt.nz` disallows `/search` in its `robots.txt`, so internal search
+is unavailable there and was recorded as such rather than substituted.
+
+### Why the first candidate set was rejected
+
+The discovery provenance was incomplete. Seven pages were recorded, but **four further
+inspections were not**: `robots.txt` on three hosts and `sitemap.xml` on one. Those
+inspections determined whether a discovery method was available at all - the sitemap and
+search findings above rest on them - so omitting them left the record unable to show how
+the candidate set was arrived at.
+
+The set is preserved as rejected, and discovery for that category is redone under a new
+version. A redo that erased the attempt it replaced would hide exactly what the ledger
+exists to show.
+
+### Changes this amendment makes
+
+**A rejected candidate set is superseded, not edited.** Recording new candidates onto a
+rejected set is refused. Superseding archives it with its rejection, its note and a stated
+reason, and opens the next version. The version number is part of the published record.
+
+**A corpus draft is not built without real frame hashes.** The first draft was written with
+`frameSha256: null` because the hashes were not supplied. The seal would have refused it,
+but writing it at all invites it being read as a real artefact.
+
+**Provenance is published separately from the data.** `evaluation/data/` is ignored by Git,
+correctly, because it holds captured third-party markup. The selection ledger was inside
+it, which would have left the audit trail unpublishable. A `publish` command now writes a
+tracked copy - the ledger and a provenance summary - containing no markup, and a test
+asserts that nothing published contains any.
+
+**Every inspection counts as a discovery page**, including a `robots.txt` or a `sitemap.xml`
+that turns out not to exist. A method found unavailable is a finding about the agency, and
+the absence has to be as visible as the presence.
+

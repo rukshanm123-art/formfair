@@ -52,7 +52,10 @@ function lastNavigation(log) {
 }
 
 export function emptyLog() {
-  return { schema: LOG_SCHEMA, politeness: { ...POLICY }, attempts: [], candidateSets: {}, exhausted: [] };
+  return {
+    schema: LOG_SCHEMA, politeness: { ...POLICY }, attempts: [],
+    candidateSets: {}, supersededCandidateSets: [], exhausted: [],
+  };
 }
 
 export function readLog(path) {
@@ -228,8 +231,20 @@ export function appendAttempt(log, attempt) {
 export function recordCandidates(log, { agency, category, urls }) {
   if (!CATEGORY_ORDER.includes(category)) throw new Error(`unknown category ${category}`);
   const key = setKey(agency, category);
+  const existing = log.candidateSets[key];
+  if (existing?.approval === APPROVAL.REJECTED) {
+    throw new Error(
+      `the candidate set for ${agency} / ${category} was rejected and must be superseded ` +
+        'before new candidates are recorded. Run `supersede-set` to archive it and open a ' +
+        'new version.'
+    );
+  }
+  const version = (log.supersededCandidateSets ?? []).filter(
+    (v) => v.agency === agency && v.category === category
+  ).length + 1;
   const set = (log.candidateSets[key] ??= {
-    agency, category, discovered: [], locked: [], lockedAt: null, approval: APPROVAL.PENDING,
+    agency, category, version, discovered: [], locked: [], lockedAt: null,
+    approval: APPROVAL.PENDING,
   });
   if (set.lockedAt) {
     throw new Error(
@@ -274,6 +289,31 @@ export function approveCandidateSet(log, { agency, category, approved, note }) {
   set.approvedAt = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
   if (note) set.approvalNote = note;
   return set;
+}
+
+/**
+ * Archives a rejected candidate set and opens a new version.
+ *
+ * A rejected set is not deleted. The reason it was rejected - here, discovery provenance
+ * that did not record every page inspected - is part of the record of how the sample was
+ * arrived at, and a redo that erased the attempt it replaced would hide exactly the thing
+ * the ledger exists to show.
+ */
+export function supersedeCandidateSet(log, { agency, category, reason }) {
+  const key = setKey(agency, category);
+  const set = log.candidateSets[key];
+  if (!set) throw new Error(`no candidate set for ${agency} / ${category}`);
+  if (set.approval !== APPROVAL.REJECTED) {
+    throw new Error('only a rejected candidate set may be superseded');
+  }
+  if (!reason) throw new Error('superseding a candidate set needs a reason');
+  (log.supersededCandidateSets ??= []).push({
+    ...set,
+    supersededAt: new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'),
+    supersededReason: reason,
+  });
+  delete log.candidateSets[key];
+  return log.supersededCandidateSets.at(-1);
 }
 
 /** Every locked candidate must have an outcome before the category can be settled. */
@@ -376,6 +416,13 @@ export function deriveDraft(log, { frameSha256, drawOrderSha256, selectionLedger
       category: a.category,
       file: a.file,
     }));
+  // A draft carrying null hashes would be refused by the seal anyway, but writing one at
+  // all invites it being read as a real artefact.
+  for (const [name, value] of [['frameSha256', frameSha256], ['drawOrderSha256', drawOrderSha256]]) {
+    if (typeof value !== 'string' || !/^[0-9a-f]{64}$/.test(value)) {
+      throw new Error(`${name} must be a SHA-256 digest to build a corpus draft, got ${value ?? 'nothing'}`);
+    }
+  }
   return {
     schema: 'formfair/solo-corpus-draft@1',
     synthetic,
@@ -384,6 +431,57 @@ export function deriveDraft(log, { frameSha256, drawOrderSha256, selectionLedger
     selectionLedgerFile,
     pages,
   };
+}
+
+/**
+ * The publishable provenance record.
+ *
+ * `evaluation/data/` is ignored by Git, correctly: it holds captured third-party markup.
+ * But the protocol publishes provenance - hashes, the selection ledger, the schemas - and
+ * leaving the ledger inside the ignored tree would make the audit trail unpublishable.
+ *
+ * This writes a tracked copy containing no markup: URLs examined, when, by what discovery
+ * method, the outcome, the reason, and content hashes. Nothing here reproduces any part of
+ * a captured page.
+ */
+export function publishProvenance(log, { to }) {
+  const dir = resolve(to);
+  mkdirSync(dir, { recursive: true });
+  const ledgerPath = join(dir, 'selection-ledger.csv');
+  writeFileSync(ledgerPath, deriveLedger(log), 'utf8');
+
+  const discovery = log.attempts.filter((a) => a.status === 'discovery');
+  const candidates = log.attempts.filter((a) => a.status !== 'discovery');
+  const provenance = {
+    schema: 'formfair/capture-provenance@1',
+    politeness: log.politeness,
+    counts: {
+      discoveryPages: discovery.length,
+      candidatesAssessed: candidates.length,
+      captured: candidates.filter((a) => a.status === 'captured').length,
+      excluded: candidates.filter((a) => a.status === 'excluded').length,
+      failed: candidates.filter((a) => a.status === 'failed').length,
+      pendingApproval: log.attempts.filter((a) => a.approval === APPROVAL.PENDING).length,
+    },
+    discoveryByMethod: discovery.reduce((acc, a) => {
+      acc[a.discoveryKind] = (acc[a.discoveryKind] ?? 0) + 1;
+      return acc;
+    }, {}),
+    candidateSets: Object.values(log.candidateSets ?? {}).map((set) => ({
+      agency: set.agency, category: set.category, version: set.version,
+      discovered: set.discovered.length, locked: set.locked.length,
+      droppedBeyondBound: set.droppedBeyondBound?.length ?? 0,
+      lockedAt: set.lockedAt, approval: set.approval, approvedAt: set.approvedAt ?? null,
+    })),
+    supersededCandidateSets: (log.supersededCandidateSets ?? []).map((set) => ({
+      agency: set.agency, category: set.category, version: set.version,
+      approval: set.approval, approvalNote: set.approvalNote ?? null,
+      supersededAt: set.supersededAt, supersededReason: set.supersededReason,
+    })),
+  };
+  const provenancePath = join(dir, 'provenance.json');
+  writeFileSync(provenancePath, `${JSON.stringify(provenance, null, 2)}\n`, 'utf8');
+  return { ledgerPath, provenancePath };
 }
 
 /** Writes both derived artefacts beside the log, so nothing is edited by hand. */

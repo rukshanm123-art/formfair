@@ -8,10 +8,12 @@
 
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   emptyLog, appendAttempt, ELIGIBILITY_CRITERIA, recordCandidates, lockCandidateSet,
-  approveCandidateSet, APPROVAL,
+  approveCandidateSet, APPROVAL, supersedeCandidateSet, publishProvenance, deriveDraft,
 } from '../run.mjs';
 import { parseDrawOrder, nextWork, MAX_QUALIFIED_AGENCIES, isSuperseded } from '../selection.mjs';
 import { POLICY } from '../politeness.mjs';
@@ -180,5 +182,83 @@ describe('discovery pacing is recorded and checked', () => {
     appendAttempt(log, discovery('https://w.govt.nz/b', '2026-09-24T00:00:06Z'));
     assert.equal(log.attempts[1].msSincePreviousNavigation, 6000);
     assert.ok(6000 >= POLICY.minDelayBetweenNavigationsMs);
+  });
+});
+
+describe('a rejected candidate set is superseded, not edited', () => {
+  test('a rejected set refuses new candidates until it is superseded', () => {
+    const log = emptyLog();
+    ready(log, 'TPK', 'account-registration', ['https://w.govt.nz/a'], { approve: false });
+    approveCandidateSet(log, { agency: 'TPK', category: 'account-registration', approved: false, note: 'incomplete provenance' });
+    assert.throws(
+      () => recordCandidates(log, { agency: 'TPK', category: 'account-registration', urls: ['https://w.govt.nz/b'] }),
+      /must be superseded/
+    );
+  });
+
+  test('superseding archives the rejected set and opens the next version', () => {
+    // The rejected attempt is part of how the sample was arrived at. A redo that erased it
+    // would hide exactly what the ledger exists to show.
+    const log = emptyLog();
+    ready(log, 'TPK', 'account-registration', ['https://w.govt.nz/a'], { approve: false });
+    approveCandidateSet(log, { agency: 'TPK', category: 'account-registration', approved: false });
+    supersedeCandidateSet(log, { agency: 'TPK', category: 'account-registration', reason: 'incomplete discovery provenance' });
+
+    assert.equal(log.supersededCandidateSets.length, 1);
+    assert.equal(log.supersededCandidateSets[0].version, 1);
+    assert.equal(log.supersededCandidateSets[0].approval, APPROVAL.REJECTED);
+    assert.match(log.supersededCandidateSets[0].supersededReason, /incomplete discovery provenance/);
+
+    recordCandidates(log, { agency: 'TPK', category: 'account-registration', urls: ['https://w.govt.nz/b'] });
+    assert.equal(log.candidateSets['TPK\u0000account-registration'].version, 2);
+  });
+
+  test('only a rejected set may be superseded, and a reason is required', () => {
+    const log = emptyLog();
+    ready(log, 'TPK', 'account-registration', ['https://w.govt.nz/a']);
+    assert.throws(
+      () => supersedeCandidateSet(log, { agency: 'TPK', category: 'account-registration', reason: 'no' }),
+      /only a rejected candidate set/
+    );
+    approveCandidateSet(log, { agency: 'TPK', category: 'account-registration', approved: false });
+    assert.throws(
+      () => supersedeCandidateSet(log, { agency: 'TPK', category: 'account-registration' }),
+      /needs a reason/
+    );
+  });
+});
+
+describe('the corpus draft and the publishable record', () => {
+  test('a draft will not be built without real frame hashes', () => {
+    // A draft carrying nulls would be refused by the seal anyway, but writing one invites
+    // it being read as a real artefact.
+    const log = emptyLog();
+    for (const bad of [undefined, null, '', 'not-a-hash', 'a'.repeat(63)]) {
+      assert.throws(
+        () => deriveDraft(log, { frameSha256: bad, drawOrderSha256: 'd'.repeat(64) }),
+        /frameSha256 must be a SHA-256 digest/
+      );
+    }
+    assert.doesNotThrow(() => deriveDraft(log, { frameSha256: 'a'.repeat(64), drawOrderSha256: 'd'.repeat(64) }));
+  });
+
+  test('the published provenance carries no markup', () => {
+    const log = emptyLog();
+    const urls = ready(log, 'TPK', 'account-registration', ['https://w.govt.nz/a']);
+    appendAttempt(log, outcome('TPK', 'account-registration', urls[0]));
+    const dir = mkdtempSync(join(tmpdir(), 'formfair-pub-'));
+    try {
+      const { ledgerPath, provenancePath } = publishProvenance(log, { to: dir });
+      const provenance = JSON.parse(readFileSync(provenancePath, 'utf8'));
+      assert.equal(provenance.schema, 'formfair/capture-provenance@1');
+      assert.equal(provenance.counts.candidatesAssessed, 1);
+      assert.equal(provenance.candidateSets[0].version, 1);
+      assert.ok(provenance.politeness.minDelayBetweenNavigationsMs >= 5000);
+      // Nothing published may contain captured markup.
+      const published = readFileSync(ledgerPath, 'utf8') + readFileSync(provenancePath, 'utf8');
+      assert.doesNotMatch(published, /<html|<form|<input/i, 'published provenance must contain no markup');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
