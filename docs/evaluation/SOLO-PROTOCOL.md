@@ -221,3 +221,53 @@ reachable page markup. This removes the participant-dependent method; it does no
 itself constitute an institutional ethics determination. The previously submitted
 project paperwork should be amended or withdrawn as Yoobee directs so that the recorded
 method matches the work actually performed.
+
+## Amendment 1: the capture harness
+
+**Dated 24 September 2026, before the first held-out page was visited.** This tag,
+`solo-protocol-v1.0.0`, is not moved.
+
+Step 5 of the mandatory sequence assumed a tool that did not exist. The corpus draft
+template expected provenance fields and captured markup to appear from somewhere, and
+nothing produced them, so capture was blocked on tooling rather than on any decision.
+
+`capture/` now holds that tool. It was written after this protocol was frozen and is
+therefore outside that freeze, which is recorded here rather than left to be discovered.
+It is frozen separately as `capture-v1.0.0` before the first held-out visit, with its
+lockfile hash, Playwright version, Chromium version and politeness policy in that tag.
+
+**It produces no FormFair output.** The analyser is never imported by it, and a CI step
+fails the build if it ever is. That property is what makes its position outside this
+freeze acceptable: it retrieves pages and records provenance, and every figure still comes
+from `evaluation-v1.1.0` run against a corpus sealed before any output is seen.
+
+**What it enforces rather than leaves to memory.** A fresh browser context with no stored
+state, never a persistent profile. The fixed 1280 x 800 viewport. A fixed two-second
+settling period after load, recorded in provenance, because capturing the instant `load`
+fires misses constraints a framework applies a tick later, and a variable wait would make
+two runs of the same page incomparable. No code path types text or clicks a submit
+control, and a test asserts from the captured markup itself that no submit, input or
+keydown event occurred during capture.
+
+**Politeness policy**, which this protocol did not previously state and which is now part
+of the artefact: one capture at a time; at least five seconds between top-level
+navigations; `robots.txt` honoured, with a disallowed path recorded as excluded and never
+fetched; a 429 stops the run and `Retry-After` is respected; one retry for a transient
+failure, then the attempt is recorded as failed; authentication, CAPTCHA, blocking and
+consent controls never bypassed, and a page behind one excluded under this protocol's
+first eligibility criterion; the normal Chromium user agent, unmodified and recorded
+exactly, because a custom agent could change what the server returns and would make the
+sample less representative of what a member of the public receives.
+
+**Eligibility and approval.** The harness proposes an assessment against the five frozen
+criteria and records the evidence for an inclusion, not only a reason for an exclusion.
+Every attempt starts at `approval: pending`, and the corpus draft is withheld while
+anything is pending, so the corpus cannot be built on judgements the researcher has not
+confirmed. This remains a solo study: the approval is the researcher's, and no outside
+annotator is involved.
+
+**Ledger and draft cannot disagree.** `capture-log.json` is the single append-only record,
+and both the selection ledger and the corpus draft are derived from it. Neither is written
+by hand, so a captured page cannot be missing from the ledger and a ledger row cannot name
+a page the draft does not contain.
+

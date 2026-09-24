@@ -5,17 +5,36 @@
  * any real page is opened. Nothing in this file reaches the network.
  */
 
-import { test, describe } from 'node:test';
+import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { createServer } from 'node:http';
 import { chromium } from 'playwright';
 import { capturePage, recordExamination, buildDraft, VIEWPORT, LOCALE, CATEGORIES, LEDGER_HEADER } from '../capture.mjs';
 
 const browserFactory = () => chromium.launch();
+
+// The harness accepts only http(s), so synthetic pages are served locally rather than
+// loaded from disk. Nothing leaves the machine.
+let server;
+let origin;
+before(async () => {
+  server = createServer((_req, res) => {
+    res.writeHead(200, { 'content-type': 'text/html' });
+    res.end(PAGE);
+  });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  origin = `http://127.0.0.1:${server.address().port}`;
+});
+after(() => {
+  // Chromium keeps connections alive, and close() alone would wait for them, hanging the
+  // test process after every assertion has already passed.
+  server?.closeAllConnections?.();
+  server?.close();
+});
 
 const inTemp = async (fn) => {
   const dir = mkdtempSync(join(tmpdir(), 'formfair-capture-'));
@@ -35,12 +54,10 @@ const PAGE = `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>
 describe('capture harness', () => {
   test('saves the rendered document, after scripts have run', async () => {
     await inTemp(async (dir) => {
-      const src = join(dir, 'page.html');
-      writeFileSync(src, PAGE);
       const out = join(dir, 'captures');
       const record = await capturePage({
         browserFactory,
-        url: pathToFileURL(src).href,
+        url: `${origin}/page`,
         agency: 'Synthetic Agency',
         website: 'https://example.invalid/',
         pageId: 'synthetic-001',
@@ -57,11 +74,9 @@ describe('capture harness', () => {
 
   test('records every provenance field the protocol requires', async () => {
     await inTemp(async (dir) => {
-      const src = join(dir, 'page.html');
-      writeFileSync(src, PAGE);
       const r = await capturePage({
         browserFactory,
-        url: pathToFileURL(src).href,
+        url: `${origin}/page`,
         agency: 'Synthetic Agency',
         website: 'https://example.invalid/',
         pageId: 'synthetic-002',
@@ -84,11 +99,9 @@ describe('capture harness', () => {
     // An overwritten page would change what the corpus manifest hashes without changing
     // the manifest, which is the one thing the seal cannot detect afterwards.
     await inTemp(async (dir) => {
-      const src = join(dir, 'page.html');
-      writeFileSync(src, PAGE);
       const args = {
         browserFactory,
-        url: pathToFileURL(src).href,
+        url: `${origin}/page`,
         agency: 'A',
         website: 'https://example.invalid/',
         pageId: 'synthetic-003',
@@ -102,7 +115,7 @@ describe('capture harness', () => {
 
   test('rejects a category outside the protocol priority order', async () => {
     await assert.rejects(
-      () => capturePage({ browserFactory, url: 'file:///dev/null', agency: 'A', website: 'w', pageId: 'x', category: 'whatever', outDir: tmpdir() }),
+      () => capturePage({ browserFactory, url: 'https://example.invalid/x', agency: 'A', website: 'w', pageId: 'x-001', category: 'whatever', outDir: tmpdir() }),
       /category must be one of/
     );
     assert.deepEqual(CATEGORIES, [

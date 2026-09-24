@@ -208,3 +208,39 @@ jobs:
           fi
           test ! -f "$RUNNER_TEMP/should-not-exist.json"
           echo "refused, and wrote nothing."
+
+  capture-harness:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: capture/package-lock.json
+
+      - name: Install the capture harness
+        working-directory: capture
+        run: npm ci
+
+      # The harness drives a real browser, so CI needs one. Chromium only: the descriptive
+      # scan is defined against one engine and one viewport.
+      - name: Install Chromium
+        working-directory: capture
+        run: npx playwright install --with-deps chromium
+
+      # Thirteen tests, none of which reaches the network. The end-to-end one drives the
+      # real CLI and hands its output to the FROZEN corpus seal, so the chain from capture
+      # to ledger to draft to corpus is checked where it is actually used.
+      - name: Capture harness tests
+        working-directory: capture
+        run: npm test
+
+      # The harness must not be able to analyse anything. A page judged before the corpus
+      # containing it is sealed would defeat the seal entirely. Checked by parsing imports
+      # rather than grepping for a product name, which matches schema identifiers too.
+      - name: The capture harness must not import the analyser
+        working-directory: capture
+        run: node check-no-analyser.mjs

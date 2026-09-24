@@ -25,6 +25,7 @@
 import { createHash } from 'node:crypto';
 import { mkdirSync, writeFileSync, existsSync, readFileSync, appendFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { POLICY } from './politeness.mjs';
 
 export const VIEWPORT = { width: 1280, height: 800 };
 export const LOCALE = 'en-NZ';
@@ -75,6 +76,58 @@ export function recordExamination(ledgerPath, row) {
   return line;
 }
 
+/** Only real web pages. A file: or data: URL is not a government form. */
+export function validateUrl(url) {
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new Error(`not a URL: ${url}`);
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new Error(`only http and https may be captured, got ${parsed.protocol}`);
+  }
+  return parsed;
+}
+
+/**
+ * A pageId becomes a filename, so it may not traverse or collide with anything.
+ * Lowercase letters, digits and hyphens only.
+ */
+export function validatePageId(pageId) {
+  if (typeof pageId !== 'string' || !/^[a-z0-9]+(-[a-z0-9]+)*$/.test(pageId) || pageId.length > 64) {
+    throw new Error(
+      `pageId must be lowercase alphanumeric words separated by hyphens, got ${JSON.stringify(pageId)}`
+    );
+  }
+  return pageId;
+}
+
+/**
+ * Detects controls that would have to be bypassed to see the form, without bypassing any.
+ *
+ * The protocol requires an eligible form to be publicly reachable without signing in, so a
+ * page behind one of these is genuinely ineligible rather than merely awkward. What is
+ * found is recorded and the page is excluded; nothing here clicks, dismisses or solves
+ * anything.
+ */
+export async function detectBlocking(page, httpStatus) {
+  const signals = [];
+  if (httpStatus === 401 || httpStatus === 403) signals.push(`http ${httpStatus}`);
+  const found = await page.evaluate(() => {
+    const out = [];
+    if (document.querySelector('input[type="password"]')) out.push('password field');
+    const src = [...document.querySelectorAll('script[src],iframe[src]')].map((e) => e.src).join(' ');
+    if (/recaptcha|hcaptcha|turnstile|challenges\.cloudflare/i.test(src)) out.push('captcha');
+    const text = (document.body?.innerText ?? '').slice(0, 4000).toLowerCase();
+    if (/(^|\W)(sign in|log in|login required)(\W|$)/.test(text) && document.querySelector('input[type="password"]')) {
+      out.push('sign-in wall');
+    }
+    return out;
+  });
+  return [...signals, ...found];
+}
+
 /**
  * Captures one page.
  *
@@ -82,7 +135,9 @@ export function recordExamination(ledgerPath, row) {
  * pages without reaching the network, which is what the protocol requires of it before
  * any real page is opened.
  */
-export async function capturePage({ browserFactory, url, agency, website, pageId, category, outDir }) {
+export async function capturePage({ browserFactory, url, agency, website, pageId, category, outDir, settleMs = POLICY.postLoadSettleMs }) {
+  validateUrl(url);
+  validatePageId(pageId);
   if (!CATEGORIES.includes(category)) {
     throw new Error(`category must be one of ${CATEGORIES.join(', ')}`);
   }
@@ -100,6 +155,7 @@ export async function capturePage({ browserFactory, url, agency, website, pageId
   const page = await context.newPage();
   try {
     const response = await page.goto(url, { waitUntil: 'load', timeout: 45000 });
+    const httpStatus = response?.status() ?? null;
 
     const redirects = [];
     let hop = response?.request()?.redirectedFrom?.();
@@ -108,11 +164,24 @@ export async function capturePage({ browserFactory, url, agency, website, pageId
       hop = hop.redirectedFrom?.();
     }
 
+    // A fixed settling period after load. Capturing the instant `load` fires misses
+    // constraints that a framework applies a tick later, and a variable wait would make
+    // two runs of the same page incomparable. It is recorded in provenance so a reader
+    // knows exactly what was waited for.
+    await page.waitForTimeout(settleMs);
+
+    const blocking = await detectBlocking(page, httpStatus);
+    const userAgent = await page.evaluate(() => navigator.userAgent);
+
     const html = await page.evaluate(() => document.documentElement.outerHTML);
     writeFileSync(target, html, 'utf8');
 
     const version = browser.version?.() ?? 'unknown';
     return {
+      httpStatus,
+      blocking,
+      userAgent,
+      settleMs,
       pageId,
       agency,
       website,
@@ -127,7 +196,6 @@ export async function capturePage({ browserFactory, url, agency, website, pageId
       category,
       file,
       htmlSha256: sha256(html),
-      httpStatus: response?.status() ?? null,
     };
   } finally {
     await context.close();

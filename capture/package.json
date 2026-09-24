@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Capture harness for the solo descriptive scan. Separate from evaluation/, which is deliberately dependency-free and must stay that way.",
   "scripts": {
-    "test": "node --test test/capture.test.mjs",
+    "test": "node --test test/capture.test.mjs test/cli.test.mjs",
     "capture": "node cli-capture.mjs"
   },
   "devDependencies": {
