@@ -11,10 +11,11 @@ import {
   canonicalise, orderCandidates, remainingBudget, SEARCH_TERMS, CATEGORY_ORDER,
   MAX_CANDIDATES_PER_CATEGORY, MAX_CANDIDATES_PER_AGENCY, DISCOVERY_KINDS,
 } from '../selection.mjs';
-import {
-  emptyLog, appendAttempt, ELIGIBILITY_CRITERIA, deriveLedger, recordCandidates, lockCandidateSet,
-  approveCandidateSet,
-} from '../run.mjs';
+import { emptyLog, appendAttempt, ELIGIBILITY_CRITERIA, deriveLedger } from '../run.mjs';
+import { prepareSet, addDiscovery, nextTimestamp } from './helpers.mjs';
+
+/** Candidates only: discovery records share the attempts array but are not candidates. */
+const candidateCount = (log) => log.attempts.filter((a) => a.status !== 'discovery').length;
 
 const nullEligibility = () => Object.fromEntries(ELIGIBILITY_CRITERIA.map((c) => [c, null]));
 
@@ -26,11 +27,7 @@ const nullEligibility = () => Object.fromEntries(ELIGIBILITY_CRITERIA.map((c) =>
  */
 function prepare(log, agency, category, count) {
   const urls = Array.from({ length: count }, (_, i) => `https://w.govt.nz/${encodeURIComponent(agency)}/${category}/${i}`);
-  recordCandidates(log, { agency, category, urls });
-  lockCandidateSet(log, { agency, category });
-  // Assessment now requires the researcher to approve the candidate set; that gate has its
-  // own tests in approval.test.mjs.
-  approveCandidateSet(log, { agency, category, approved: true });
+  prepareSet(log, agency, category, urls);
   return urls;
 }
 const candidate = (agency, category, n) => ({
@@ -101,7 +98,7 @@ describe('the effort bound', () => {
       appendAttempt(log, candidate('TPK', 'enquiry-or-contact', i));
     }
     appendAttempt(log, candidate('TPK', 'service-application', 0));
-    assert.equal(log.attempts.length, MAX_CANDIDATES_PER_CATEGORY + 1);
+    assert.equal(candidateCount(log), MAX_CANDIDATES_PER_CATEGORY + 1);
   });
 
   test('a twenty-first candidate in the agency is refused even across categories', () => {
@@ -110,7 +107,7 @@ describe('the effort bound', () => {
       prepare(log, 'TPK', category, MAX_CANDIDATES_PER_CATEGORY);
       for (let i = 0; i < MAX_CANDIDATES_PER_CATEGORY; i++) appendAttempt(log, candidate('TPK', category, i));
     }
-    assert.equal(log.attempts.length, MAX_CANDIDATES_PER_AGENCY);
+    assert.equal(candidateCount(log), MAX_CANDIDATES_PER_AGENCY);
     assert.throws(
       () => appendAttempt(log, candidate('TPK', 'account-registration', 98)),
       /effort bound reached|not in the locked candidate set/
@@ -136,15 +133,10 @@ describe('the effort bound', () => {
     for (let i = 0; i < MAX_CANDIDATES_PER_CATEGORY; i++) {
       appendAttempt(log, candidate('TPK', 'enquiry-or-contact', i));
     }
-    DISCOVERY_KINDS.forEach((kind, i) => {
-      const navigatedAt = new Date(Date.UTC(2026, 8, 24, 1, i * 10)).toISOString().replace(/\.\d{3}Z$/, 'Z');
-      appendAttempt(log, {
-        examinedAt: navigatedAt, agency: 'TPK', website: 'https://w.govt.nz/',
-        url: `https://w.govt.nz/discovery/${kind}`, status: 'discovery', discoveryKind: kind,
-        navigatedAt,
-      });
+    DISCOVERY_KINDS.forEach((kind) => {
+      addDiscovery(log, { agency: 'TPK', category: 'enquiry-or-contact', method: kind, outcome: 'no-candidates' });
     });
-    assert.equal(log.attempts.length, MAX_CANDIDATES_PER_CATEGORY + DISCOVERY_KINDS.length);
+    assert.equal(candidateCount(log), MAX_CANDIDATES_PER_CATEGORY, 'discovery records are not candidates');
     // And they reach the ledger, so the search is auditable, not just its outcome.
     const ledger = deriveLedger(log);
     for (const kind of DISCOVERY_KINDS) assert.match(ledger, new RegExp(`discovery: ${kind}`));
@@ -156,7 +148,7 @@ describe('the effort bound', () => {
       () => appendAttempt(log, {
         examinedAt: 't', agency: 'TPK', website: 'w', url: 'https://w/x', status: 'discovery',
       }),
-      /discoveryKind/
+      /needs a method from/
     );
   });
 });

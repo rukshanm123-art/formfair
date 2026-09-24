@@ -14,6 +14,7 @@ import {
   emptyLog, appendAttempt, ELIGIBILITY_CRITERIA, recordCandidates, lockCandidateSet,
   categorySettled, deriveDraft, APPROVAL, approveCandidateSet,
 } from '../run.mjs';
+import { prepareSet, addDiscovery } from './helpers.mjs';
 import {
   parseDrawOrder, nextWork, CATEGORY_ORDER, MAX_CANDIDATES_PER_CATEGORY, MAX_QUALIFIED_AGENCIES,
 } from '../selection.mjs';
@@ -27,9 +28,7 @@ const drawOrder = parseDrawOrder(
 function preparedLog(agency, category, n = MAX_CANDIDATES_PER_CATEGORY) {
   const log = emptyLog();
   const urls = Array.from({ length: n }, (_, i) => `https://w.govt.nz/${category}/${i}`);
-  recordCandidates(log, { agency, category, urls });
-  lockCandidateSet(log, { agency, category });
-  approveCandidateSet(log, { agency, category, approved: true });
+  prepareSet(log, agency, category, urls);
   return { log, urls: log.candidateSets[`${agency}\u0000${category}`].locked };
 }
 
@@ -44,12 +43,12 @@ describe('the category-omission attack', () => {
     // none was counted against no category and ten candidates came from one real category.
     const { log, urls } = preparedLog('TPK', 'account-registration');
     for (const url of urls) appendAttempt(log, excluded('TPK', 'account-registration', url));
-    assert.equal(log.attempts.length, MAX_CANDIDATES_PER_CATEGORY);
+    assert.equal(log.attempts.filter((a) => a.status !== 'discovery').length, MAX_CANDIDATES_PER_CATEGORY);
 
     const withoutCategory = { ...excluded('TPK', 'account-registration', 'https://w.govt.nz/extra') };
     delete withoutCategory.category;
     assert.throws(() => appendAttempt(log, withoutCategory), /every candidate needs a category/);
-    assert.equal(log.attempts.length, MAX_CANDIDATES_PER_CATEGORY, 'nothing slipped through');
+    assert.equal(log.attempts.filter((a) => a.status !== 'discovery').length, MAX_CANDIDATES_PER_CATEGORY, 'nothing slipped through');
   });
 
   test('an unknown category is refused too', () => {
@@ -64,6 +63,7 @@ describe('the category-omission attack', () => {
 describe('the locked candidate set', () => {
   test('nothing may be assessed before the set is locked', () => {
     const log = emptyLog();
+    addDiscovery(log, { agency: 'TPK', category: 'account-registration' });
     recordCandidates(log, { agency: 'TPK', category: 'account-registration', urls: ['https://w.govt.nz/a'] });
     assert.throws(
       () => appendAttempt(log, excluded('TPK', 'account-registration', 'https://w.govt.nz/a')),
@@ -89,6 +89,7 @@ describe('the locked candidate set', () => {
 
   test('locking canonicalises, deduplicates, sorts and keeps the first five', () => {
     const log = emptyLog();
+    addDiscovery(log, { agency: 'TPK', category: 'account-registration' });
     recordCandidates(log, {
       agency: 'TPK', category: 'account-registration',
       urls: ['https://w.govt.nz/e', 'https://W.GOVT.NZ/e#frag', 'https://w.govt.nz/a',
@@ -192,9 +193,7 @@ describe('a third-party form shared by two agencies', () => {
     // Refusing would hide that the later agency genuinely links it.
     const log = emptyLog();
     for (const agency of ['TPK', 'Ministry of Health']) {
-      recordCandidates(log, { agency, category: 'enquiry-or-contact', urls: [shared] });
-      lockCandidateSet(log, { agency, category: 'enquiry-or-contact' });
-      approveCandidateSet(log, { agency, category: 'enquiry-or-contact', approved: true });
+      prepareSet(log, agency, 'enquiry-or-contact', [shared]);
       appendAttempt(log, excluded(agency, 'enquiry-or-contact', shared));
     }
     assert.equal(log.attempts.filter((a) => a.url === shared).length, 2);
@@ -209,9 +208,7 @@ describe('a third-party form shared by two agencies', () => {
       eligibility: Object.fromEntries(ELIGIBILITY_CRITERIA.map((c) => [c, true])),
     });
     for (const agency of ['TPK', 'Ministry of Health']) {
-      recordCandidates(log, { agency, category: 'enquiry-or-contact', urls: [shared] });
-      lockCandidateSet(log, { agency, category: 'enquiry-or-contact' });
-      approveCandidateSet(log, { agency, category: 'enquiry-or-contact', approved: true });
+      prepareSet(log, agency, 'enquiry-or-contact', [shared]);
     }
     appendAttempt(log, capturedAttempt('TPK'));
     assert.throws(

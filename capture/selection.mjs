@@ -27,8 +27,29 @@ export const CATEGORY_ORDER = Object.freeze([
 export const MAX_CANDIDATES_PER_CATEGORY = 5;
 export const MAX_CANDIDATES_PER_AGENCY = MAX_CANDIDATES_PER_CATEGORY * CATEGORY_ORDER.length; // 20
 
-/** Where a candidate URL came from. Discovery pages are logged, not treated as candidates. */
-export const DISCOVERY_KINDS = Object.freeze(['navigation', 'sitemap', 'internal-search']);
+/**
+ * How a discovery page was reached.
+ *
+ * `robots` is its own method. Earlier rounds recorded a robots.txt fetch as `sitemap`,
+ * which made the provenance say something untrue about how the page was found and made the
+ * published method counts wrong.
+ */
+export const DISCOVERY_METHODS = Object.freeze(['navigation', 'sitemap', 'internal-search', 'robots']);
+
+/** Kept as the old name so existing callers and records still resolve. */
+export const DISCOVERY_KINDS = DISCOVERY_METHODS;
+
+/**
+ * What the inspection established. A method that turned out not to exist, or to be
+ * forbidden, is a finding about the agency and has to be as visible as a method that
+ * produced candidates.
+ */
+export const DISCOVERY_OUTCOMES = Object.freeze([
+  'candidates-found',
+  'no-candidates',
+  'unavailable',
+  'disallowed',
+]);
 
 /**
  * Canonical form of a URL, for deduplication and for the alphabetical tie-break.

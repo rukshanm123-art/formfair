@@ -28,7 +28,8 @@ import {
   supersedeCandidateSet, publishProvenance,
 } from './run.mjs';
 import {
-  DISCOVERY_KINDS, remainingBudget, canonicalise, SEARCH_TERMS, parseDrawOrder, nextWork,
+  DISCOVERY_KINDS, DISCOVERY_METHODS, DISCOVERY_OUTCOMES, remainingBudget, canonicalise,
+  SEARCH_TERMS, parseDrawOrder, nextWork,
 } from './selection.mjs';
 import { readFileSync as readFile } from 'node:fs';
 
@@ -47,7 +48,9 @@ const USAGE = `usage:
   cli-capture.mjs exclude --out <dir> --agency <name> --website <url> --url <url>
                           --reason "<why it was not captured>" --category <c>
   cli-capture.mjs discovery --out <dir> --agency <name> --website <url> --url <url>
-                          --kind <${DISCOVERY_KINDS.join('|')}> --navigated-at <ISO8601Z>
+                          --method <${DISCOVERY_METHODS.join('|')}>
+                          --outcome <${DISCOVERY_OUTCOMES.join('|')}>
+                          --category <c> --set-version <n> --navigated-at <ISO8601Z>
                           [--note "<e.g. method unavailable and why>"]
   cli-capture.mjs candidates --out <dir> --agency <name> --category <c> --add <url>[,<url>...]
   cli-capture.mjs lock    --out <dir> --agency <name> --category <c>
@@ -266,13 +269,19 @@ function doBuild() {
 
 function doDiscovery() {
   const dir = require_('out');
-  const kind = require_('kind');
-  if (!DISCOVERY_KINDS.includes(kind)) die(`--kind must be one of ${DISCOVERY_KINDS.join(', ')}`);
+  const kind = flag('method') ?? require_('kind');
+  if (!DISCOVERY_METHODS.includes(kind)) die(`--method must be one of ${DISCOVERY_METHODS.join(', ')}`);
+  const outcome = require_('outcome');
+  if (!DISCOVERY_OUTCOMES.includes(outcome)) die(`--outcome must be one of ${DISCOVERY_OUTCOMES.join(', ')}`);
+  const category = require_('category');
+  const setVersion = Number(require_('set-version'));
+  if (!Number.isInteger(setVersion) || setVersion < 1) die('--set-version must be a positive integer');
   const logPath = logPathFor(dir);
   const log = readLog(logPath);
   appendAttempt(log, {
     examinedAt: now(), agency: require_('agency'), website: require_('website'),
     url: require_('url'), status: 'discovery', discoveryKind: kind,
+    outcome, category, candidateSetVersion: setVersion,
     // Discovery browsing happens outside the capture harness, so its navigation time is
     // recorded and checked against the previous one rather than paced by the pacer.
     navigatedAt: require_('navigated-at'),
@@ -281,7 +290,7 @@ function doDiscovery() {
   });
   writeLog(logPath, log);
   writeDerived({ log, dir, frameSha256: flag('frame-sha256'), drawOrderSha256: flag('draw-order-sha256'), synthetic: has('synthetic') });
-  console.log(`recorded discovery page (${kind})`);
+  console.log(`recorded discovery: ${kind} / ${outcome} (${category} v${setVersion})`);
 }
 
 function doApproveSet() {

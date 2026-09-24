@@ -115,7 +115,15 @@ const seal = (args) =>
  * merely available, so every capture in these tests goes through it, exactly as a real run
  * would.
  */
+let discoveryTick = 0;
 const lockSet = async (dir, agency, category, urls) => {
+  // A set must be supported by the discovery round that produced it.
+  const at = new Date(Date.UTC(2026, 8, 24, 0, discoveryTick++ * 2)).toISOString().replace(/\.\d{3}Z$/, 'Z');
+  const disc = await run(['discovery', '--out', dir, '--agency', agency, '--website', origin,
+    '--url', `${origin}/discovery/${category}/${discoveryTick}`, '--method', 'navigation',
+    '--outcome', 'candidates-found', '--category', category, '--set-version', '1',
+    '--navigated-at', at]);
+  assert.equal(disc.status, 0, disc.stderr);
   const add = await run(['candidates', '--out', dir, '--agency', agency, '--category', category, '--add', urls.join(',')]);
   assert.equal(add.status, 0, add.stderr);
   const locked = await run(['lock', '--out', dir, '--agency', agency, '--category', category]);

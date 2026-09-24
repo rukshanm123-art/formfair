@@ -22,6 +22,7 @@ import { POLICY } from './politeness.mjs';
 import {
   DISCOVERY_KINDS, remainingBudget, MAX_CANDIDATES_PER_CATEGORY, MAX_CANDIDATES_PER_AGENCY,
   canonicalise, setKey, MAX_QUALIFIED_AGENCIES, CATEGORY_ORDER, lockCandidates, isSuperseded,
+  DISCOVERY_METHODS, DISCOVERY_OUTCOMES,
 } from './selection.mjs';
 
 export const LOG_SCHEMA = 'formfair/capture-log@1';
@@ -82,8 +83,20 @@ function checkAttempt(attempt) {
     problems.push('status must be captured, excluded, failed or discovery');
   }
   if (attempt.status === 'discovery') {
-    if (!DISCOVERY_KINDS.includes(attempt.discoveryKind)) {
-      problems.push(`a discovery record needs discoveryKind from ${DISCOVERY_KINDS.join(', ')}`);
+    if (!DISCOVERY_METHODS.includes(attempt.discoveryKind)) {
+      problems.push(`a discovery record needs a method from ${DISCOVERY_METHODS.join(', ')}`);
+    }
+    if (!DISCOVERY_OUTCOMES.includes(attempt.outcome)) {
+      problems.push(`a discovery record needs an outcome from ${DISCOVERY_OUTCOMES.join(', ')}`);
+    }
+    // A discovery record that names neither the category it served nor the version of the
+    // set it supports cannot be attributed to a round, which is what made the second round
+    // indistinguishable from additions to the first.
+    if (!CATEGORIES.includes(attempt.category)) {
+      problems.push(`a discovery record needs the category it served, from ${CATEGORIES.join(', ')}`);
+    }
+    if (!Number.isInteger(attempt.candidateSetVersion) || attempt.candidateSetVersion < 1) {
+      problems.push('a discovery record needs candidateSetVersion, the set version it supports');
     }
     // Discovery browsing is not performed by the capture harness, so its pacing cannot be
     // enforced by the pacer. It is recorded instead, and checked against the previous
@@ -137,7 +150,21 @@ export function appendAttempt(log, attempt) {
   }
   // Per AGENCY, not globally: a third-party form linked by two agencies is genuine
   // evidence for both, and refusing to record it for the second would hide that.
-  const priorForUrl = log.attempts.filter((a) => a.agency === attempt.agency && a.url === attempt.url);
+  if (attempt.status === 'discovery') {
+    const sameRound = log.attempts.some(
+      (a) => a.status === 'discovery' && a.agency === attempt.agency && a.url === attempt.url &&
+        a.category === attempt.category && a.candidateSetVersion === attempt.candidateSetVersion
+    );
+    if (sameRound) {
+      throw new Error(
+        `${attempt.url} is already recorded for ${attempt.agency} / ${attempt.category} ` +
+          `round ${attempt.candidateSetVersion}`
+      );
+    }
+  }
+  const priorForUrl = log.attempts.filter(
+    (a) => a.status !== 'discovery' && a.agency === attempt.agency && a.url === attempt.url
+  );
   if (priorForUrl.length > 0) {
     // A rejected decision is corrected by recording a NEW attempt that supersedes it. The
     // original stays in the log: a correction that erases what it corrected is not a
@@ -217,7 +244,10 @@ export function appendAttempt(log, attempt) {
       );
     }
   }
-  log.attempts.push({ approval: APPROVAL.PENDING, ...attempt });
+  // Assigned AFTER the spread: a caller passing `id: undefined` must not wipe it, which is
+  // exactly what an object built from a template with optional fields does.
+  const id = attempt.id ?? `${attempt.status === 'discovery' ? 'd' : 'c'}-${String(log.attempts.length + 1).padStart(4, '0')}`;
+  log.attempts.push({ approval: APPROVAL.PENDING, ...attempt, id });
   return log;
 }
 
@@ -266,11 +296,28 @@ export function lockCandidateSet(log, { agency, category }) {
   const set = log.candidateSets[key];
   if (!set) throw new Error(`no candidates recorded for ${agency} / ${category}`);
   if (set.lockedAt) throw new Error(`already locked at ${set.lockedAt}`);
+  // Bind the set to the exact discovery records that support it. Without this the
+  // provenance shows that inspections happened and that a set exists, but not that the one
+  // produced the other - which is how a second round became indistinguishable from
+  // additions to the first.
+  const supporting = log.attempts.filter(
+    (a) => a.status === 'discovery' && a.agency === agency && a.category === category &&
+      a.candidateSetVersion === set.version
+  );
+  if (supporting.length === 0) {
+    throw new Error(
+      `no discovery records for ${agency} / ${category} round ${set.version}. A candidate ` +
+        'set must be supported by the round that produced it.'
+    );
+  }
+
   const { ordered, locked } = lockCandidates(set.discovered);
   set.ordered = ordered;
   set.locked = locked;
   set.lockedAt = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
   set.droppedBeyondBound = ordered.slice(locked.length);
+  set.discoveryRecordIds = supporting.map((a) => a.id);
+  set.discoveryMethods = [...new Set(supporting.map((a) => a.discoveryKind))].sort();
   return set;
 }
 
@@ -469,10 +516,23 @@ export function publishProvenance(log, { to }) {
       captured: candidates.filter((a) => a.status === 'captured').length,
       excluded: candidates.filter((a) => a.status === 'excluded').length,
       failed: candidates.filter((a) => a.status === 'failed').length,
-      pendingApproval: log.attempts.filter((a) => a.approval === APPROVAL.PENDING).length,
+      pendingApprovalAttempts: log.attempts.filter((a) => a.approval === APPROVAL.PENDING).length,
+      pendingApprovalCandidateSets: Object.values(log.candidateSets ?? {}).filter(
+        (set) => set.approval === APPROVAL.PENDING
+      ).length,
     },
     discoveryByMethod: discovery.reduce((acc, a) => {
       acc[a.discoveryKind] = (acc[a.discoveryKind] ?? 0) + 1;
+      return acc;
+    }, {}),
+    discoveryByOutcome: discovery.reduce((acc, a) => {
+      const key = a.outcome ?? 'unrecorded';
+      acc[key] = (acc[key] ?? 0) + 1;
+      return acc;
+    }, {}),
+    discoveryByRound: discovery.reduce((acc, a) => {
+      const key = `${a.agency ?? '?'} / ${a.category ?? 'unattributed'} v${a.candidateSetVersion ?? '?'}`;
+      acc[key] = (acc[key] ?? 0) + 1;
       return acc;
     }, {}),
     candidateSets: Object.values(log.candidateSets ?? {}).map((set) => ({
@@ -480,6 +540,8 @@ export function publishProvenance(log, { to }) {
       discovered: set.discovered.length, locked: set.locked.length,
       droppedBeyondBound: set.droppedBeyondBound?.length ?? 0,
       lockedAt: set.lockedAt, approval: set.approval, approvedAt: set.approvedAt ?? null,
+      supportedByDiscoveryRecords: set.discoveryRecordIds ?? [],
+      discoveryMethods: set.discoveryMethods ?? [],
     })),
     supersededCandidateSets: (log.supersededCandidateSets ?? []).map((set) => ({
       agency: set.agency, category: set.category, version: set.version,

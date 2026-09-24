@@ -497,3 +497,62 @@ asserts that nothing published contains any.
 that turns out not to exist. A method found unavailable is a finding about the agency, and
 the absence has to be as visible as the presence.
 
+## Amendment 5: discovery rounds are identifiable, and bound to what they produced
+
+**Dated 24 September 2026. Precondition: three discovery rounds have been performed for one
+agency and one category. Nothing has been assessed, captured or analysed, no FormFair
+output exists, and no held-out markup exists.** `solo-protocol-v1.0.0`, `capture-v1.0.0`,
+`capture-v1.0.1`, `selection-v1.0.0`, `selection-v1.0.1` and `selection-v1.0.2` are not
+moved.
+
+### What went wrong
+
+Amendment 4 rejected the first candidate set for incomplete discovery provenance and
+required a redo. The redo was not a separate round. It was the first round's records plus
+eight additions, because a discovery record carried no category, no set version and no
+stable identifier, so nothing distinguished round two from round one. A reader could see
+that inspections happened and that a set existed, but not that the one produced the other.
+
+Three further defects were found at the same time. A robots.txt fetch was filed under the
+`sitemap` method, so the published method counts described inspections that never happened.
+The fixes for the previous amendment were tagged before they had tests, so `capture-v1.0.1`
+and `selection-v1.0.2` point at a commit that does not contain the code that produced the
+second round. And the invalid corpus draft carrying null hashes was still sitting beside
+the real artefacts.
+
+### What changes
+
+**A discovery record identifies its round.** It carries the category it served, the
+candidate-set version it supports, a stable identifier, the method used and the outcome
+established. All five are required.
+
+**`robots` is a method of its own**, alongside navigation, sitemap and internal search.
+
+**An outcome is recorded**: `candidates-found`, `no-candidates`, `unavailable` or
+`disallowed`. A method that does not exist, or that robots.txt forbids, is a finding about
+the agency and has to be as visible as one that produced candidates.
+
+**A locked set is bound to the records that support it.** Locking without a discovery round
+for that agency, category and version is refused, and the set records the identifiers and
+methods that produced it.
+
+**A later round may re-inspect the same page.** Refusing that is what made an independent
+round impossible: a new round could only ever be additions to the first.
+
+**The published counts describe what happened** — by method, by outcome, by round — and
+pending candidate *sets* are counted, not only pending attempts. A pending set is what
+blocks the work, and it was not counted at all.
+
+**The invalid draft is quarantined**, not deleted, with the reason recorded beside it.
+
+### The record as it stands
+
+Rounds one and two are preserved as rejected, with their reasons. Their fifteen discovery
+records are retained unchanged and appear in the published provenance as unattributed, with
+no outcome — which is what they are. Rewriting them to look like a proper round would
+falsify the thing this protocol exists to protect.
+
+Round three is a complete run: fifteen inspections across the agency's four websites, each
+attributed to its category, version, method and outcome, and bound to the locked set. It is
+locked and pending approval. Nothing has been assessed or captured.
+

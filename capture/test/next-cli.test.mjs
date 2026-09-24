@@ -19,6 +19,7 @@ import {
   appendAttempt, ELIGIBILITY_CRITERIA, APPROVAL,
 } from '../run.mjs';
 import { parseDrawOrder } from '../selection.mjs';
+import { prepareSet } from './helpers.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const cli = join(here, '..', 'cli-capture.mjs');
@@ -63,8 +64,7 @@ describe('next reports every state without crashing', () => {
   test('a locked but unapproved set asks for approval - the branch that crashed', async () => {
     await withLog(
       (log) => {
-        recordCandidates(log, { agency, category: 'account-registration', urls: ['https://w.govt.nz/a'] });
-        lockCandidateSet(log, { agency, category: 'account-registration' });
+        prepareSet(log, agency, 'account-registration', ['https://w.govt.nz/a'], { approve: false });
       },
       async (dir) => {
         const r = await run(['next', '--out', dir]);
@@ -79,9 +79,7 @@ describe('next reports every state without crashing', () => {
   test('an approved set with unassessed candidates lists them', async () => {
     await withLog(
       (log) => {
-        recordCandidates(log, { agency, category: 'account-registration', urls: ['https://w.govt.nz/a'] });
-        lockCandidateSet(log, { agency, category: 'account-registration' });
-        approveCandidateSet(log, { agency, category: 'account-registration', approved: true });
+        prepareSet(log, agency, 'account-registration', ['https://w.govt.nz/a']);
       },
       async (dir) => {
         const r = await run(['next', '--out', dir]);
@@ -94,9 +92,7 @@ describe('next reports every state without crashing', () => {
   test('a pending outcome reports what is blocking', async () => {
     await withLog(
       (log) => {
-        recordCandidates(log, { agency, category: 'account-registration', urls: ['https://w.govt.nz/a'] });
-        lockCandidateSet(log, { agency, category: 'account-registration' });
-        approveCandidateSet(log, { agency, category: 'account-registration', approved: true });
+        prepareSet(log, agency, 'account-registration', ['https://w.govt.nz/a']);
         appendAttempt(log, {
           examinedAt: '2026-09-24T00:00:00Z', agency, website: 'https://w.govt.nz/',
           url: 'https://w.govt.nz/a', status: 'excluded', category: 'account-registration',

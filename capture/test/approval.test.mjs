@@ -17,6 +17,10 @@ import {
 } from '../run.mjs';
 import { parseDrawOrder, nextWork, MAX_QUALIFIED_AGENCIES, isSuperseded } from '../selection.mjs';
 import { POLICY } from '../politeness.mjs';
+import { prepareSet, addDiscovery } from './helpers.mjs';
+
+/** Candidates only. Discovery records share the attempts array and are not candidates. */
+const candidates = (log) => log.attempts.filter((a) => a.status !== 'discovery');
 
 const drawOrder = parseDrawOrder(
   readFileSync(new URL('../../evaluation/frame/draw-order.csv', import.meta.url), 'utf8')
@@ -25,10 +29,7 @@ const el = () => Object.fromEntries(ELIGIBILITY_CRITERIA.map((c) => [c, null]));
 
 /** Records, locks and (by default) approves a set, so a test can reach assessment. */
 function ready(log, agency, category, urls, { approve = true } = {}) {
-  recordCandidates(log, { agency, category, urls });
-  lockCandidateSet(log, { agency, category });
-  if (approve) approveCandidateSet(log, { agency, category, approved: true });
-  return log.candidateSets[`${agency}\u0000${category}`].locked;
+  return prepareSet(log, agency, category, urls, { approve });
 }
 
 const outcome = (agency, category, url, extra = {}) => ({
@@ -116,14 +117,14 @@ describe('work does not advance past an unresolved outcome', () => {
     const agency = drawOrder[0].agency;
     const [url] = ready(log, agency, 'account-registration', ['https://w.govt.nz/a']);
     appendAttempt(log, outcome(agency, 'account-registration', url));
-    log.attempts[0].approval = APPROVAL.REJECTED;
+    candidates(log)[0].approval = APPROVAL.REJECTED;
     assert.match(nextWork(log, drawOrder).reason, /pending or rejected/);
 
     appendAttempt(log, outcome(agency, 'account-registration', url, {
       supersedes: url, exclusionReason: 'corrected: the field is a display name, not a personal name',
     }));
-    log.attempts[1].approval = APPROVAL.APPROVED;
-    assert.equal(isSuperseded(log, log.attempts[0]), true);
+    candidates(log)[1].approval = APPROVAL.APPROVED;
+    assert.equal(isSuperseded(log, candidates(log)[0]), true);
     assert.doesNotMatch(nextWork(log, drawOrder).reason ?? '', /pending or rejected/);
   });
 
@@ -133,12 +134,12 @@ describe('work does not advance past an unresolved outcome', () => {
     const log = emptyLog();
     const [url] = ready(log, 'TPK', 'account-registration', ['https://w.govt.nz/a']);
     appendAttempt(log, outcome('TPK', 'account-registration', url, { exclusionReason: 'first call' }));
-    log.attempts[0].approval = APPROVAL.REJECTED;
+    candidates(log)[0].approval = APPROVAL.REJECTED;
     appendAttempt(log, outcome('TPK', 'account-registration', url, { supersedes: url, exclusionReason: 'second call' }));
-    assert.equal(log.attempts.length, 2);
-    assert.equal(log.attempts[0].exclusionReason, 'first call');
-    assert.equal(log.attempts[0].approval, APPROVAL.REJECTED);
-    assert.equal(log.attempts[1].supersedes, url);
+    assert.equal(candidates(log).length, 2);
+    assert.equal(candidates(log)[0].exclusionReason, 'first call');
+    assert.equal(candidates(log)[0].approval, APPROVAL.REJECTED);
+    assert.equal(candidates(log)[1].supersedes, url);
   });
 
   test('a correction is refused when nothing was rejected', () => {
@@ -155,7 +156,8 @@ describe('work does not advance past an unresolved outcome', () => {
 describe('discovery pacing is recorded and checked', () => {
   const discovery = (url, navigatedAt) => ({
     examinedAt: navigatedAt, agency: 'TPK', website: 'https://w.govt.nz/', url,
-    status: 'discovery', discoveryKind: 'internal-search', navigatedAt,
+    status: 'discovery', discoveryKind: 'internal-search', outcome: 'no-candidates',
+    category: 'account-registration', candidateSetVersion: 1, navigatedAt,
   });
 
   test('a discovery record without a navigation time is refused', () => {
