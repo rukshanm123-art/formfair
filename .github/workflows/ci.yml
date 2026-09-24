@@ -101,14 +101,14 @@ jobs:
 
     steps:
       - name: Check out the harness
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       # The instrument is a SEPARATE checkout at the frozen tag. Testing the harness
       # against this branch would validate it against an analyser the protocol does not
       # name: main's sources drift, and the frozen instrument includes exact message,
       # evidence and basis text, not only rule behaviour.
       - name: Check out the frozen instrument
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: evaluation-v1.0.0
           path: .instrument
