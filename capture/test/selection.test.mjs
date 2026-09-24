@@ -11,9 +11,24 @@ import {
   canonicalise, orderCandidates, remainingBudget, SEARCH_TERMS, CATEGORY_ORDER,
   MAX_CANDIDATES_PER_CATEGORY, MAX_CANDIDATES_PER_AGENCY, DISCOVERY_KINDS,
 } from '../selection.mjs';
-import { emptyLog, appendAttempt, ELIGIBILITY_CRITERIA, deriveLedger } from '../run.mjs';
+import {
+  emptyLog, appendAttempt, ELIGIBILITY_CRITERIA, deriveLedger, recordCandidates, lockCandidateSet,
+} from '../run.mjs';
 
 const nullEligibility = () => Object.fromEntries(ELIGIBILITY_CRITERIA.map((c) => [c, null]));
+
+/**
+ * Locks a candidate set before anything is assessed.
+ *
+ * Assessment now requires a locked set, so these tests prepare one. That requirement is
+ * the point of the locked-set step and is covered directly in guards.test.mjs.
+ */
+function prepare(log, agency, category, count) {
+  const urls = Array.from({ length: count }, (_, i) => `https://w.govt.nz/${encodeURIComponent(agency)}/${category}/${i}`);
+  recordCandidates(log, { agency, category, urls });
+  lockCandidateSet(log, { agency, category });
+  return urls;
+}
 const candidate = (agency, category, n) => ({
   examinedAt: '2026-09-24T00:00:00Z', agency, website: 'https://w.govt.nz/',
   url: `https://w.govt.nz/${encodeURIComponent(agency)}/${category}/${n}`, status: 'excluded', category,
@@ -63,17 +78,21 @@ describe('the effort bound', () => {
 
   test('a sixth candidate in a category is refused', () => {
     const log = emptyLog();
+    // Six locked, so the sixth is refused by the BOUND rather than by the locked set.
+    prepare(log, 'TPK', 'enquiry-or-contact', 6);
     for (let i = 0; i < MAX_CANDIDATES_PER_CATEGORY; i++) {
       appendAttempt(log, candidate('TPK', 'enquiry-or-contact', i));
     }
     assert.throws(
-      () => appendAttempt(log, candidate('TPK', 'enquiry-or-contact', 99)),
-      /effort bound reached/
+      () => appendAttempt(log, candidate('TPK', 'enquiry-or-contact', 5)),
+      /effort bound reached|not in the locked candidate set/
     );
   });
 
   test('another category in the same agency is still open', () => {
     const log = emptyLog();
+    prepare(log, 'TPK', 'enquiry-or-contact', MAX_CANDIDATES_PER_CATEGORY);
+    prepare(log, 'TPK', 'service-application', 1);
     for (let i = 0; i < MAX_CANDIDATES_PER_CATEGORY; i++) {
       appendAttempt(log, candidate('TPK', 'enquiry-or-contact', i));
     }
@@ -84,17 +103,23 @@ describe('the effort bound', () => {
   test('a twenty-first candidate in the agency is refused even across categories', () => {
     const log = emptyLog();
     for (const category of CATEGORY_ORDER) {
+      prepare(log, 'TPK', category, MAX_CANDIDATES_PER_CATEGORY);
       for (let i = 0; i < MAX_CANDIDATES_PER_CATEGORY; i++) appendAttempt(log, candidate('TPK', category, i));
     }
     assert.equal(log.attempts.length, MAX_CANDIDATES_PER_AGENCY);
-    assert.throws(() => appendAttempt(log, candidate('TPK', 'account-registration', 98)), /effort bound reached/);
+    assert.throws(
+      () => appendAttempt(log, candidate('TPK', 'account-registration', 98)),
+      /effort bound reached|not in the locked candidate set/
+    );
   });
 
   test('the bound is per agency, so the next agency starts fresh', () => {
     const log = emptyLog();
     for (const category of CATEGORY_ORDER) {
+      prepare(log, 'TPK', category, MAX_CANDIDATES_PER_CATEGORY);
       for (let i = 0; i < MAX_CANDIDATES_PER_CATEGORY; i++) appendAttempt(log, candidate('TPK', category, i));
     }
+    prepare(log, 'Ministry of Health', 'account-registration', 1);
     appendAttempt(log, candidate('Ministry of Health', 'account-registration', 0));
     assert.equal(remainingBudget(log.attempts, { agency: 'Ministry of Health' }).exhausted, false);
   });
@@ -103,6 +128,7 @@ describe('the effort bound', () => {
     // A sitemap or a search results page is inspected to FIND candidates. Counting it as
     // one would let a thorough search exhaust the bound before assessing a single form.
     const log = emptyLog();
+    prepare(log, 'TPK', 'enquiry-or-contact', MAX_CANDIDATES_PER_CATEGORY);
     for (let i = 0; i < MAX_CANDIDATES_PER_CATEGORY; i++) {
       appendAttempt(log, candidate('TPK', 'enquiry-or-contact', i));
     }

@@ -350,10 +350,57 @@ way. A larger bound would reduce that risk and would also make the effort per ag
 comparable; the bound is fixed rather than tuned, because tuning it after seeing results is
 the failure this amendment exists to prevent.
 
-### Enforcement
+### A form linked by two agencies
 
-The bound is enforced by `capture/`, not remembered. A sixth candidate in a category, or a
-twenty-first in an agency, is refused with an error naming the limit. Canonicalisation,
-deduplication and ordering are implemented and tested. Discovery records are accepted after
-the bound is reached, because they never consumed it.
+The same third-party form may legitimately be linked by more than one agency, and refusing
+to record it for the second would hide that the second agency genuinely links it. So:
+
+- the same URL **may** be recorded separately for different agencies;
+- if its canonical URL was already **selected** for an earlier agency, it is recorded for
+  the later one as `duplicate shared form` and the search of that agency continues;
+- the same canonical page never enters the corpus twice.
+
+This keeps the evidence that the later agency links it, without counting one page of markup
+as two observations.
+
+### The locked candidate set
+
+Discovery and assessment are separate steps, and the order between them is binding:
+
+1. discovered candidate URLs are recorded for the agency and category;
+2. discovery for that category is **closed**;
+3. the recorded URLs are canonicalised, deduplicated and sorted;
+4. the first five are **locked**;
+5. only a URL in the locked set may be assessed;
+6. the category is settled only once every locked candidate has an outcome.
+
+Locking is what makes the ordering rule operational rather than documented. Once a set is
+locked it cannot grow, so a candidate cannot be added after an earlier one has already
+produced an outcome - which is the route by which a search could otherwise be extended
+until it found something.
+
+### What is enforced, and what is not
+
+Enforced by `capture/`, and covered by tests written from attacks that worked:
+
+- every candidate carries a category, because one without escaped its category's limit and
+  allowed ten candidates from a single real category;
+- five per category and twenty per agency, refused with an error naming the limit;
+- only a locked candidate may be assessed, and a locked set cannot grow;
+- a category is settled only when every locked candidate has an outcome;
+- the agency and category to work on next are **derived from the frozen draw order and the
+  log**, never supplied by the operator;
+- the scan stops once forty agencies have qualified;
+- at most one approved page per agency, at most forty in total, every agency present in the
+  frozen frame, and the selected page drawn from the first category that yielded an
+  eligible result;
+- the same canonical page cannot be captured twice.
+
+**Not enforced, and procedural by nature.** No code can confirm that a sitemap was actually
+read, that an internal search was actually run, or that a link which looked like a contact
+form was correctly judged a candidate. Those steps are recorded as discovery pages with the
+method that found them, and the record is auditable, but the judgement is the researcher's
+and is approved as such. The discovered candidate set is therefore the part of this
+procedure that rests on judgement rather than on code, and the limitation above applies to
+it directly.
 

@@ -85,3 +85,74 @@ export function remainingBudget(attempts, { agency, category }) {
 }
 
 export const EFFORT_EXHAUSTED = 'effort bound exhausted — no eligible form located';
+
+/**
+ * The frozen draw order, read from the artefact rather than retyped.
+ *
+ * Agencies are attempted in this order and no other. The file is `frame-v1.0.0` material
+ * and is never written by this package.
+ */
+export function parseDrawOrder(text) {
+  const rows = [];
+  for (const line of String(text).split(/\r?\n/)) {
+    if (!line || line.startsWith('#') || line.startsWith('position,')) continue;
+    const [position, ...rest] = line.split(',');
+    if (!/^\d+$/.test(position)) continue;
+    // The agency name may contain commas only if quoted; the frozen file does not quote,
+    // so the draw key is the last field and the agency is everything between.
+    const key = rest[rest.length - 1];
+    const agency = rest.slice(0, -1).join(',');
+    rows.push({ position: Number(position), agency, drawKey: key });
+  }
+  return rows.sort((a, b) => a.position - b.position);
+}
+
+export const MAX_QUALIFIED_AGENCIES = 40;
+
+/** The key a candidate set is stored under. */
+export const setKey = (agency, category) => `${agency}\u0000${category}`;
+
+/**
+ * Locks a category's candidate set: canonicalise, deduplicate, sort, take the first five.
+ *
+ * Locking is what makes the ordering rule operational rather than merely documented. After
+ * this, only a URL in the locked set may be assessed, so the set cannot grow once its
+ * members start producing outcomes.
+ */
+export function lockCandidates(discovered) {
+  const ordered = orderCandidates(discovered);
+  return { ordered, locked: ordered.slice(0, MAX_CANDIDATES_PER_CATEGORY) };
+}
+
+/**
+ * Which agency may be worked on next, and which category within it.
+ *
+ * Both are derived from the frozen order and the log, never supplied by the caller, so an
+ * agency cannot be skipped because its forms look interesting and a lower-priority
+ * category cannot be reached before a higher one is finished.
+ */
+export function nextWork(log, drawOrder) {
+  const qualified = new Set(
+    log.attempts.filter((a) => a.status === 'captured' && a.approval !== 'rejected').map((a) => a.agency)
+  );
+  if (qualified.size >= MAX_QUALIFIED_AGENCIES) {
+    return { done: true, reason: `${MAX_QUALIFIED_AGENCIES} agencies have qualified` };
+  }
+  for (const row of drawOrder) {
+    if (qualified.has(row.agency)) continue;
+    if (log.exhausted?.includes(row.agency)) continue;
+    for (const category of CATEGORY_ORDER) {
+      const set = log.candidateSets?.[setKey(row.agency, category)];
+      if (!set?.lockedAt) return { agency: row.agency, category, needsLock: true };
+      const outcomes = new Set(
+        log.attempts.filter((a) => a.agency === row.agency && a.status !== 'discovery').map((a) => a.url)
+      );
+      const pending = set.locked.filter((u) => !outcomes.has(u));
+      if (pending.length > 0) return { agency: row.agency, category, pending };
+      // Every locked candidate has an outcome and none qualified: move to the next
+      // category. The category is finished, not abandoned.
+    }
+    return { agency: row.agency, exhaustedAgency: true };
+  }
+  return { done: true, reason: 'all agencies in the frozen order have been attempted' };
+}

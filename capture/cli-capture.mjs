@@ -24,8 +24,12 @@ import { capturePage, validateUrl, validatePageId, CATEGORIES } from './capture.
 import { POLICY, parseRobots, isAllowed, createPacer } from './politeness.mjs';
 import {
   readLog, writeLog, appendAttempt, writeDerived, ELIGIBILITY_CRITERIA, APPROVAL,
+  recordCandidates, lockCandidateSet, categorySettled,
 } from './run.mjs';
-import { DISCOVERY_KINDS, remainingBudget, canonicalise, SEARCH_TERMS } from './selection.mjs';
+import {
+  DISCOVERY_KINDS, remainingBudget, canonicalise, SEARCH_TERMS, parseDrawOrder, nextWork,
+} from './selection.mjs';
+import { readFileSync as readFile } from 'node:fs';
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -40,9 +44,12 @@ const USAGE = `usage:
                           --page-id <id> --category <${CATEGORIES.join('|')}>
                           --evidence "<why this page qualifies>" [--settle-ms <n>]
   cli-capture.mjs exclude --out <dir> --agency <name> --website <url> --url <url>
-                          --reason "<why it was not captured>" [--category <c>]
+                          --reason "<why it was not captured>" --category <c>
   cli-capture.mjs discovery --out <dir> --agency <name> --website <url> --url <url>
                           --kind <${DISCOVERY_KINDS.join('|')}>
+  cli-capture.mjs candidates --out <dir> --agency <name> --category <c> --add <url>[,<url>...]
+  cli-capture.mjs lock    --out <dir> --agency <name> --category <c>
+  cli-capture.mjs next    --out <dir>
   cli-capture.mjs budget  --out <dir> --agency <name> [--category <c>]
   cli-capture.mjs approve --out <dir> --url <url> [--reject --reason "<why>"]
   cli-capture.mjs status  --out <dir>
@@ -104,7 +111,7 @@ async function doCapture() {
   const verdict = isAllowed(groups, parsed.pathname + parsed.search, 'chromium');
   if (!verdict.allowed) {
     const attempt = {
-      ...base, status: 'excluded',
+      ...base, status: 'excluded', category,
       exclusionReason: `robots.txt disallows this path (${verdict.reason})`,
       eligibility: Object.fromEntries(ELIGIBILITY_CRITERIA.map((c) => [c, null])),
       politeness: { robots: verdict.reason },
@@ -139,7 +146,7 @@ async function doCapture() {
 
   if (!record) {
     appendAttempt(log, {
-      ...base, status: 'failed',
+      ...base, status: 'failed', category,
       exclusionReason: `capture failed: ${lastError?.message ?? 'unknown error'}`,
       eligibility: Object.fromEntries(ELIGIBILITY_CRITERIA.map((c) => [c, null])),
     });
@@ -156,7 +163,7 @@ async function doCapture() {
   // first criterion, and nothing here attempts to get past one.
   if (record.blocking.length > 0) {
     appendAttempt(log, {
-      ...base, status: 'excluded', finalUrl: record.finalUrl,
+      ...base, status: 'excluded', category, finalUrl: record.finalUrl,
       exclusionReason: `not publicly reachable: ${record.blocking.join(', ')}`,
       eligibility: { ...Object.fromEntries(ELIGIBILITY_CRITERIA.map((c) => [c, null])),
         publiclyReachableWithoutSigningIn: false },
@@ -278,7 +285,53 @@ function doBudget() {
   if (category && SEARCH_TERMS[category]) console.log(`  terms: ${SEARCH_TERMS[category].join(', ')}`);
 }
 
-const commands = { capture: doCapture, exclude: doExclude, discovery: doDiscovery, budget: doBudget, approve: doApprove, status: doStatus, build: doBuild };
+function drawOrder() {
+  const path = new URL('../evaluation/frame/draw-order.csv', import.meta.url);
+  return parseDrawOrder(readFile(path, 'utf8'));
+}
+
+function doCandidates() {
+  const dir = require_('out');
+  const logPath = logPathFor(dir);
+  const log = readLog(logPath);
+  const urls = require_('add').split(',').map((u) => u.trim()).filter(Boolean);
+  const set = recordCandidates(log, { agency: require_('agency'), category: require_('category'), urls });
+  writeLog(logPath, log);
+  console.log(`${set.discovered.length} candidate URL(s) recorded; the set is still open`);
+}
+
+function doLock() {
+  const dir = require_('out');
+  const logPath = logPathFor(dir);
+  const log = readLog(logPath);
+  const set = lockCandidateSet(log, { agency: require_('agency'), category: require_('category') });
+  writeLog(logPath, log);
+  console.log(`locked ${set.locked.length} of ${set.ordered.length} canonical candidates at ${set.lockedAt}`);
+  set.locked.forEach((u, i) => console.log(`  ${i + 1}. ${u}`));
+  if (set.droppedBeyondBound.length) {
+    console.log(`  beyond the bound, not assessed: ${set.droppedBeyondBound.length}`);
+  }
+}
+
+function doNext() {
+  const log = readLog(logPathFor(require_('out')));
+  const work = nextWork(log, drawOrder());
+  if (work.done) return console.log(`nothing further: ${work.reason}`);
+  if (work.exhaustedAgency) {
+    return console.log(`${work.agency}: every category is settled with no eligible form. Record it as exhausted.`);
+  }
+  console.log(`agency:   ${work.agency}`);
+  console.log(`category: ${work.category}`);
+  if (work.needsLock) {
+    console.log('next:     record discovered candidates, then lock the set');
+    console.log(`terms:    ${(SEARCH_TERMS[work.category] ?? []).join(', ')}`);
+  } else {
+    console.log(`next:     assess ${work.pending.length} locked candidate(s) still without an outcome`);
+    work.pending.forEach((u) => console.log(`  - ${u}`));
+  }
+}
+
+const commands = { candidates: doCandidates, lock: doLock, next: doNext, capture: doCapture, exclude: doExclude, discovery: doDiscovery, budget: doBudget, approve: doApprove, status: doStatus, build: doBuild };
 if (!commands[command]) die(USAGE);
 try {
   await commands[command]();

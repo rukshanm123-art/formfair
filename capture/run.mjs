@@ -19,7 +19,10 @@ import { existsSync, readFileSync, writeFileSync, renameSync, unlinkSync, mkdirS
 import { dirname, join, resolve } from 'node:path';
 import { LEDGER_HEADER, recordExamination, CATEGORIES } from './capture.mjs';
 import { POLICY } from './politeness.mjs';
-import { DISCOVERY_KINDS, remainingBudget, MAX_CANDIDATES_PER_CATEGORY, MAX_CANDIDATES_PER_AGENCY } from './selection.mjs';
+import {
+  DISCOVERY_KINDS, remainingBudget, MAX_CANDIDATES_PER_CATEGORY, MAX_CANDIDATES_PER_AGENCY,
+  canonicalise, setKey, MAX_QUALIFIED_AGENCIES, CATEGORY_ORDER, lockCandidates,
+} from './selection.mjs';
 
 export const LOG_SCHEMA = 'formfair/capture-log@1';
 
@@ -37,7 +40,7 @@ export const APPROVAL = Object.freeze({ PENDING: 'pending', APPROVED: 'approved'
 const sha256 = (v) => createHash('sha256').update(v).digest('hex');
 
 export function emptyLog() {
-  return { schema: LOG_SCHEMA, politeness: { ...POLICY }, attempts: [] };
+  return { schema: LOG_SCHEMA, politeness: { ...POLICY }, attempts: [], candidateSets: {}, exhausted: [] };
 }
 
 export function readLog(path) {
@@ -74,13 +77,18 @@ function checkAttempt(attempt) {
       }
     }
   }
+  // A candidate with no category would not be counted against any category's limit, which
+  // let five more account-registration candidates through after the limit was reached.
+  if (attempt.status !== 'discovery' && !CATEGORIES.includes(attempt.category)) {
+    problems.push(
+      `every candidate needs a category from ${CATEGORIES.join(', ')}; omitting it would ` +
+        'escape the per-category limit'
+    );
+  }
   if (attempt.status === 'captured') {
     if (!attempt.pageId) problems.push('a captured attempt needs a pageId');
     if (!attempt.file) problems.push('a captured attempt needs a file');
     if (!attempt.htmlSha256) problems.push('a captured attempt needs htmlSha256');
-    if (!attempt.category || !CATEGORIES.includes(attempt.category)) {
-      problems.push(`a captured attempt needs a category from ${CATEGORIES.join(', ')}`);
-    }
     // An inclusion must say WHY it qualified, not merely fail to say why it did not.
     if (!attempt.inclusionEvidence) problems.push('a captured attempt needs inclusionEvidence');
     if (ELIGIBILITY_CRITERIA.some((c) => attempt.eligibility[c] !== true)) {
@@ -104,9 +112,43 @@ export function appendAttempt(log, attempt) {
   if (attempt.pageId && log.attempts.some((a) => a.pageId === attempt.pageId)) {
     throw new Error(`pageId ${attempt.pageId} is already recorded`);
   }
-  if (log.attempts.some((a) => a.url === attempt.url)) {
-    throw new Error(`url ${attempt.url} is already recorded`);
+  // Per AGENCY, not globally: a third-party form linked by two agencies is genuine
+  // evidence for both, and refusing to record it for the second would hide that.
+  if (log.attempts.some((a) => a.agency === attempt.agency && a.url === attempt.url)) {
+    throw new Error(`url ${attempt.url} is already recorded for ${attempt.agency}`);
   }
+  if (attempt.status === 'captured') {
+    const canonical = canonicalise(attempt.finalUrl ?? attempt.url);
+    const already = log.attempts.find(
+      (a) => a.status === 'captured' && canonicalise(a.finalUrl ?? a.url) === canonical
+    );
+    if (already) {
+      throw new Error(
+        `${canonical} was already captured for ${already.agency}. Record it for ` +
+          `${attempt.agency} as excluded with reason "duplicate shared form" and continue ` +
+          'searching; the same canonical page must not enter the corpus twice.'
+      );
+    }
+  }
+  // Only a URL from the locked candidate set may be assessed. Locking happens after
+  // canonicalisation, deduplication and sorting, so the set cannot grow once its members
+  // start producing outcomes - which is what makes the ordering rule operational.
+  if (attempt.status !== 'discovery') {
+    const set = log.candidateSets?.[setKey(attempt.agency, attempt.category)];
+    if (!set?.lockedAt) {
+      throw new Error(
+        `no locked candidate set for ${attempt.agency} / ${attempt.category}. ` +
+          'Record the discovered URLs and lock the set before assessing any of them.'
+      );
+    }
+    if (!set.locked.includes(canonicalise(attempt.url))) {
+      throw new Error(
+        `${attempt.url} is not in the locked candidate set for ${attempt.agency} / ` +
+          `${attempt.category}. The set was locked at ${set.lockedAt}.`
+      );
+    }
+  }
+
   // The effort bound, enforced rather than remembered. Discovery pages do not consume it:
   // a sitemap or a search results page is inspected to FIND candidates, it is not one.
   if (attempt.status !== 'discovery') {
@@ -121,6 +163,56 @@ export function appendAttempt(log, attempt) {
   }
   log.attempts.push({ approval: APPROVAL.PENDING, ...attempt });
   return log;
+}
+
+/**
+ * Records discovered candidate URLs for one agency and category.
+ *
+ * Discovery and assessment are deliberately separate steps. While a set is open it may
+ * grow; once locked it cannot, and only then may its members be assessed. That ordering is
+ * what stops a candidate being added after an earlier one has already produced an outcome.
+ */
+export function recordCandidates(log, { agency, category, urls }) {
+  if (!CATEGORY_ORDER.includes(category)) throw new Error(`unknown category ${category}`);
+  const key = setKey(agency, category);
+  const set = (log.candidateSets[key] ??= { agency, category, discovered: [], locked: [], lockedAt: null });
+  if (set.lockedAt) {
+    throw new Error(
+      `the candidate set for ${agency} / ${category} was locked at ${set.lockedAt} and cannot grow`
+    );
+  }
+  for (const url of urls) if (!set.discovered.includes(url)) set.discovered.push(url);
+  return set;
+}
+
+/**
+ * Closes discovery for a category: canonicalise, deduplicate, sort, keep the first five.
+ *
+ * The alphabetical order is the tie-break the protocol specifies, and locking is what makes
+ * it binding rather than advisory.
+ */
+export function lockCandidateSet(log, { agency, category }) {
+  const key = setKey(agency, category);
+  const set = log.candidateSets[key];
+  if (!set) throw new Error(`no candidates recorded for ${agency} / ${category}`);
+  if (set.lockedAt) throw new Error(`already locked at ${set.lockedAt}`);
+  const { ordered, locked } = lockCandidates(set.discovered);
+  set.ordered = ordered;
+  set.locked = locked;
+  set.lockedAt = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
+  set.droppedBeyondBound = ordered.slice(locked.length);
+  return set;
+}
+
+/** Every locked candidate must have an outcome before the category can be settled. */
+export function categorySettled(log, { agency, category }) {
+  const set = log.candidateSets[setKey(agency, category)];
+  if (!set?.lockedAt) return { settled: false, reason: 'not locked' };
+  const decided = new Set(
+    log.attempts.filter((a) => a.agency === agency && a.status !== 'discovery').map((a) => a.url)
+  );
+  const pending = set.locked.filter((u) => !decided.has(u));
+  return { settled: pending.length === 0, pending };
 }
 
 /** The selection ledger, derived. Every URL examined appears, captured or not. */
@@ -150,15 +242,53 @@ export function deriveLedger(log) {
 }
 
 /** The corpus draft, derived. Only approved captures; provenance only, never findings. */
-export function deriveDraft(log, { frameSha256, drawOrderSha256, selectionLedgerFile = 'selection-ledger.csv', synthetic = false }) {
+export function deriveDraft(log, { frameSha256, drawOrderSha256, selectionLedgerFile = 'selection-ledger.csv', synthetic = false, frameAgencies = null }) {
   const pending = log.attempts.filter((a) => a.approval === APPROVAL.PENDING);
   if (pending.length) {
     throw new Error(
       `${pending.length} attempt(s) still pending researcher approval; the corpus cannot be built until every inclusion and exclusion is approved`
     );
   }
-  const pages = log.attempts
-    .filter((a) => a.status === 'captured' && a.approval === APPROVAL.APPROVED)
+  const approved = log.attempts.filter((a) => a.status === 'captured' && a.approval === APPROVAL.APPROVED);
+
+  // One page per agency. The protocol takes at most one form page from each, and nothing
+  // downstream would notice two.
+  const perAgency = new Map();
+  for (const a of approved) perAgency.set(a.agency, (perAgency.get(a.agency) ?? 0) + 1);
+  const doubled = [...perAgency].filter(([, n]) => n > 1);
+  if (doubled.length) {
+    throw new Error(
+      `more than one approved page for: ${doubled.map(([ag, n]) => `${ag} (${n})`).join(', ')}. ` +
+        'The protocol takes at most one form page per agency.'
+    );
+  }
+  if (approved.length > MAX_QUALIFIED_AGENCIES) {
+    throw new Error(`${approved.length} approved pages exceeds the target of ${MAX_QUALIFIED_AGENCIES}`);
+  }
+  if (frameAgencies) {
+    const outside = approved.map((a) => a.agency).filter((ag) => !frameAgencies.includes(ag));
+    if (outside.length) {
+      throw new Error(`agencies outside the frozen frame: ${[...new Set(outside)].join(', ')}`);
+    }
+  }
+  // The selected page must come from the FIRST category that yielded an eligible result,
+  // otherwise the priority order was not actually followed.
+  for (const a of approved) {
+    const earlier = CATEGORY_ORDER.slice(0, CATEGORY_ORDER.indexOf(a.category));
+    for (const category of earlier) {
+      const eligible = log.attempts.find(
+        (o) => o.agency === a.agency && o.category === category && o.status === 'captured'
+      );
+      if (eligible) {
+        throw new Error(
+          `${a.agency}: selected a ${a.category} form while ${category} also yielded one. ` +
+            'The first category with an eligible result must be used.'
+        );
+      }
+    }
+  }
+
+  const pages = approved
     .map((a) => ({
       pageId: a.pageId,
       agency: a.agency,

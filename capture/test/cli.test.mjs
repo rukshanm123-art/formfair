@@ -108,6 +108,21 @@ const seal = (args) =>
     child.on('exit', (status) => resolve({ status, stdout, stderr }));
   });
 
+/**
+ * Records and locks a candidate set, which assessment now requires.
+ *
+ * The locked-set step is what makes canonicalisation and ordering binding rather than
+ * merely available, so every capture in these tests goes through it, exactly as a real run
+ * would.
+ */
+const lockSet = async (dir, agency, category, urls) => {
+  const add = await run(['candidates', '--out', dir, '--agency', agency, '--category', category, '--add', urls.join(',')]);
+  assert.equal(add.status, 0, add.stderr);
+  const locked = await run(['lock', '--out', dir, '--agency', agency, '--category', category]);
+  assert.equal(locked.status, 0, locked.stderr);
+  return locked;
+};
+
 const inTemp = async (fn) => {
   const dir = mkdtempSync(join(tmpdir(), 'formfair-cli-'));
   try {
@@ -120,6 +135,7 @@ const inTemp = async (fn) => {
 describe('capture CLI', () => {
   test('capture, approve, build and seal, end to end', async () => {
     await inTemp(async (dir) => {
+      await lockSet(dir, 'Synthetic Agency', 'enquiry-or-contact', [`${origin}/contact`]);
       const cap = await run(['capture', '--out', dir, '--agency', 'Synthetic Agency',
         '--website', origin, '--url', `${origin}/contact`, '--page-id', 'synthetic-001',
         '--category', 'enquiry-or-contact', '--evidence', 'declares a First name field',
@@ -170,6 +186,7 @@ describe('capture CLI', () => {
     // records every submit, input and keydown it sees into an attribute, so the captured
     // markup itself is the evidence that none occurred.
     inTemp(async (dir) => {
+      await lockSet(dir, 'A', 'enquiry-or-contact', [`${origin}/events`]);
       const cap = await run(['capture', '--out', dir, '--agency', 'A', '--website', origin,
         '--url', `${origin}/events`, '--page-id', 'events-001', '--category', 'enquiry-or-contact',
         '--evidence', 'has a name field', '--synthetic']);
@@ -183,6 +200,7 @@ describe('capture CLI', () => {
 
   test('robots.txt is honoured, and the refusal is recorded not silent', async () => {
     await inTemp(async (dir) => {
+      await lockSet(dir, 'A', 'enquiry-or-contact', [`${origin}/private/form`]);
       const cap = await run(['capture', '--out', dir, '--agency', 'A', '--website', origin,
         '--url', `${origin}/private/form`, '--page-id', 'private-001',
         '--category', 'enquiry-or-contact', '--evidence', 'would qualify', '--synthetic']);
@@ -195,6 +213,7 @@ describe('capture CLI', () => {
 
   test('a sign-in wall is excluded, never bypassed', async () => {
     await inTemp(async (dir) => {
+      await lockSet(dir, 'A', 'account-registration', [`${origin}/locked`]);
       const cap = await run(['capture', '--out', dir, '--agency', 'A', '--website', origin,
         '--url', `${origin}/locked`, '--page-id', 'locked-001',
         '--category', 'account-registration', '--evidence', 'looked like a registration form', '--synthetic']);
@@ -226,14 +245,15 @@ describe('capture CLI', () => {
     });
   });
 
-  test('the same URL cannot be recorded twice', async () => {
+  test('the same URL cannot be recorded twice for one agency', async () => {
     await inTemp(async (dir) => {
+      await lockSet(dir, 'A', 'enquiry-or-contact', [`${origin}/dup`]);
       const args = ['capture', '--out', dir, '--agency', 'A', '--website', origin,
         '--url', `${origin}/dup`, '--page-id', 'dup-001', '--category', 'enquiry-or-contact',
         '--evidence', 'e', '--synthetic'];
       assert.equal((await run(args)).status, 0);
       const again = await run([...args.slice(0, -1), '--page-id', 'dup-002', '--synthetic']);
-      assert.notEqual(again.status, 0, 'a second attempt at the same URL must be refused');
+      assert.notEqual(again.status, 0, 'a second attempt at the same URL for one agency must be refused');
     });
   });
 });
