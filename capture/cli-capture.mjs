@@ -46,6 +46,7 @@ const USAGE = `usage:
   cli-capture.mjs capture --out <dir> --agency <name> --website <url> --url <url>
                           --page-id <id> --category <${CATEGORIES.join('|')}>
                           --evidence "<why this page qualifies>" [--settle-ms <n>]
+                          [--supersedes-attempt-id <c-NNNN>]
   cli-capture.mjs exclude --out <dir> --agency <name> --website <url> --url <url>
                           --reason "<why it was not captured>" --category <c>
   cli-capture.mjs discovery --out <dir> --agency <name> --website <url> --url <url>
@@ -63,7 +64,9 @@ const USAGE = `usage:
   cli-capture.mjs packet  --out <dir> --agency <name> --category <c>
   cli-capture.mjs next    --out <dir>
   cli-capture.mjs budget  --out <dir> --agency <name> [--category <c>]
-  cli-capture.mjs approve --out <dir> --url <url> [--reject --reason "<why>"]
+  cli-capture.mjs approve --out <dir> (--id <c-NNNN> | --url <url>)
+                          [--reject --reason "<why>"]
+                          (--url is refused once a URL has more than one attempt)
   cli-capture.mjs status  --out <dir>
   cli-capture.mjs build   --out <dir> --frame-sha256 <hex> --draw-order-sha256 <hex>
 
@@ -116,7 +119,15 @@ async function doCapture() {
   const capturesDir = join(resolve(dir), 'captures');
   mkdirSync(capturesDir, { recursive: true });
 
-  const base = { examinedAt: now(), agency, website, url };
+  // `supersedesAttemptId` rides on `base` so that every exit below - robots exclusion,
+  // failure, blocking exclusion, capture - carries the correction it is making. A rerun
+  // that superseded a rejected decision only when it happened to succeed would leave the
+  // rejected one unresolved exactly when the rerun also failed.
+  const supersedesAttemptId = flag('supersedes-attempt-id');
+  const base = {
+    examinedAt: now(), agency, website, url,
+    ...(supersedesAttemptId ? { supersedesAttemptId } : {}),
+  };
 
   // robots.txt decides before anything is fetched from the site itself.
   const groups = await robotsFor(parsed.origin);
@@ -228,11 +239,31 @@ function doExclude() {
 
 function doApprove() {
   const dir = require_('out');
-  const url = require_('url');
+  const id = flag('id');
+  const url = id ? flag('url') : require_('url');
   const logPath = logPathFor(dir);
   const log = readLog(logPath);
-  const attempt = log.attempts.find((a) => a.url === url);
-  if (!attempt) die(`no recorded attempt for ${url}`);
+
+  let attempt;
+  if (id) {
+    attempt = log.attempts.find((a) => a.id === id);
+    if (!attempt) die(`no recorded attempt with id ${id}`);
+    if (url && attempt.url !== url) die(`attempt ${id} is ${attempt.url}, not ${url}`);
+  } else {
+    // capture-v1.0.3. Approving by URL identifies a decision only while a URL has one
+    // attempt. Once a page has been attempted, rejected and re-attempted, `--url` would
+    // silently approve whichever came first - which is the rejected one. Refuse, and make
+    // the researcher name the attempt.
+    const matches = log.attempts.filter((a) => a.url === url && a.status !== 'discovery');
+    if (matches.length === 0) die(`no recorded attempt for ${url}`);
+    if (matches.length > 1) {
+      die(
+        `${matches.length} attempts recorded for ${url}; approve by id instead:\n` +
+          matches.map((a) => `  --id ${a.id}   ${a.status}, ${a.approval}, ${a.examinedAt}`).join('\n')
+      );
+    }
+    attempt = matches[0];
+  }
   if (has('reject')) {
     attempt.approval = APPROVAL.REJECTED;
     attempt.approvalNote = require_('reason');
@@ -243,7 +274,7 @@ function doApprove() {
   attempt.approvedAt = now();
   writeLog(logPath, log);
   writeDerived({ log, dir, frameSha256: flag('frame-sha256'), drawOrderSha256: flag('draw-order-sha256'), synthetic: has('synthetic') });
-  console.log(`${attempt.approval}: ${url}`);
+  console.log(`${attempt.approval}: ${attempt.id} ${attempt.url}`);
 }
 
 function doStatus() {

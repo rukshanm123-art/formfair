@@ -205,7 +205,19 @@ export function nextWork(log, drawOrder) {
   return { done: true, reason: 'all agencies in the frozen order have been attempted' };
 }
 
-/** A rejected decision is resolved only by a later attempt that explicitly supersedes it. */
+/**
+ * A rejected decision is resolved only by a later attempt that explicitly supersedes it.
+ *
+ * Both forms count. `supersedesAttemptId` (capture-v1.0.3) names the decision it corrects
+ * and is the form to use; `supersedes: <url>` is the earlier form, still honoured so that
+ * corrections already in the log keep their meaning.
+ */
 export function isSuperseded(log, attempt) {
-  return log.attempts.some((a) => a.supersedes === attempt.url && a.agency === attempt.agency);
+  return log.attempts.some(
+    (a) =>
+      (attempt.id !== undefined && a.supersedesAttemptId === attempt.id) ||
+      (a.supersedesAttemptId === undefined &&
+        a.supersedes === attempt.url &&
+        a.agency === attempt.agency)
+  );
 }

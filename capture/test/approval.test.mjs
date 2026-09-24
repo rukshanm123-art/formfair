@@ -264,3 +264,122 @@ describe('the corpus draft and the publishable record', () => {
     }
   });
 });
+
+/**
+ * Correcting a rejected decision when a URL has more than one attempt.
+ *
+ * capture-v1.0.3. The first real capture of the study failed on a third-party script that
+ * never finished loading, and the harness was changed so that it would not. Rerunning it
+ * means a second attempt at a URL that already has one - which is the case `supersedes:
+ * <url>` could not express, because it names the page rather than the decision. With two
+ * attempts recorded, approving "the attempt for that URL" is ambiguous, and the ambiguity
+ * resolves toward the rejected one, which is the wrong way round.
+ */
+describe('supersession identifies the decision, not the page', () => {
+  const failure = (agency, url, extra = {}) => ({
+    examinedAt: '2026-09-24T00:00:00Z', agency, website: 'https://w.govt.nz/', url,
+    status: 'failed', category: 'enquiry-or-contact',
+    exclusionReason: 'capture failed: Timeout 45000ms exceeded', eligibility: el(), ...extra,
+  });
+
+  /** A log holding one rejected failure, as the pilot's did. */
+  function withRejectedFailure() {
+    const log = emptyLog();
+    const url = 'https://w.govt.nz/contact';
+    ready(log, 'TPK', 'enquiry-or-contact', [url]);
+    appendAttempt(log, failure('TPK', url));
+    const first = candidates(log).at(-1);
+    first.approval = APPROVAL.REJECTED;
+    first.approvalNote = 'harness defect, not a property of the page';
+    return { log, url, first };
+  }
+
+  test('a rerun supersedes the rejected attempt by its id', () => {
+    const { log, url, first } = withRejectedFailure();
+    assert.equal(isSuperseded(log, first), false);
+
+    appendAttempt(log, {
+      ...failure('TPK', url),
+      examinedAt: '2026-09-24T00:10:00Z',
+      status: 'excluded',
+      exclusionReason: 'no personal-name field after all',
+      supersedesAttemptId: first.id,
+    });
+
+    const second = candidates(log).at(-1);
+    assert.notEqual(second.id, first.id);
+    assert.equal(second.supersedesAttemptId, first.id);
+    // The original stays, with its rejection intact.
+    assert.equal(first.approval, APPROVAL.REJECTED);
+    assert.equal(isSuperseded(log, first), true);
+  });
+
+  test('a rerun that supersedes nothing is refused, and is told which id to name', () => {
+    const { log, url, first } = withRejectedFailure();
+    assert.throws(
+      () => appendAttempt(log, { ...failure('TPK', url), examinedAt: '2026-09-24T00:10:00Z' }),
+      new RegExp(`supersedesAttemptId set to ${first.id}`)
+    );
+  });
+
+  test('a rerun cannot supersede an attempt that is not rejected', () => {
+    const log = emptyLog();
+    const url = 'https://w.govt.nz/contact';
+    ready(log, 'TPK', 'enquiry-or-contact', [url]);
+    appendAttempt(log, failure('TPK', url));
+    const pending = candidates(log).at(-1);
+    assert.throws(
+      () => appendAttempt(log, {
+        ...failure('TPK', url), examinedAt: '2026-09-24T00:10:00Z',
+        supersedesAttemptId: pending.id,
+      }),
+      /is pending, not rejected/
+    );
+  });
+
+  test('a rerun cannot supersede the same rejected attempt twice', () => {
+    const { log, url, first } = withRejectedFailure();
+    appendAttempt(log, {
+      ...failure('TPK', url), examinedAt: '2026-09-24T00:10:00Z',
+      status: 'excluded', exclusionReason: 'no personal-name field',
+      supersedesAttemptId: first.id,
+    });
+    const second = candidates(log).at(-1);
+    second.approval = APPROVAL.APPROVED;
+    assert.throws(
+      () => appendAttempt(log, {
+        ...failure('TPK', url), examinedAt: '2026-09-24T00:20:00Z',
+        supersedesAttemptId: first.id,
+      }),
+      /has already been superseded/
+    );
+  });
+
+  test('a rerun cannot supersede an attempt for a different page', () => {
+    const log = emptyLog();
+    const url = 'https://w.govt.nz/contact';
+    const other = 'https://w.govt.nz/other';
+    ready(log, 'TPK', 'enquiry-or-contact', [url, other]);
+    appendAttempt(log, failure('TPK', url));
+    const first = candidates(log).at(-1);
+    first.approval = APPROVAL.REJECTED;
+    assert.throws(
+      () => appendAttempt(log, {
+        ...failure('TPK', other), examinedAt: '2026-09-24T00:10:00Z',
+        supersedesAttemptId: first.id,
+      }),
+      /which is not what this attempt supersedes/
+    );
+  });
+
+  test('an id that matches no attempt is refused', () => {
+    const { log, url } = withRejectedFailure();
+    assert.throws(
+      () => appendAttempt(log, {
+        ...failure('TPK', url), examinedAt: '2026-09-24T00:10:00Z',
+        supersedesAttemptId: 'c-9999',
+      }),
+      /matches no recorded attempt/
+    );
+  });
+});

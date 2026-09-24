@@ -556,3 +556,121 @@ Round three is a complete run: fifteen inspections across the agency's four webs
 attributed to its category, version, method and outcome, and bound to the locked set. It is
 locked and pending approval. Nothing has been assessed or captured.
 
+
+## Amendment 6: a page is not its analytics
+
+**Dated 24 September 2026. Precondition: one candidate had been approved for assessment and
+the capture failed. No page has been captured and no markup has been analysed.**
+`solo-protocol-v1.0.0`, `capture-v1.0.0` through `capture-v1.0.2`, and `selection-v1.0.0`
+through `selection-v1.0.3` are not moved.
+
+### What happened
+
+The first candidate the pilot approved — the Te Kāhui Māngai contact form, the only page in
+Te Puni Kōkiri's four websites that asks a natural person for a name — could not be
+captured. Both the attempt and its single permitted retry ended as a navigation timeout
+after forty-five seconds, and the failure was recorded.
+
+The page was not slow. Its document returned HTTP 200 in 373 milliseconds, with both
+personal-name inputs present in the markup. One third-party request, to a Matomo analytics
+script on a different host, never completed. Because the harness treated the `load` event
+as a precondition of navigation, and `load` waits for every outstanding subresource, an
+analytics script on a host the study is not measuring was able to veto the capture of a
+page the study exists to measure.
+
+### Why this had to be fixed rather than worked around
+
+The obvious workaround — capture the page by hand, or exclude it — would have been worse
+than the defect. A prevalence estimate is only as good as the reasons pages leave the
+denominator, and "the agency's analytics vendor was slow on the afternoon we visited" is
+not a property of the agency, the form, or the constraint being measured. Left alone, this
+would drop pages non-randomly, and it would drop them in a direction: sites carrying more
+third-party tracking would be under-represented, and nothing in the published figures would
+say so. It also could not be detected after the fact, because a dropped page leaves behind
+a timeout, not a form.
+
+### The change
+
+**Navigation waits for `domcontentloaded`; the `load` event is then waited for separately,
+within its own fifteen-second budget.** A page that reaches `load` is captured at exactly
+the point the previous harness would have captured it — the two paths converge, and no page
+that succeeded before behaves differently now. The fifteen seconds is frozen at
+`capture-v1.0.3` and is not exposed as a command-line flag: it is injectable only so that
+the fallback can be exercised in a test in one second rather than in fifteen, and every
+real capture uses the constant.
+
+**A page that does not reach `load` is captured anyway, and says so.** Its provenance record
+carries `loadState: "domcontentloaded"` instead of `"load"`, and `outstandingRequests`
+naming what was still in flight when the budget expired. The fixed post-load settling
+period is unchanged and applies in both cases.
+
+**Only a timeout is a deviation.** Any other failure of the load wait — a closed page, a
+crashed target, a navigation away mid-wait — means the capture did not happen, and stays a
+failure. A fallback that swallowed every error would have converted an unknown document
+into a successful capture, which is a worse defect than the one it was written to fix.
+
+**An outstanding request is recorded as origin and pathname, and nothing else.** Query
+strings and fragments are removed. The field exists to name the host and resource that held
+the load event open, which origin and path answer completely; an analytics beacon's query
+string is generated per visit and routinely carries a session or client identifier, a
+cache-buster, and the URL of the page being viewed. Provenance is published, so anything
+left in that field would be published with it.
+
+**`loadState` and `outstandingRequests` reach the corpus draft**, not merely the log. A
+field that stopped at the log would leave two captures of the same page, taken in different
+load states, indistinguishable in the sealed corpus — and the reproducibility the seal
+exists to support would be asserted rather than true.
+
+### What it costs
+
+The change does not raise the worst case; it raises the worst case for a capture that
+*succeeds*.
+
+| | before | after |
+| --- | --- | --- |
+| page reaches `load` | up to 45 + 2 s | unchanged |
+| page reaches `domcontentloaded` but never `load` | failed after ~90 s (two attempts) | captured after up to 45 + 15 + 2 ≈ 62 s |
+| page never reaches `domcontentloaded` | failed after ~90 s (two attempts) | unchanged |
+
+The retry allowance is what makes both failure rows ~90 seconds rather than 45: a failed
+navigation is attempted twice, plus the pacing delay between them. The previous harness
+therefore already spent about ninety seconds on the Te Kāhui Māngai contact form before
+recording nothing. The new path spends at most about sixty-two and records a page.
+
+### Correcting the rejected failure
+
+The failed attempt stays in the log as a failure, with its reason. It is corrected, not
+erased, and the correction names the decision it replaces rather than the page:
+
+**`supersedesAttemptId` replaces `supersedes: <url>`.** Superseding by URL was unambiguous
+only while one attempt per URL could exist. Once a page can be attempted, rejected and
+re-attempted, a URL names two records and a third attempt would appear to supersede both of
+the first two. The earlier form is still honoured so that corrections already in the log
+keep their meaning.
+
+**`approve` takes `--id`, and refuses `--url` once a URL has more than one attempt.**
+Resolving `--url` with a first-match search returned the *rejected* attempt, so approving a
+rerun would silently have re-approved the failure it was meant to replace. The refusal
+names the candidate ids rather than merely blocking.
+
+### What this does not change
+
+No page is captured that would previously have been rejected on eligibility, robots, or
+blocking grounds; the politeness policy, the viewport, the locale, the settling period, the
+retry allowance and the no-input rule are untouched. The replacement attempt may validly
+record either `load` or the fallback, depending on whether the tracker responds on the day
+— which is itself the reason the field is recorded per page rather than assumed.
+
+Nineteen tests hold the change, written from the defect and from the review that followed
+it: a page that reaches `load` records `load` and nothing outstanding; a page whose load
+event never fires is still captured with its markup intact; the stalling requests are named,
+sanitised to origin and path, with query and fragment removed; the deviation survives
+capture, log, draft and the hash the seal takes of it; a stalled capture is bounded *below*
+by its load budget — without which shortening the wait to nothing would still pass — and
+above by well under the navigation budget; a non-timeout load error stays a failure and
+leaves no partial capture; six tests cover supersession by id, including the case that
+found a hole in the first draft of it, where an id naming a different page was accepted in
+silence; and four cover approval by id, including that approval by URL still works while a
+URL has exactly one attempt. The fixtures stall an image and an async script deliberately — a render-blocking
+script in `<head>` would stall `domcontentloaded` as well, which is a different failure with
+a different remedy. The capture package has 99 tests.

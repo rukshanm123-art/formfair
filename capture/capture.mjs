@@ -30,6 +30,49 @@ import { POLICY } from './politeness.mjs';
 export const VIEWPORT = { width: 1280, height: 800 };
 export const LOCALE = 'en-NZ';
 
+/**
+ * Navigation budget, split in two so that one hanging subresource cannot cost a page.
+ *
+ * `load` is still what the harness waits for. What changed in capture-v1.0.3 is what
+ * happens when `load` never arrives: a third-party analytics script that never completes
+ * holds the load event open indefinitely, even though the document, its markup and its
+ * form arrived in a few hundred milliseconds. Waiting for `load` as a navigation
+ * precondition threw that whole page away, which silently biases the corpus against
+ * agencies whose sites carry a slow tracker - exactly the pages a prevalence study must
+ * not drop.
+ *
+ * So navigation now waits for `domcontentloaded`, then waits separately for `load`. A
+ * page that reaches `load` is captured at precisely the same point as before; a page that
+ * does not is captured anyway, and records that it did not along with the requests that
+ * were still outstanding. The deviation is visible on the page it applies to instead of
+ * being a silent property of the harness.
+ */
+export const NAVIGATION_TIMEOUT_MS = 45000;
+export const LOAD_EVENT_TIMEOUT_MS = 15000;
+/** Outstanding requests are recorded to explain a missing load event, not to enumerate it. */
+export const MAX_RECORDED_OUTSTANDING = 20;
+
+/**
+ * An outstanding request is recorded as origin plus pathname, and nothing else.
+ *
+ * The point of the field is to say which host and resource held the load event open, which
+ * origin and path answer completely. A query string on an analytics beacon is generated
+ * per visit and routinely carries a session or client identifier, a cache-buster, and the
+ * URL of the page being viewed; a fragment can carry the same. None of that is evidence
+ * about the agency's form, and publishing provenance means it would be published.
+ */
+export function requestProvenanceUrl(raw) {
+  try {
+    const u = new URL(raw);
+    // Opaque schemes (data:, blob:) have no origin or path worth recording, and a data URI
+    // would embed the resource itself in the provenance record.
+    if (!/^https?:$/.test(u.protocol)) return `${u.protocol}//`;
+    return `${u.origin}${u.pathname}`;
+  } catch {
+    return '(unparseable url)';
+  }
+}
+
 export const CATEGORIES = [
   'account-registration',
   'service-application',
@@ -135,7 +178,13 @@ export async function detectBlocking(page, httpStatus) {
  * pages without reaching the network, which is what the protocol requires of it before
  * any real page is opened.
  */
-export async function capturePage({ browserFactory, url, agency, website, pageId, category, outDir, settleMs = POLICY.postLoadSettleMs }) {
+export async function capturePage({
+  browserFactory, url, agency, website, pageId, category, outDir,
+  settleMs = POLICY.postLoadSettleMs,
+  // Injectable so the hanging-subresource path can be exercised in a second rather than
+  // in fifteen. Real captures always use the constant.
+  loadEventTimeoutMs = LOAD_EVENT_TIMEOUT_MS,
+}) {
   validateUrl(url);
   validatePageId(pageId);
   if (!CATEGORIES.includes(category)) {
@@ -154,8 +203,37 @@ export async function capturePage({ browserFactory, url, agency, website, pageId
   const context = await browser.newContext({ viewport: VIEWPORT, locale: LOCALE });
   const page = await context.newPage();
   try {
-    const response = await page.goto(url, { waitUntil: 'load', timeout: 45000 });
+    // Tracked before navigation so that a request which is already outstanding when the
+    // load wait gives up is attributable. Playwright fires `requestfinished` and
+    // `requestfailed` for every request it fires `request` for, so what remains in the
+    // map is exactly what is still in flight.
+    const inFlight = new Map();
+    page.on('request', (r) => inFlight.set(r, r.url()));
+    page.on('requestfinished', (r) => inFlight.delete(r));
+    page.on('requestfailed', (r) => inFlight.delete(r));
+
+    const response = await page.goto(url, {
+      waitUntil: 'domcontentloaded',
+      timeout: NAVIGATION_TIMEOUT_MS,
+    });
     const httpStatus = response?.status() ?? null;
+
+    // The load event, waited for separately and bounded. A page that reaches it is at the
+    // identical state `waitUntil: 'load'` would have returned.
+    let loadState = 'load';
+    let outstandingRequests = [];
+    try {
+      await page.waitForLoadState('load', { timeout: loadEventTimeoutMs });
+    } catch (error) {
+      // Only a timeout means "this page never finished loading", which is the case this
+      // fallback exists for. Anything else - a closed page, a crashed target, a navigation
+      // away mid-wait - means the capture did not happen, and must stay a failure rather
+      // than be quietly downgraded into a successful capture of an unknown document.
+      if (error?.name !== 'TimeoutError') throw error;
+      loadState = 'domcontentloaded';
+      outstandingRequests = [...new Set([...inFlight.values()].map(requestProvenanceUrl))]
+        .slice(0, MAX_RECORDED_OUTSTANDING);
+    }
 
     const redirects = [];
     let hop = response?.request()?.redirectedFrom?.();
@@ -164,7 +242,8 @@ export async function capturePage({ browserFactory, url, agency, website, pageId
       hop = hop.redirectedFrom?.();
     }
 
-    // A fixed settling period after load. Capturing the instant `load` fires misses
+    // A fixed settling period after the load wait resolves, whether it resolved by the
+    // load event firing or by its budget expiring. Capturing the instant `load` fires misses
     // constraints that a framework applies a tick later, and a variable wait would make
     // two runs of the same page incomparable. It is recorded in provenance so a reader
     // knows exactly what was waited for.
@@ -182,6 +261,11 @@ export async function capturePage({ browserFactory, url, agency, website, pageId
       blocking,
       userAgent,
       settleMs,
+      // 'load' for a page captured at the load event, 'domcontentloaded' for one whose
+      // load event never fired within its budget. Any reader comparing two captures needs
+      // to know which of the two they are looking at.
+      loadState,
+      outstandingRequests,
       pageId,
       agency,
       website,

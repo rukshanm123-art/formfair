@@ -127,3 +127,90 @@ describe('next reports every state without crashing', () => {
     );
   });
 });
+
+/**
+ * `approve` must name a decision, not a page.
+ *
+ * capture-v1.0.3. Once a URL can carry a rejected attempt and its replacement, `--url`
+ * identifies two records. It used to resolve with `.find`, which returns the FIRST - the
+ * rejected one - so approving the rerun would silently have re-approved the failure it was
+ * meant to replace, and the corpus would have been built from a decision nobody made.
+ */
+describe('approve identifies the attempt', () => {
+  const el = () => Object.fromEntries(ELIGIBILITY_CRITERIA.map((c) => [c, null]));
+  const URL_ = 'https://w.govt.nz/contact';
+
+  const failed = (extra = {}) => ({
+    examinedAt: '2026-09-24T00:00:00Z', agency, website: 'https://w.govt.nz/', url: URL_,
+    status: 'failed', category: 'enquiry-or-contact',
+    exclusionReason: 'capture failed: Timeout 45000ms exceeded', eligibility: el(), ...extra,
+  });
+
+  /** One rejected failure plus its replacement, which is the pilot's actual situation. */
+  const twoAttempts = (log) => {
+    prepareSet(log, agency, 'enquiry-or-contact', [URL_]);
+    appendAttempt(log, failed());
+    const first = log.attempts.at(-1);
+    first.approval = APPROVAL.REJECTED;
+    first.approvalNote = 'harness defect, not a property of the page';
+    appendAttempt(log, failed({
+      examinedAt: '2026-09-24T00:10:00Z', status: 'excluded',
+      exclusionReason: 'no personal-name field', supersedesAttemptId: first.id,
+    }));
+    return { first, second: log.attempts.at(-1) };
+  };
+
+  test('approval by url is refused once a url has more than one attempt', async () => {
+    let ids;
+    await withLog((log) => { ids = twoAttempts(log); }, async (dir) => {
+      const r = await run(['approve', '--out', dir, '--url', URL_]);
+      assert.equal(r.status, 1);
+      assert.match(r.stderr, /2 attempts recorded/);
+      // It must say which ids, or the refusal just blocks the work.
+      assert.match(r.stderr, new RegExp(`--id ${ids.first.id}`));
+      assert.match(r.stderr, new RegExp(`--id ${ids.second.id}`));
+      // And it must not have approved anything on the way out.
+      const log = JSON.parse(readFileSync(join(dir, 'capture-log.json'), 'utf8'));
+      assert.equal(log.attempts.find((a) => a.id === ids.first.id).approval, APPROVAL.REJECTED);
+      assert.equal(log.attempts.find((a) => a.id === ids.second.id).approval, APPROVAL.PENDING);
+    });
+  });
+
+  test('approval by id approves that attempt and leaves the rejected one rejected', async () => {
+    let ids;
+    await withLog((log) => { ids = twoAttempts(log); }, async (dir) => {
+      const r = await run(['approve', '--out', dir, '--id', ids.second.id]);
+      assert.equal(r.status, 0, r.stderr);
+      assert.match(r.stdout, new RegExp(`approved: ${ids.second.id}`));
+      const log = JSON.parse(readFileSync(join(dir, 'capture-log.json'), 'utf8'));
+      assert.equal(log.attempts.find((a) => a.id === ids.second.id).approval, APPROVAL.APPROVED);
+      assert.equal(log.attempts.find((a) => a.id === ids.first.id).approval, APPROVAL.REJECTED);
+    });
+  });
+
+  test('approval by url still works while a url has exactly one attempt', async () => {
+    let id;
+    await withLog(
+      (log) => {
+        prepareSet(log, agency, 'enquiry-or-contact', [URL_]);
+        appendAttempt(log, failed());
+        id = log.attempts.at(-1).id;
+      },
+      async (dir) => {
+        const r = await run(['approve', '--out', dir, '--url', URL_, '--reject', '--reason', 'harness defect']);
+        assert.equal(r.status, 0, r.stderr);
+        const log = JSON.parse(readFileSync(join(dir, 'capture-log.json'), 'utf8'));
+        assert.equal(log.attempts.find((a) => a.id === id).approval, APPROVAL.REJECTED);
+        assert.equal(log.attempts.find((a) => a.id === id).approvalNote, 'harness defect');
+      }
+    );
+  });
+
+  test('an id that names no attempt is refused', async () => {
+    await withLog((log) => { twoAttempts(log); }, async (dir) => {
+      const r = await run(['approve', '--out', dir, '--id', 'c-9999']);
+      assert.equal(r.status, 1);
+      assert.match(r.stderr, /no recorded attempt with id c-9999/);
+    });
+  });
+});

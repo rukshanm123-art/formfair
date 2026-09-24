@@ -165,7 +165,35 @@ export function appendAttempt(log, attempt) {
   const priorForUrl = log.attempts.filter(
     (a) => a.status !== 'discovery' && a.agency === attempt.agency && a.url === attempt.url
   );
-  if (priorForUrl.length > 0) {
+  // capture-v1.0.3: supersede by attempt id, not by URL. Superseding by URL was
+  // unambiguous only while one attempt per URL could exist. Once a page can be attempted,
+  // rejected and re-attempted, `supersedes: <url>` no longer says WHICH decision is being
+  // corrected, and a third attempt would appear to supersede both of the first two.
+  //
+  // Checked whenever it is present, not only when the URL already has attempts. Validating
+  // it inside that branch meant an id naming a DIFFERENT page was accepted in silence, and
+  // the rejected decision it claimed to correct stayed open.
+  if (attempt.supersedesAttemptId) {
+    const target = log.attempts.find((a) => a.id === attempt.supersedesAttemptId);
+    if (!target) {
+      throw new Error(`supersedesAttemptId ${attempt.supersedesAttemptId} matches no recorded attempt`);
+    }
+    if (target.agency !== attempt.agency || target.url !== attempt.url) {
+      throw new Error(
+        `attempt ${target.id} is ${target.agency} / ${target.url}, which is not what this ` +
+          `attempt supersedes (${attempt.agency} / ${attempt.url})`
+      );
+    }
+    if (target.approval !== APPROVAL.REJECTED) {
+      throw new Error(
+        `attempt ${target.id} is ${target.approval}, not rejected; only a rejected decision ` +
+          'is corrected by superseding it'
+      );
+    }
+    if (isSuperseded(log, target)) {
+      throw new Error(`attempt ${target.id} has already been superseded`);
+    }
+  } else if (priorForUrl.length > 0) {
     // A rejected decision is corrected by recording a NEW attempt that supersedes it. The
     // original stays in the log: a correction that erases what it corrected is not a
     // correction, and the ledger has to show what was decided first.
@@ -174,7 +202,8 @@ export function appendAttempt(log, attempt) {
       throw new Error(
         `url ${attempt.url} is already recorded for ${attempt.agency}` +
           (rejected.length
-            ? '. Its decision was rejected; record the correction with supersedes set to the same URL.'
+            ? '. Its decision was rejected; record the correction with ' +
+              `supersedesAttemptId set to ${rejected.map((a) => a.id).join(' or ')}.`
             : '')
       );
     }
@@ -470,6 +499,12 @@ export function deriveDraft(log, { frameSha256, drawOrderSha256, selectionLedger
       redirects: a.redirects ?? [],
       category: a.category,
       file: a.file,
+      // capture-v1.0.3. Whether this page was captured at its load event or at the bounded
+      // fallback, and what was still in flight if it was the latter. A corpus that mixed
+      // the two without saying which was which would not be reproducible: the same page,
+      // captured twice, could legitimately differ.
+      loadState: a.loadState ?? 'load',
+      outstandingRequests: a.outstandingRequests ?? [],
     }));
   // A draft carrying null hashes would be refused by the seal anyway, but writing one at
   // all invites it being read as a real artefact.
