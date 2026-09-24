@@ -1,9 +1,15 @@
 # FormFair Solo Evaluation Protocol
 
-**Version 1.0 candidate. Dated 22 September 2026, before any government form was
-captured or analysed.** Freeze this document as `solo-protocol-v1.0.0` together with the
-new analyser as `evaluation-v1.1.0` before real-form capture begins. Existing catalogue,
-frame, draw-order and historical harness tags are not moved.
+**Version 1.0 - frozen.** Tagged `solo-protocol-v1.0.0`. Dated 22 September 2026 and
+frozen on 24 September 2026, before any government form was captured or analysed.
+
+The analyser it governs is frozen as `evaluation-v1.1.0`. Existing catalogue, frame,
+draw-order and historical harness tags are not moved, and the draw order remains derived
+from the literal seed `evaluation-v1.0.0`.
+
+Amendments to this document follow the same rule as the held-out protocol it supersedes:
+the original text stays, and a dated amendment is appended stating what it supersedes and
+the precondition under which it was made. This tag is not moved.
 
 ## 1. Purpose and claim boundary
 
@@ -47,10 +53,13 @@ RQ4 is descriptive tool output. It is not a defect-prevalence question.
 
 The order is mandatory:
 
-1. Resolve the FF-02 catalogue/implementation conflict and pass all tests.
+1. Resolve the FF-02 catalogue/implementation conflict and pass all tests. **Done, 23
+   September 2026.** The corrected gate and the decision trail are recorded in
+   [`OPEN-CONFLICT-FF-02.md`](OPEN-CONFLICT-FF-02.md).
 2. Freeze the analyser as `evaluation-v1.1.0` and record its commit and lockfile hash.
+   **Done, 23 September 2026**, at commit `ef58ad3`.
 3. Freeze this protocol and the files under `evaluation/solo/` as
-   `solo-protocol-v1.0.0`.
+   `solo-protocol-v1.0.0`. **Done, 24 September 2026.**
 4. Preserve the existing `frame-v1.0.0` frame and `draw-order.csv` byte for byte.
 5. Only then visit and capture candidate forms.
 6. Build the content-hash corpus manifest, commit it, and freeze that commit as
