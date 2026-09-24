@@ -19,7 +19,7 @@ import {
   appendAttempt, ELIGIBILITY_CRITERIA, APPROVAL,
 } from '../run.mjs';
 import { parseDrawOrder } from '../selection.mjs';
-import { prepareSet } from './helpers.mjs';
+import { prepareSet, addDiscovery } from './helpers.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const cli = join(here, '..', 'cli-capture.mjs');
@@ -211,6 +211,86 @@ describe('approve identifies the attempt', () => {
       const r = await run(['approve', '--out', dir, '--id', 'c-9999']);
       assert.equal(r.status, 1);
       assert.match(r.stderr, /no recorded attempt with id c-9999/);
+    });
+  });
+});
+
+/**
+ * Recording a round that found nothing.
+ *
+ * selection-v1.0.4. Most agencies publish no form at all in most categories, so "this
+ * round found nothing" is the commonest finding the scan produces - and it was expressible
+ * only as `--add ""`, which worked by accident: the empty string was filtered away and left
+ * an empty set behind. That made a genuine finding indistinguishable in the log from a
+ * mistyped URL that happened to vanish, and it left `lock` refusing the set outright with
+ * "no candidates recorded", which reads like the discovery was never done.
+ */
+describe('a round that found nothing is recordable and lockable', () => {
+  const CAT = 'account-registration';
+
+  /** Discovery happened and found nothing: the state most agencies are in. */
+  const discoveryOnly = (log) => {
+    addDiscovery(log, { agency, category: CAT, outcome: 'no-candidates' });
+  };
+
+  test('--none records an empty set, which then locks', async () => {
+    await withLog(discoveryOnly, async (dir) => {
+      const r = await run(['candidates', '--out', dir, '--agency', agency, '--category', CAT, '--none']);
+      assert.equal(r.status, 0, r.stderr);
+      assert.match(r.stdout, /no candidates recorded for this round/);
+
+      const locked = await run(['lock', '--out', dir, '--agency', agency, '--category', CAT]);
+      assert.equal(locked.status, 0, locked.stderr);
+      assert.match(locked.stdout, /locked 0 of 0/);
+
+      const log = JSON.parse(readFileSync(join(dir, 'capture-log.json'), 'utf8'));
+      const set = log.candidateSets[`${agency}\u0000${CAT}`];
+      assert.deepEqual(set.discovered, []);
+      assert.deepEqual(set.locked, []);
+      assert.ok(set.lockedAt);
+      // Still bound to the round that produced it: an empty set must be evidenced too.
+      assert.equal(set.discoveryRecordIds.length, 1);
+    });
+  });
+
+  test('--add with no usable url is refused, and points at --none', async () => {
+    await withLog(discoveryOnly, async (dir) => {
+      const r = await run(['candidates', '--out', dir, '--agency', agency, '--category', CAT, '--add', '']);
+      assert.equal(r.status, 1);
+      assert.match(r.stderr, /use --none/);
+      // Nothing was created: the empty-string path must not still work by side effect.
+      const log = JSON.parse(readFileSync(join(dir, 'capture-log.json'), 'utf8'));
+      assert.equal(log.candidateSets[`${agency}\u0000${CAT}`], undefined);
+    });
+  });
+
+  test('--none and --add together are refused', async () => {
+    await withLog(discoveryOnly, async (dir) => {
+      const r = await run([
+        'candidates', '--out', dir, '--agency', agency, '--category', CAT,
+        '--none', '--add', 'https://w.govt.nz/a',
+      ]);
+      assert.equal(r.status, 1);
+      assert.match(r.stderr, /cannot be combined with --add/);
+    });
+  });
+
+  test('neither --add nor --none is refused', async () => {
+    await withLog(discoveryOnly, async (dir) => {
+      const r = await run(['candidates', '--out', dir, '--agency', agency, '--category', CAT]);
+      assert.equal(r.status, 1);
+      assert.match(r.stderr, /--add is required, or --none/);
+    });
+  });
+
+  test('--add still records a real url', async () => {
+    await withLog(discoveryOnly, async (dir) => {
+      const r = await run([
+        'candidates', '--out', dir, '--agency', agency, '--category', CAT,
+        '--add', 'https://w.govt.nz/register',
+      ]);
+      assert.equal(r.status, 0, r.stderr);
+      assert.match(r.stdout, /1 candidate URL\(s\) recorded/);
     });
   });
 });

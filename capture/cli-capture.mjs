@@ -54,7 +54,9 @@ const USAGE = `usage:
                           --outcome <${DISCOVERY_OUTCOMES.join('|')}>
                           --category <c> --set-version <n> --navigated-at <ISO8601Z>
                           [--note "<e.g. method unavailable and why>"]
-  cli-capture.mjs candidates --out <dir> --agency <name> --category <c> --add <url>[,<url>...]
+  cli-capture.mjs candidates --out <dir> --agency <name> --category <c>
+                          (--add <url>[,<url>...] | --none)
+                          (--none records a round that found nothing, which is lockable)
   cli-capture.mjs lock    --out <dir> --agency <name> --category <c>
   cli-capture.mjs approve-set --out <dir> --agency <name> --category <c>
                           [--reject] [--note "<why>"]
@@ -391,10 +393,29 @@ function doCandidates() {
   const dir = require_('out');
   const logPath = logPathFor(dir);
   const log = readLog(logPath);
-  const urls = require_('add').split(',').map((u) => u.trim()).filter(Boolean);
+
+  // "This round found nothing" is a finding about the agency, and one of the commonest:
+  // most agencies publish no form at all in most categories. It needs to be sayable
+  // deliberately. It used to be expressible only as `--add ""`, which relied on an empty
+  // string being filtered away to leave an empty set - undiscoverable, and indistinguishable
+  // in the log from a mistyped URL that happened to vanish.
+  const none = has('none');
+  const add = flag('add');
+  if (none && add) die('--none records an empty set; it cannot be combined with --add');
+  if (!none && add === null) die(`--add is required, or --none for a round that found nothing\n\n${USAGE}`);
+
+  const urls = none ? [] : add.split(',').map((u) => u.trim()).filter(Boolean);
+  if (!none && urls.length === 0) {
+    die('--add named no usable URL. For a round that genuinely found nothing, use --none.');
+  }
+
   const set = recordCandidates(log, { agency: require_('agency'), category: require_('category'), urls });
   writeLog(logPath, log);
-  console.log(`${set.discovered.length} candidate URL(s) recorded; the set is still open`);
+  console.log(
+    none
+      ? 'no candidates recorded for this round; the set is open and may be locked empty'
+      : `${set.discovered.length} candidate URL(s) recorded; the set is still open`
+  );
 }
 
 function doLock() {

@@ -674,3 +674,49 @@ silence; and four cover approval by id, including that approval by URL still wor
 URL has exactly one attempt. The fixtures stall an image and an async script deliberately — a render-blocking
 script in `<head>` would stall `domcontentloaded` as well, which is a different failure with
 a different remedy. The capture package has 99 tests.
+
+## Amendment 7: a round that found nothing is a finding
+
+**Dated 24 September 2026. Precondition: one page is captured and approved; the second
+agency's first category had been searched and found nothing, and could not be recorded as
+such.** No existing capture or selection tag is moved.
+
+### What happened
+
+The second agency in the frozen order, the Family Violence and Sexual Violence Executive
+Board, publishes no account registration anywhere on its single website: robots disallows
+the CMS login, no sitemap is published, both frozen search terms return only prose and PDF
+filenames, and none of the forty-five links on the home page matches register, sign up,
+join, member, account, portal or login. The round was complete and its result was nil.
+
+That result could not be recorded. `candidates` required `--add`, and `lock` refused a set
+that did not exist with "no candidates recorded" — which reads as though the discovery was
+never done. The only way through was `candidates --add ""`, which worked by accident: the
+empty string was filtered out of the URL list and left an empty set behind as a side
+effect.
+
+### Why it matters more than it looks
+
+Most agencies will publish no form at all in most categories. A nil result is therefore not
+an edge case but the commonest thing the scan produces, and it is evidence: the prevalence
+denominator is agencies searched, not agencies that happened to have a form. An interface
+in which the ordinary finding is unsayable pushes the operator toward either the
+empty-string trick or, worse, skipping the record altogether — and a skipped category is
+indistinguishable from one that was never reached.
+
+It also could not be told apart after the fact. A set created by `--add ""` and a set
+created by a mistyped URL that normalised away are byte-identical in the log.
+
+### The change
+
+**`candidates --none` records an explicitly empty set**, which locks, carries its
+`discoveryRecordIds` like any other, and is approved by the researcher exactly as a set
+with candidates is. An empty set is still bound to the round that produced it: a nil finding
+has to be evidenced too.
+
+**`--add` with no usable URL is now refused** and names `--none` in the refusal, so the
+accidental path is closed rather than left as a second way to do the same thing. `--none`
+and `--add` together are refused, as are neither.
+
+Five tests hold it, including that the empty-string path no longer creates a set as a side
+effect. The capture package has 104 tests.
