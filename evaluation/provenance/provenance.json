@@ -1,0 +1,51 @@
+{
+  "schema": "formfair/capture-provenance@1",
+  "politeness": {
+    "concurrency": 1,
+    "minDelayBetweenNavigationsMs": 5000,
+    "honoursRobotsTxt": true,
+    "stopOnHttp429": true,
+    "respectsRetryAfter": true,
+    "transientRetries": 1,
+    "bypassesBlockingControls": false,
+    "userAgent": "chromium default, unmodified",
+    "postLoadSettleMs": 2000
+  },
+  "counts": {
+    "discoveryPages": 15,
+    "candidatesAssessed": 0,
+    "captured": 0,
+    "excluded": 0,
+    "failed": 0,
+    "pendingApproval": 0
+  },
+  "discoveryByMethod": {
+    "navigation": 3,
+    "internal-search": 5,
+    "sitemap": 7
+  },
+  "candidateSets": [
+    {
+      "agency": "Te Puni Kōkiri",
+      "category": "account-registration",
+      "version": 2,
+      "discovered": 1,
+      "locked": 1,
+      "droppedBeyondBound": 0,
+      "lockedAt": "2026-09-24T07:59:22Z",
+      "approval": "pending",
+      "approvedAt": null
+    }
+  ],
+  "supersededCandidateSets": [
+    {
+      "agency": "Te Puni Kōkiri",
+      "category": "account-registration",
+      "version": 1,
+      "approval": "rejected",
+      "approvalNote": "incomplete discovery provenance: four inspections were performed but not recorded - robots.txt on www.tpk.govt.nz, www.tupu.nz and tehaeata.govt.nz, and sitemap.xml on www.tpk.govt.nz. The sitemap and search availability findings rest on those, so the record cannot show how this set was reached.",
+      "supersededAt": "2026-09-24T07:57:00Z",
+      "supersededReason": "redo discovery recording every inspection, including methods found unavailable"
+    }
+  ]
+}

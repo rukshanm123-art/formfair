@@ -48,6 +48,7 @@ const USAGE = `usage:
                           --reason "<why it was not captured>" --category <c>
   cli-capture.mjs discovery --out <dir> --agency <name> --website <url> --url <url>
                           --kind <${DISCOVERY_KINDS.join('|')}> --navigated-at <ISO8601Z>
+                          [--note "<e.g. method unavailable and why>"]
   cli-capture.mjs candidates --out <dir> --agency <name> --category <c> --add <url>[,<url>...]
   cli-capture.mjs lock    --out <dir> --agency <name> --category <c>
   cli-capture.mjs approve-set --out <dir> --agency <name> --category <c>
@@ -275,6 +276,7 @@ function doDiscovery() {
     // Discovery browsing happens outside the capture harness, so its navigation time is
     // recorded and checked against the previous one rather than paced by the pacer.
     navigatedAt: require_('navigated-at'),
+    ...(flag('note') ? { note: flag('note') } : {}),
     approval: APPROVAL.APPROVED, // a page inspected to find links is not a judgement to approve
   });
   writeLog(logPath, log);

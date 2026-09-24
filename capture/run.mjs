@@ -307,8 +307,12 @@ export function supersedeCandidateSet(log, { agency, category, reason }) {
     throw new Error('only a rejected candidate set may be superseded');
   }
   if (!reason) throw new Error('superseding a candidate set needs a reason');
-  (log.supersededCandidateSets ??= []).push({
+  const history = (log.supersededCandidateSets ??= []);
+  history.push({
+    // A set created before versioning existed carries no version; it is the one before
+    // whatever is already archived for this agency and category.
     ...set,
+    version: set.version ?? history.filter((v) => v.agency === agency && v.category === category).length + 1,
     supersededAt: new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'),
     supersededReason: reason,
   });
@@ -338,7 +342,11 @@ export function deriveLedger(log) {
       a.finalUrl ?? '',
       a.status,
       a.category ?? '',
-      a.status === 'captured' ? a.inclusionEvidence : a.status === 'discovery' ? `discovery: ${a.discoveryKind}` : a.exclusionReason,
+      a.status === 'captured'
+        ? a.inclusionEvidence
+        : a.status === 'discovery'
+          ? `discovery: ${a.discoveryKind}${a.note ? ` - ${a.note}` : ''}`
+          : a.exclusionReason,
       a.pageId ?? '',
       a.htmlSha256 ?? '',
       a.approval,
