@@ -32,6 +32,7 @@ import {
   SEARCH_TERMS, parseDrawOrder, nextWork,
 } from './selection.mjs';
 import { readFileSync as readFile } from 'node:fs';
+import { buildPacket, renderPacket } from './packet.mjs';
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -59,6 +60,7 @@ const USAGE = `usage:
   cli-capture.mjs supersede-set --out <dir> --agency <name> --category <c>
                           --reason "<why the rejected set is being redone>"
   cli-capture.mjs publish --out <dir> --to <tracked dir>
+  cli-capture.mjs packet  --out <dir> --agency <name> --category <c>
   cli-capture.mjs next    --out <dir>
   cli-capture.mjs budget  --out <dir> --agency <name> [--category <c>]
   cli-capture.mjs approve --out <dir> --url <url> [--reject --reason "<why>"]
@@ -332,6 +334,11 @@ function doPublish() {
   console.log('These carry no markup and are safe to track.');
 }
 
+function doPacket() {
+  const log = readLog(logPathFor(require_('out')));
+  console.log(renderPacket(buildPacket(log, { agency: require_('agency'), category: require_('category') })));
+}
+
 function doBudget() {
   const log = readLog(logPathFor(require_('out')));
   const agency = require_('agency');
@@ -404,7 +411,7 @@ function doNext() {
   work.pending.forEach((u) => console.log(`  - ${u}`));
 }
 
-const commands = { candidates: doCandidates, lock: doLock, 'approve-set': doApproveSet,
+const commands = { packet: doPacket, candidates: doCandidates, lock: doLock, 'approve-set': doApproveSet,
   'supersede-set': doSupersedeSet, publish: doPublish, next: doNext, capture: doCapture, exclude: doExclude, discovery: doDiscovery, budget: doBudget, approve: doApprove, status: doStatus, build: doBuild };
 if (!commands[command]) die(USAGE);
 try {

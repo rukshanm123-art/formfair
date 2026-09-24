@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Capture harness for the solo descriptive scan. Separate from evaluation/, which is deliberately dependency-free and must stay that way.",
   "scripts": {
-    "test": "node --test test/capture.test.mjs test/cli.test.mjs test/selection.test.mjs test/guards.test.mjs test/approval.test.mjs test/next-cli.test.mjs test/provenance.test.mjs",
+    "test": "node --test test/capture.test.mjs test/cli.test.mjs test/selection.test.mjs test/guards.test.mjs test/approval.test.mjs test/next-cli.test.mjs test/provenance.test.mjs test/packet.test.mjs",
     "capture": "node cli-capture.mjs",
     "next": "node cli-capture.mjs next",
     "candidates": "node cli-capture.mjs candidates",
@@ -18,7 +18,8 @@
     "approve": "node cli-capture.mjs approve",
     "build": "node cli-capture.mjs build",
     "supersede-set": "node cli-capture.mjs supersede-set",
-    "publish": "node cli-capture.mjs publish"
+    "publish": "node cli-capture.mjs publish",
+    "packet": "node cli-capture.mjs packet"
   },
   "devDependencies": {
     "playwright": "^1.63.0"
