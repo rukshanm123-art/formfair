@@ -1422,8 +1422,87 @@ export function reopenCandidateSet(log, { agency, category, reason }) {
  */
 export function checkPermitLedger(log, { only = null } = {}) {
   const problems = [];
-  const permits = (log.discoveryPermits ?? []).filter((p) => (only ? p.id === only : true));
+  const allPermits = log.discoveryPermits ?? [];
+  const permits = allPermits.filter((p) => (only ? p.id === only : true));
   const byId = new Map(log.attempts.map((a) => [a.id, a]));
+
+  // selection-v1.0.16. The consumption side of the ledger, which the closure checks never
+  // reached. Validating only closures left three inconsistent states passing cleanly: a record
+  // whose URL differed from its own permit's, a consumed permit no record referenced, and two
+  // records naming one single-use permit. A permit and the inspection it authorised are a pair;
+  // anything else means the log does not describe the traffic that occurred.
+  //
+  // Records predating the permit model carry no `permitId` and are exempt: the invariants apply
+  // to permits and to records that participate in the model.
+  if (!only) {
+    const seenPermitIds = new Set();
+    const seenClosureIds = new Set();
+    for (const permit of allPermits) {
+      if (seenPermitIds.has(permit.id)) problems.push(`permit id ${permit.id} appears more than once`);
+      seenPermitIds.add(permit.id);
+      if (permit.closureId) {
+        if (seenClosureIds.has(permit.closureId)) {
+          problems.push(`closure id ${permit.closureId} appears more than once`);
+        }
+        seenClosureIds.add(permit.closureId);
+      }
+      // A permit should rest on a robots check for its own origin: that check is why it was
+      // issued at all.
+      const check = (log.robotsChecks ?? []).find((c) => c.id === permit.robotsCheckId);
+      if (!check) {
+        problems.push(`${permit.id} names robots check ${permit.robotsCheckId}, which does not exist`);
+      } else {
+        let origin = null;
+        try { origin = new URL(permit.url).origin; } catch { origin = null; }
+        if (origin && check.origin !== origin) {
+          problems.push(`${permit.id} is for ${origin} but names a robots check for ${check.origin}`);
+        }
+      }
+    }
+
+    const citations = new Map();
+    for (const attempt of log.attempts) {
+      if (!attempt.permitId) continue;
+      if (!citations.has(attempt.permitId)) citations.set(attempt.permitId, []);
+      citations.get(attempt.permitId).push(attempt);
+      const permit = allPermits.find((p) => p.id === attempt.permitId);
+      if (!permit) {
+        problems.push(`${attempt.id} names permit ${attempt.permitId}, which does not exist`);
+        continue;
+      }
+      if (!permit.consumedAt) {
+        problems.push(`${attempt.id} names permit ${permit.id}, which is not recorded as consumed`);
+      }
+      for (const [field, label] of [['agency', 'agency'], ['category', 'category'],
+        ['candidateSetVersion', 'round'], ['url', 'url']]) {
+        if (attempt[field] !== permit[field]) {
+          problems.push(
+            `${attempt.id} has ${label} ${JSON.stringify(attempt[field])} but its permit ` +
+              `${permit.id} covers ${JSON.stringify(permit[field])}`
+          );
+        }
+      }
+    }
+
+    for (const [permitId, records] of citations) {
+      if (records.length > 1) {
+        problems.push(
+          `permit ${permitId} is named by ${records.length} records ` +
+            `(${records.map((r) => r.id).join(', ')}); a permit authorises one request`
+        );
+      }
+    }
+    for (const permit of allPermits) {
+      if (!permit.consumedAt) continue;
+      const cited = citations.get(permit.id) ?? [];
+      if (cited.length === 0) {
+        problems.push(
+          `permit ${permit.id} is recorded as consumed at ${permit.consumedAt} but no discovery ` +
+            'record names it, so a request it authorised is unaccounted for'
+        );
+      }
+    }
+  }
 
   for (const permit of permits) {
     if (permit.consumedAt && permit.closedAt) {

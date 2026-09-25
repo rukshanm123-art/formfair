@@ -598,6 +598,10 @@ describe('discovery without a resolved set blocks the corpus', () => {
   test('an unconsumed permit blocks the corpus', () => {
     // A permit issued and never consumed means a request was authorised that nothing accounts for.
     const log = emptyLog();
+    log.robotsChecks = [{
+      id: 'r-0001', origin: 'https://w.govt.nz', fetchedAt: '2026-09-25T08:00:00Z',
+      httpStatus: 200, disposition: 'rules', body: '',
+    }];
     log.attempts.push(capturedFor(agency));
     issueDiscoveryPermit(log, {
       agency, category: CAT, candidateSetVersion: 1,
@@ -901,6 +905,10 @@ describe('a permit is named by the record it authorises', () => {
 
   /** An inspection recorded under its own consumed permit: what evidence has to look like. */
   function evidencedInspection(log, forUrl = url) {
+    log.robotsChecks ??= [{
+      id: 'r-0001', origin: 'https://w.govt.nz', fetchedAt: '2026-09-25T08:00:00Z',
+      httpStatus: 200, disposition: 'rules', body: '',
+    }];
     const p = issueDiscoveryPermit(log, { ...base, url: forUrl });
     addDiscovery(log, { agency, category: CAT, url: forUrl });
     const r = log.attempts.at(-1);
@@ -973,6 +981,10 @@ describe('a permit is named by the record it authorises', () => {
 
   test('a properly closed permit does not withhold the corpus draft', () => {
     const log = emptyLog();
+    log.robotsChecks = [{
+      id: 'r-0001', origin: 'https://w.govt.nz', fetchedAt: '2026-09-25T08:00:00Z',
+      httpStatus: 200, disposition: 'rules', body: '',
+    }];
     const agencyName = drawOrder[0].agency;
     log.attempts.push({
       agency: agencyName, category: 'enquiry-or-contact', status: 'captured', approval: APPROVAL.APPROVED,
@@ -1018,6 +1030,10 @@ describe('the permit ledger describes traffic that happened', () => {
 
   /** A properly evidenced inspection: navigated, under its own consumed permit. */
   function realInspection(log, { navigatedAt = at, urlFor = url } = {}) {
+    log.robotsChecks ??= [{
+      id: 'r-0001', origin: 'https://w.govt.nz', fetchedAt: at, httpStatus: 200,
+      disposition: 'rules', body: '',
+    }];
     const permit = issueDiscoveryPermit(log, { ...scope, url: urlFor, robotsCheckId: 'r-0001' });
     appendAttempt(log, {
       examinedAt: navigatedAt, agency, website: 'https://w.govt.nz/', url: urlFor,
@@ -1179,5 +1195,126 @@ describe('the permit ledger describes traffic that happened', () => {
       closedAt: at, disposition: 'unused', closureReason: 'x', accountedBy: record.id,
     });
     assert.ok(checkPermitLedger(log).some((p) => /closed unused but names/.test(p)));
+  });
+});
+
+/**
+ * The consumption side of the permit ledger.
+ *
+ * selection-v1.0.16. The validator checked closures and never reached consumption, so three
+ * inconsistent ledgers passed cleanly: a discovery record whose URL differed from its own
+ * consumed permit's, a consumed permit no record referenced, and two records naming one
+ * single-use permit.
+ *
+ * A permit and the inspection it authorised are a pair. Anything else means the log does not
+ * describe the traffic that occurred - which is the only thing the permit model is for.
+ */
+describe('a permit and its inspection are one to one', () => {
+  const CAT = 'account-registration';
+  const at = '2026-09-25T08:00:00Z';
+  const later = '2026-09-25T08:00:10Z';
+
+  function ledger() {
+    const log = emptyLog();
+    log.robotsChecks = [{
+      id: 'r-0001', origin: 'https://w.govt.nz', fetchedAt: at, httpStatus: 200,
+      disposition: 'rules', body: '',
+    }];
+    return log;
+  }
+  const issue = (log, url) => issueDiscoveryPermit(log, {
+    agency: 'TPK', category: CAT, candidateSetVersion: 1, url, robotsCheckId: 'r-0001',
+  });
+  const record = (log, url, permitId, when = at) => {
+    appendAttempt(log, {
+      examinedAt: when, agency: 'TPK', website: 'https://w.govt.nz/', url,
+      status: 'discovery', discoveryKind: 'navigation', outcome: 'no-candidates', category: CAT,
+      candidateSetVersion: 1, navigatedAt: when, approval: 'approved',
+      ...(permitId ? { permitId } : {}),
+    });
+    return log.attempts.at(-1);
+  };
+
+  test('THE GAP: a record whose url differs from its permit is caught', () => {
+    const log = ledger();
+    const permit = issue(log, 'https://w.govt.nz/a');
+    permit.consumedAt = at;
+    record(log, 'https://w.govt.nz/different', permit.id);
+    assert.ok(checkPermitLedger(log).some((p) => /but its permit p-0001 covers/.test(p)));
+  });
+
+  test('THE GAP: a consumed permit no record names is caught', () => {
+    const log = ledger();
+    issue(log, 'https://w.govt.nz/a').consumedAt = at;
+    assert.ok(checkPermitLedger(log).some((p) => /no discovery record names it/.test(p)));
+  });
+
+  test('THE GAP: two records naming one single-use permit are caught', () => {
+    const log = ledger();
+    const permit = issue(log, 'https://w.govt.nz/a');
+    permit.consumedAt = at;
+    record(log, 'https://w.govt.nz/a', permit.id, at);
+    record(log, 'https://w.govt.nz/b', permit.id, later);
+    assert.ok(checkPermitLedger(log).some((p) => /a permit authorises one request/.test(p)));
+  });
+
+  test('a record naming a permit that does not exist is caught', () => {
+    const log = ledger();
+    record(log, 'https://w.govt.nz/a', 'p-9999');
+    assert.ok(checkPermitLedger(log).some((p) => /names permit p-9999, which does not exist/.test(p)));
+  });
+
+  test('a record naming an unconsumed permit is caught', () => {
+    const log = ledger();
+    const permit = issue(log, 'https://w.govt.nz/a');
+    record(log, 'https://w.govt.nz/a', permit.id);
+    assert.ok(checkPermitLedger(log).some((p) => /is not recorded as consumed/.test(p)));
+  });
+
+  test('duplicate permit ids and closure ids are caught', () => {
+    const log = ledger();
+    const a = issue(log, 'https://w.govt.nz/a');
+    a.consumedAt = at;
+    record(log, 'https://w.govt.nz/a', a.id);
+    log.discoveryPermits.push({ ...a, url: 'https://w.govt.nz/b', consumedAt: null });
+    assert.ok(checkPermitLedger(log).some((p) => /permit id p-0001 appears more than once/.test(p)));
+
+    const log2 = ledger();
+    const x = issue(log2, 'https://w.govt.nz/a');
+    const y = issue(log2, 'https://w.govt.nz/b');
+    x.closedAt = at; x.disposition = 'unused'; x.closureReason = 'r'; x.closureId = 'x-0001';
+    y.closedAt = at; y.disposition = 'unused'; y.closureReason = 'r'; y.closureId = 'x-0001';
+    assert.ok(checkPermitLedger(log2).some((p) => /closure id x-0001 appears more than once/.test(p)));
+  });
+
+  test('a permit whose robots check is missing or for another origin is caught', () => {
+    const log = ledger();
+    const permit = issue(log, 'https://w.govt.nz/a');
+    permit.consumedAt = at;
+    record(log, 'https://w.govt.nz/a', permit.id);
+    permit.robotsCheckId = 'r-9999';
+    assert.ok(checkPermitLedger(log).some((p) => /robots check r-9999, which does not exist/.test(p)));
+
+    permit.robotsCheckId = 'r-0001';
+    log.robotsChecks[0].origin = 'https://elsewhere.govt.nz';
+    assert.ok(checkPermitLedger(log).some((p) => /names a robots check for https:\/\/elsewhere/.test(p)));
+  });
+
+  test('records predating the permit model are exempt', () => {
+    // They carry no permitId at all; the invariants apply to participants in the model.
+    const log = ledger();
+    record(log, 'https://w.govt.nz/legacy', null);
+    assert.deepEqual(checkPermitLedger(log), []);
+  });
+
+  test('a consistent ledger passes', () => {
+    const log = ledger();
+    const a = issue(log, 'https://w.govt.nz/a');
+    a.consumedAt = at;
+    record(log, 'https://w.govt.nz/a', a.id, at);
+    const b = issue(log, 'https://w.govt.nz/b');
+    b.consumedAt = later;
+    record(log, 'https://w.govt.nz/b', b.id, later);
+    assert.deepEqual(checkPermitLedger(log), []);
   });
 });

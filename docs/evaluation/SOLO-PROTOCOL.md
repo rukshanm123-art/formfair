@@ -1713,3 +1713,40 @@ gate. The capture package has 215 tests.
 | `p-0039` | `d-0239` | `p-0027` | yes | yes | yes |
 
 `checkPermitLedger` reports no problems against the live log. Nothing is redone.
+
+## Amendment 19: a permit and its inspection are one to one
+
+**Dated 25 September 2026.** `selection-v1.0.16`. Moves no earlier tag. Nothing is redone.
+
+`checkPermitLedger` validated closures and never reached consumption, so three inconsistent
+ledgers passed cleanly:
+
+- a discovery record whose URL differed from the URL of the permit it named;
+- a consumed permit that no discovery record referenced;
+- two discovery records naming one single-use consumed permit.
+
+Each says the log does not describe the traffic that occurred, which is the only thing the permit
+model exists to do. Validating the closure side alone checked that a *correction* was honest
+while leaving the ordinary path unchecked.
+
+The invariants now enforced:
+
+- every consumed permit is referenced by **exactly one** discovery record;
+- that record matches its permit's agency, category, round and URL;
+- every record naming a permit references an existing, consumed permit;
+- permit ids and closure ids are unique;
+- every permit names an existing robots check **for its own origin** — the check is why the permit
+  was issued at all.
+
+Records predating the permit model carry no `permitId` and are exempt. The invariants apply to
+permits and to the records that participate in the model, not retrospectively to a log written
+before it existed.
+
+Nine tests, the first three being the reproduced ledgers. The capture package has 224 tests.
+
+### The live ledger
+
+Unchanged and clean under the stronger audit: 51 permits, 48 consumed, 48 records naming permits,
+11 robots checks, **0 problems**. Four earlier fixtures needed seeding with a robots check, having
+issued permits that named one which did not exist — the fixtures were wrong in exactly the way the
+new invariant describes, and were corrected rather than the rule loosened.
