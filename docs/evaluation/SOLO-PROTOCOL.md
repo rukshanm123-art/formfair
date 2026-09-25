@@ -843,3 +843,77 @@ locked by the ordinary tooling path is soundly bound by construction. The captur
 **Agency 2 already satisfies every one of these conditions**, so no new discovery, declaration
 or round is required: its five bound records all exist, are unique, are `discovery` records,
 and belong to its own agency, category and round.
+
+## Operational correction, dated 25 September 2026: an ineligible form is still a form found
+
+**This is a correction to the record of the scan, not to the tooling. No tag moves.**
+It was made before the corpus seal, while one page is captured and two agencies are in
+progress.
+
+### Two errors in the selection trail
+
+**A document application form is a candidate, and is excluded — not filtered out of
+discovery.** The second agency in the draw order publishes four Ministerial Advisory Group
+application forms in DOCX. Discovery recorded them as prose results and declared the category
+nil. That is wrong, and not merely untidy: a nil candidate set conflates
+
+- *no form was found*, with
+- *forms were found, and every one was ineligible*,
+
+and those are different findings about an agency. The `exclude` stage exists precisely to keep
+them apart, and collapsing them destroys the distinction between an agency that offers no
+application at all and one that offers an application only as a document. For a study whose
+subject is the constraints forms place on names, "this agency's application exists but is not
+on the web" is a result, not an absence.
+
+**Criterion two was misread.** It requires a form to be *reached from* a website listed for
+the agency, not hosted on one, and the frozen protocol states explicitly that a publicly
+reachable third-party form may be included when it is directly linked or embedded by a
+monitored agency website. The workforce survey this agency links on
+`consultations.justice.govt.nz` was recorded as failing criterion two because of its host.
+It does not fail criterion two. It is not a service-application candidate because it is a
+workforce survey, which is outside all four categories — and that is what the replacement
+record says. The replacement also states that only the agency page was examined; the linked
+survey itself was not opened, and the record no longer implies otherwise.
+
+### What was redone
+
+Both affected rounds were rejected with their reasons, superseded, and redone. The rejected
+versions and their reasons stay in the log.
+
+**Family Violence and Sexual Violence Executive Board, service application.** Round 2 records
+the `application` search as `candidates-found`, locks the four DOCX forms as candidates, and
+each is then excluded under criterion five. Their content type was confirmed by request
+(`application/vnd.openxmlformats-officedocument.wordprocessingml.document`) rather than
+inferred from the file extension.
+
+**Te Puni Kōkiri, service application.** Its round-1 note claimed that applications for the
+Māori Development Fund are "eight PDFs, excluded by criterion five". Re-inspection does not
+support that. The page carries four supporting PDFs — eligibility and investment criteria
+guidance, the investment plan, agreement terms and conditions, and data reporting requirements
+— and **none of them is an application form**. The proposal template is not published at all:
+the page directs kaitono to contact a regional office, which supplies the template, and the
+completed proposal is returned by email or post. A search for `application form` across the
+site returns no document link of any kind.
+
+So this agency's nil result is substantively correct and there is no document candidate to
+record and exclude — but the round-1 evidence for it was wrong, and round 2 replaces it with an
+accurate account that names the correction explicitly. The distinction now visible in the log
+is exactly the one the first error destroyed: the second agency publishes an application form
+that is ineligible, and Te Puni Kōkiri publishes none.
+
+The selected Te Puni Kōkiri page is unaffected. Its capture came from enquiry or contact, and
+the category priority order is satisfied because service application yielded no *eligible*
+form in either version.
+
+### The limitation this does not support
+
+An earlier draft of this work proposed a limitation to the effect that a frame built from
+agency websites systematically misses forms agencies operate on shared whole-of-government
+platforms. That claim is wrong, because a directly linked shared-platform form is explicitly
+in scope.
+
+The defensible limitation is narrower, and is about the search rather than the frame: bounded
+discovery may miss forms — shared-platform forms among them — that the monitored agency pages
+do not surface within the fixed terms and the effort bound. What is in scope is what an agency
+links; what may be missed is what no inspected agency page links.
