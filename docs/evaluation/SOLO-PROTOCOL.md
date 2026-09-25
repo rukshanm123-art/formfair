@@ -720,3 +720,43 @@ and `--add` together are refused, as are neither.
 
 Five tests hold it, including that the empty-string path no longer creates a set as a side
 effect. The capture package has 104 tests.
+
+### The safeguard was incomplete, and what closed it
+
+Recording the nil result was necessary but not sufficient. Review reproduced three states
+that locked cleanly under the first version of this amendment, and each of them falsifies
+the prevalence data rather than merely looking untidy:
+
+- **Discovery reported `candidates-found`, and an empty set still locked.** The published
+  figure would say the agency publishes no such form, while the agency's own discovery
+  record says an inspection found one.
+- **Discovery reported only `no-candidates`, and a non-empty set still locked.** The
+  reverse: a candidate enters the corpus that no inspection records finding, so it has no
+  provenance at all.
+- **An empty set built straight from the library locked without any declaration.**
+  `--none` set `urls: []` and stored nothing, so the CLI's declaration existed only for the
+  length of the process. Binding a set to its round proved a round had happened; it did not
+  check that the round *says* what the set claims.
+
+**The declaration is now stored.** A set carries `candidateDeclaration: "none"` and
+`declaredAt`. An empty array is no longer read as a nil finding, because an empty array is
+also what a set nobody populated looks like, and those are opposite findings.
+
+**Locking enforces agreement between the set and its round.** An empty set requires an
+explicit nil declaration *and* no supporting `candidates-found` record. A non-empty set
+requires at least one. A refusal names the contradicting record ids rather than only
+objecting, because the operator has to know which of the two to correct — the discovery
+outcome or the candidate list.
+
+**The rule lives in the library, not the CLI.** The CLI is not the only caller, so an
+undeclared empty set is refused at `lockCandidateSet`, whatever built it. Declaring nil on a
+set that is already locked, empty and unapproved is permitted and changes no membership —
+the guards refuse it the moment anything has been discovered — which is how a set locked
+empty before declarations existed records the declaration that was in fact made. Declaring
+nil on a locked non-empty set, or on an approved set, is refused.
+
+Sixteen further tests hold this, including all three reproduced contradictions, direct
+library creation of an undeclared empty set, and the four ways a declaration can conflict
+with a candidate list. Three earlier tests were corrected rather than the rule relaxed: they
+had recorded a candidate against a `no-candidates` round, which is now exactly what is
+forbidden. The capture package has 120 tests.

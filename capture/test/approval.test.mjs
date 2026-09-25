@@ -383,3 +383,176 @@ describe('supersession identifies the decision, not the page', () => {
     );
   });
 });
+
+/**
+ * The set and its evidence must agree.
+ *
+ * selection-v1.0.4. Binding a set to its discovery round proved that a round happened. It
+ * did not check that the round SAYS what the set claims, and both contradictions below
+ * locked cleanly until now. Each is a silent falsification of the prevalence data: one
+ * reports no form for an agency whose own discovery recorded finding one, the other reports
+ * a form that no inspection ever recorded finding.
+ *
+ * The third case is the one that made the first two possible - an empty set carried no
+ * record that its emptiness was intended, so "this agency publishes no such form" and "this
+ * category was never searched" were the same bytes in the log.
+ */
+describe('a locked set must agree with its discovery round', () => {
+  const CAT = 'account-registration';
+
+  /** Discovery for one round, with the outcome under test. */
+  const round = (log, outcome) =>
+    addDiscovery(log, { agency: 'TPK', category: CAT, outcome, url: `https://w.govt.nz/d-${outcome}` });
+
+  test('an empty set is refused when discovery reports candidates-found', () => {
+    const log = emptyLog();
+    round(log, 'candidates-found');
+    recordCandidates(log, { agency: 'TPK', category: CAT, urls: [], declaration: 'none' });
+    assert.throws(
+      () => lockCandidateSet(log, { agency: 'TPK', category: CAT }),
+      /declared to have no candidates, but 1 discovery record\(s\) report candidates-found/
+    );
+  });
+
+  test('the refusal names the discovery records that contradict the nil declaration', () => {
+    const log = emptyLog();
+    const a = round(log, 'candidates-found');
+    const b = addDiscovery(log, {
+      agency: 'TPK', category: CAT, outcome: 'candidates-found', url: 'https://w.govt.nz/d-second',
+    });
+    recordCandidates(log, { agency: 'TPK', category: CAT, urls: [], declaration: 'none' });
+    assert.throws(
+      () => lockCandidateSet(log, { agency: 'TPK', category: CAT }),
+      new RegExp(`${a.id}, ${b.id}`)
+    );
+  });
+
+  test('a non-empty set is refused when no discovery record reports candidates-found', () => {
+    const log = emptyLog();
+    round(log, 'no-candidates');
+    recordCandidates(log, { agency: 'TPK', category: CAT, urls: ['https://w.govt.nz/register'] });
+    assert.throws(
+      () => lockCandidateSet(log, { agency: 'TPK', category: CAT }),
+      /locks 1 candidate\(s\), but no discovery record for this round reports candidates-found/
+    );
+  });
+
+  test('an undeclared empty set is refused, even built straight from the library', () => {
+    // The CLI is not the only caller, so the rule cannot live in the CLI. This is the exact
+    // shape `candidates --add ""` used to produce.
+    const log = emptyLog();
+    round(log, 'no-candidates');
+    recordCandidates(log, { agency: 'TPK', category: CAT, urls: [] });
+    assert.throws(
+      () => lockCandidateSet(log, { agency: 'TPK', category: CAT }),
+      /no candidates and no nil declaration/
+    );
+  });
+
+  test('a declared nil set locks, and records the declaration', () => {
+    const log = emptyLog();
+    round(log, 'no-candidates');
+    recordCandidates(log, { agency: 'TPK', category: CAT, urls: [], declaration: 'none' });
+    const set = lockCandidateSet(log, { agency: 'TPK', category: CAT });
+    assert.equal(set.candidateDeclaration, 'none');
+    assert.match(set.declaredAt, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
+    assert.deepEqual(set.locked, []);
+    // Evidenced like any other set: a nil finding is still a finding.
+    assert.equal(set.discoveryRecordIds.length, 1);
+  });
+
+  test('a set with candidates and a candidates-found record still locks', () => {
+    const log = emptyLog();
+    round(log, 'candidates-found');
+    recordCandidates(log, { agency: 'TPK', category: CAT, urls: ['https://w.govt.nz/register'] });
+    const set = lockCandidateSet(log, { agency: 'TPK', category: CAT });
+    assert.deepEqual(set.locked, ['https://w.govt.nz/register']);
+    assert.equal(set.candidateDeclaration, null);
+  });
+
+  test('a nil result cannot be declared for a set that already found something', () => {
+    const log = emptyLog();
+    round(log, 'candidates-found');
+    recordCandidates(log, { agency: 'TPK', category: CAT, urls: ['https://w.govt.nz/register'] });
+    assert.throws(
+      () => recordCandidates(log, { agency: 'TPK', category: CAT, urls: [], declaration: 'none' }),
+      /a nil result cannot be declared for a set that found something/
+    );
+  });
+
+  test('a candidate cannot be added to a set already declared nil', () => {
+    const log = emptyLog();
+    round(log, 'no-candidates');
+    recordCandidates(log, { agency: 'TPK', category: CAT, urls: [], declaration: 'none' });
+    assert.throws(
+      () => recordCandidates(log, { agency: 'TPK', category: CAT, urls: ['https://w.govt.nz/register'] }),
+      /a candidate cannot be added to a nil result/
+    );
+  });
+
+  test('a nil declaration cannot be recorded together with candidate URLs', () => {
+    const log = emptyLog();
+    round(log, 'no-candidates');
+    assert.throws(
+      () => recordCandidates(log, {
+        agency: 'TPK', category: CAT, urls: ['https://w.govt.nz/register'], declaration: 'none',
+      }),
+      /cannot be recorded together with candidate URLs/
+    );
+  });
+
+  test('an unknown declaration is refused rather than stored', () => {
+    const log = emptyLog();
+    round(log, 'no-candidates');
+    assert.throws(
+      () => recordCandidates(log, { agency: 'TPK', category: CAT, urls: [], declaration: 'nil' }),
+      /unknown candidate declaration/
+    );
+  });
+
+  test('declaring nil on a locked empty set is allowed, and cannot smuggle a candidate in', () => {
+    // How a set locked empty before declarations existed records the declaration that was in
+    // fact made. Membership cannot change: the set is empty and the guards keep it so.
+    const log = emptyLog();
+    round(log, 'no-candidates');
+    recordCandidates(log, { agency: 'TPK', category: CAT, urls: [], declaration: 'none' });
+    const set = lockCandidateSet(log, { agency: 'TPK', category: CAT });
+    // Simulate the pre-declaration state.
+    delete set.candidateDeclaration;
+    delete set.declaredAt;
+
+    recordCandidates(log, { agency: 'TPK', category: CAT, urls: [], declaration: 'none' });
+    assert.equal(set.candidateDeclaration, 'none');
+    assert.deepEqual(set.discovered, []);
+
+    // And the locked-set guard still holds for anything that would change membership.
+    assert.throws(
+      () => recordCandidates(log, { agency: 'TPK', category: CAT, urls: ['https://w.govt.nz/late'] }),
+      /a candidate cannot be added to a nil result/
+    );
+  });
+
+  test('declaring nil on a locked NON-empty set is refused', () => {
+    const log = emptyLog();
+    round(log, 'candidates-found');
+    recordCandidates(log, { agency: 'TPK', category: CAT, urls: ['https://w.govt.nz/register'] });
+    lockCandidateSet(log, { agency: 'TPK', category: CAT });
+    assert.throws(
+      () => recordCandidates(log, { agency: 'TPK', category: CAT, urls: [], declaration: 'none' }),
+      /a nil result cannot be declared for a set that found something/
+    );
+  });
+
+  test('declaring nil on an already approved empty set is refused', () => {
+    const log = emptyLog();
+    round(log, 'no-candidates');
+    recordCandidates(log, { agency: 'TPK', category: CAT, urls: [], declaration: 'none' });
+    const set = lockCandidateSet(log, { agency: 'TPK', category: CAT });
+    approveCandidateSet(log, { agency: 'TPK', category: CAT, approved: true });
+    delete set.candidateDeclaration;
+    assert.throws(
+      () => recordCandidates(log, { agency: 'TPK', category: CAT, urls: [], declaration: 'none' }),
+      /was locked at .* and cannot grow/
+    );
+  });
+});

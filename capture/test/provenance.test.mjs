@@ -100,13 +100,13 @@ describe('a locked set is bound to the round that produced it', () => {
 
   test('a set is bound only to its own round, not to an earlier one', () => {
     const log = emptyLog();
-    appendAttempt(log, discovery('https://w.govt.nz/round1', { version: 1, at: clock() }));
+    appendAttempt(log, discovery('https://w.govt.nz/round1', { version: 1, at: clock(), outcome: 'candidates-found' }));
     recordCandidates(log, { agency: AGENCY, category: CAT, urls: ['https://w.govt.nz/x'] });
     lockCandidateSet(log, { agency: AGENCY, category: CAT });
     approveCandidateSet(log, { agency: AGENCY, category: CAT, approved: false });
     supersedeCandidateSet(log, { agency: AGENCY, category: CAT, reason: 'incomplete provenance' });
 
-    appendAttempt(log, discovery('https://w.govt.nz/round2', { version: 2, at: clock() }));
+    appendAttempt(log, discovery('https://w.govt.nz/round2', { version: 2, at: clock(), outcome: 'candidates-found' }));
     recordCandidates(log, { agency: AGENCY, category: CAT, urls: ['https://w.govt.nz/y'] });
     const v2 = lockCandidateSet(log, { agency: AGENCY, category: CAT });
     assert.equal(v2.version, 2);
@@ -118,7 +118,7 @@ describe('legacy records migrate rather than crash', () => {
   test('a set with no version archives with one derived from history', () => {
     // A set created before versioning existed archived as "version undefined".
     const log = emptyLog();
-    appendAttempt(log, discovery('https://w.govt.nz/a', { at: clock() }));
+    appendAttempt(log, discovery('https://w.govt.nz/a', { at: clock(), outcome: 'candidates-found' }));
     recordCandidates(log, { agency: AGENCY, category: CAT, urls: ['https://w.govt.nz/x'] });
     lockCandidateSet(log, { agency: AGENCY, category: CAT });
     approveCandidateSet(log, { agency: AGENCY, category: CAT, approved: false });

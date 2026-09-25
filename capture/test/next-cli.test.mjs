@@ -10,7 +10,7 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdtempSync, rmSync, mkdirSync, readFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -237,7 +237,7 @@ describe('a round that found nothing is recordable and lockable', () => {
     await withLog(discoveryOnly, async (dir) => {
       const r = await run(['candidates', '--out', dir, '--agency', agency, '--category', CAT, '--none']);
       assert.equal(r.status, 0, r.stderr);
-      assert.match(r.stdout, /no candidates recorded for this round/);
+      assert.match(r.stdout, /nil result declared at/);
 
       const locked = await run(['lock', '--out', dir, '--agency', agency, '--category', CAT]);
       assert.equal(locked.status, 0, locked.stderr);
@@ -248,6 +248,9 @@ describe('a round that found nothing is recordable and lockable', () => {
       assert.deepEqual(set.discovered, []);
       assert.deepEqual(set.locked, []);
       assert.ok(set.lockedAt);
+      // selection-v1.0.4: the emptiness is declared, not inferred from an empty array.
+      assert.equal(set.candidateDeclaration, 'none');
+      assert.ok(set.declaredAt);
       // Still bound to the round that produced it: an empty set must be evidenced too.
       assert.equal(set.discoveryRecordIds.length, 1);
     });
@@ -292,5 +295,72 @@ describe('a round that found nothing is recordable and lockable', () => {
       assert.equal(r.status, 0, r.stderr);
       assert.match(r.stdout, /1 candidate URL\(s\) recorded/);
     });
+  });
+});
+
+/**
+ * The consistency checks, through the CLI.
+ *
+ * selection-v1.0.4. The library refuses these; these tests confirm the operator sees the
+ * refusal rather than a stack trace, and that nothing is written on the way out.
+ */
+describe('the CLI refuses a set that contradicts its round', () => {
+  const CAT = 'account-registration';
+  const setKeyFor = () => `${agency}\u0000${CAT}`;
+
+  test('--none is refused at lock when discovery reported candidates-found', async () => {
+    await withLog(
+      (log) => { addDiscovery(log, { agency, category: CAT, outcome: 'candidates-found' }); },
+      async (dir) => {
+        const declared = await run(['candidates', '--out', dir, '--agency', agency, '--category', CAT, '--none']);
+        assert.equal(declared.status, 0, declared.stderr);
+
+        const locked = await run(['lock', '--out', dir, '--agency', agency, '--category', CAT]);
+        assert.equal(locked.status, 1);
+        assert.match(locked.stderr, /report candidates-found/);
+
+        const log = JSON.parse(readFileSync(join(dir, 'capture-log.json'), 'utf8'));
+        assert.equal(log.candidateSets[setKeyFor()].lockedAt, null);
+      }
+    );
+  });
+
+  test('a candidate is refused at lock when discovery reported only no-candidates', async () => {
+    await withLog(
+      (log) => { addDiscovery(log, { agency, category: CAT, outcome: 'no-candidates' }); },
+      async (dir) => {
+        const added = await run([
+          'candidates', '--out', dir, '--agency', agency, '--category', CAT,
+          '--add', 'https://w.govt.nz/register',
+        ]);
+        assert.equal(added.status, 0, added.stderr);
+
+        const locked = await run(['lock', '--out', dir, '--agency', agency, '--category', CAT]);
+        assert.equal(locked.status, 1);
+        assert.match(locked.stderr, /no discovery record for this round reports candidates-found/);
+
+        const log = JSON.parse(readFileSync(join(dir, 'capture-log.json'), 'utf8'));
+        assert.equal(log.candidateSets[setKeyFor()].lockedAt, null);
+      }
+    );
+  });
+
+  test('an undeclared empty set is refused at lock', async () => {
+    await withLog(
+      (log) => { addDiscovery(log, { agency, category: CAT, outcome: 'no-candidates' }); },
+      async (dir) => {
+        // Reach the state without the CLI, since the CLI no longer offers a way to make it.
+        const log = JSON.parse(readFileSync(join(dir, 'capture-log.json'), 'utf8'));
+        log.candidateSets[setKeyFor()] = {
+          agency, category: CAT, version: 1, discovered: [], locked: [], lockedAt: null,
+          approval: 'pending',
+        };
+        writeFileSync(join(dir, 'capture-log.json'), `${JSON.stringify(log, null, 2)}\n`, 'utf8');
+
+        const locked = await run(['lock', '--out', dir, '--agency', agency, '--category', CAT]);
+        assert.equal(locked.status, 1);
+        assert.match(locked.stderr, /no candidates and no nil declaration/);
+      }
+    );
   });
 });

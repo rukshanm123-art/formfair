@@ -409,11 +409,14 @@ function doCandidates() {
     die('--add named no usable URL. For a round that genuinely found nothing, use --none.');
   }
 
-  const set = recordCandidates(log, { agency: require_('agency'), category: require_('category'), urls });
+  const set = recordCandidates(log, {
+    agency: require_('agency'), category: require_('category'), urls,
+    declaration: none ? 'none' : null,
+  });
   writeLog(logPath, log);
   console.log(
     none
-      ? 'no candidates recorded for this round; the set is open and may be locked empty'
+      ? `nil result declared at ${set.declaredAt}; the set may be locked empty`
       : `${set.discovered.length} candidate URL(s) recorded; the set is still open`
   );
 }

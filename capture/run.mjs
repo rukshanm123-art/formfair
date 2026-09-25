@@ -287,7 +287,7 @@ export function appendAttempt(log, attempt) {
  * grow; once locked it cannot, and only then may its members be assessed. That ordering is
  * what stops a candidate being added after an earlier one has already produced an outcome.
  */
-export function recordCandidates(log, { agency, category, urls }) {
+export function recordCandidates(log, { agency, category, urls, declaration = null }) {
   if (!CATEGORY_ORDER.includes(category)) throw new Error(`unknown category ${category}`);
   const key = setKey(agency, category);
   const existing = log.candidateSets[key];
@@ -303,12 +303,50 @@ export function recordCandidates(log, { agency, category, urls }) {
   ).length + 1;
   const set = (log.candidateSets[key] ??= {
     agency, category, version, discovered: [], locked: [], lockedAt: null,
-    approval: APPROVAL.PENDING,
+    approval: APPROVAL.PENDING, candidateDeclaration: null,
   });
-  if (set.lockedAt) {
+
+  // selection-v1.0.4. A nil result is declared, not inferred from an empty array. Without a
+  // stored declaration an empty set cannot be told apart from a set nobody ever populated,
+  // which is the difference between "this agency publishes no such form" and "this category
+  // was skipped" - and those are opposite findings.
+  if (declaration !== null && declaration !== 'none') {
+    throw new Error(`unknown candidate declaration ${JSON.stringify(declaration)}; the only declaration is "none"`);
+  }
+  if (declaration === 'none' && urls.length > 0) {
+    throw new Error('a nil declaration cannot be recorded together with candidate URLs');
+  }
+  if (declaration === 'none' && set.discovered.length > 0) {
     throw new Error(
-      `the candidate set for ${agency} / ${category} was locked at ${set.lockedAt} and cannot grow`
+      `${agency} / ${category} already has ${set.discovered.length} candidate(s) recorded; ` +
+        'a nil result cannot be declared for a set that found something'
     );
+  }
+  if (declaration === null && urls.length > 0 && set.candidateDeclaration === 'none') {
+    throw new Error(
+      `${agency} / ${category} was declared to have no candidates; a candidate cannot be ` +
+        'added to a nil result. Supersede the set if the declaration was wrong.'
+    );
+  }
+
+  if (set.lockedAt) {
+    // A locked set cannot GROW. Declaring the nil result of a set that is already locked and
+    // empty changes no membership - the guards above refuse it the moment anything has been
+    // discovered - so it is permitted, and is how a set locked empty before declarations
+    // existed records the declaration that was in fact made.
+    const declaringEmptyLockedSet =
+      declaration === 'none' && set.discovered.length === 0 && set.locked.length === 0 &&
+      set.approval === APPROVAL.PENDING && !set.candidateDeclaration;
+    if (!declaringEmptyLockedSet) {
+      throw new Error(
+        `the candidate set for ${agency} / ${category} was locked at ${set.lockedAt} and cannot grow`
+      );
+    }
+  }
+
+  if (declaration === 'none') {
+    set.candidateDeclaration = 'none';
+    set.declaredAt = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
   }
   for (const url of urls) if (!set.discovered.includes(url)) set.discovered.push(url);
   return set;
@@ -341,6 +379,37 @@ export function lockCandidateSet(log, { agency, category }) {
   }
 
   const { ordered, locked } = lockCandidates(set.discovered);
+
+  // selection-v1.0.4. The set and the round that produced it must agree. Binding the two
+  // (above) proved only that a round happened; it did not check that the round SAYS what the
+  // set claims. Both of these passed until now, and each is a silent falsification: one
+  // reports no form for an agency whose discovery found one, the other reports a form that
+  // no inspection ever recorded finding.
+  const found = supporting.filter((a) => a.outcome === 'candidates-found');
+  if (locked.length === 0) {
+    if (set.candidateDeclaration !== 'none') {
+      throw new Error(
+        `${agency} / ${category} has no candidates and no nil declaration. An empty set must ` +
+          'be declared deliberately - run `candidates --none` - so that it cannot be ' +
+          'confused with a category that was never searched.'
+      );
+    }
+    if (found.length > 0) {
+      throw new Error(
+        `${agency} / ${category} is declared to have no candidates, but ` +
+          `${found.length} discovery record(s) report candidates-found ` +
+          `(${found.map((a) => a.id).join(', ')}). Record the candidate, or correct the ` +
+          'discovery outcome; the set and its evidence must agree.'
+      );
+    }
+  } else if (found.length === 0) {
+    throw new Error(
+      `${agency} / ${category} locks ${locked.length} candidate(s), but no discovery record ` +
+        'for this round reports candidates-found. A candidate that no inspection records ' +
+        'finding has no provenance; correct the discovery outcome for the page it came from.'
+    );
+  }
+
   set.ordered = ordered;
   set.locked = locked;
   set.lockedAt = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');

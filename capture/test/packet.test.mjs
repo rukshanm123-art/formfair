@@ -80,7 +80,9 @@ describe('the approval packet', () => {
   test('a category that yields nothing says so plainly', () => {
     const log = emptyLog();
     addDiscovery(log, { agency: AGENCY, category: CAT, method: 'navigation', outcome: 'no-candidates' });
-    recordCandidates(log, { agency: AGENCY, category: CAT, urls: [] });
+    // selection-v1.0.4: an empty set is declared, so that it cannot be confused with a
+    // category nobody searched.
+    recordCandidates(log, { agency: AGENCY, category: CAT, urls: [], declaration: 'none' });
     lockCandidateSet(log, { agency: AGENCY, category: CAT });
     const text = renderPacket(buildPacket(log, { agency: AGENCY, category: CAT }));
     assert.match(text, /none - this category yields no eligible form/);
