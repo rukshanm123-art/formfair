@@ -9,10 +9,14 @@
 
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   emptyLog, appendAttempt, ELIGIBILITY_CRITERIA, recordCandidates, lockCandidateSet,
   categorySettled, deriveDraft, APPROVAL, approveCandidateSet,
+  exhaustAgency, EXHAUSTION_REASON, publishProvenance,
 } from '../run.mjs';
 import { prepareSet, addDiscovery } from './helpers.mjs';
 import {
@@ -364,5 +368,161 @@ describe('unfinished work blocks both the next step and the corpus', () => {
     const draft = deriveDraft(log, { frameSha256: 'a'.repeat(64), drawOrderSha256: 'b'.repeat(64) });
     assert.equal(draft.pages.length, 1);
     assert.equal(draft.pages[0].pageId, 'page-1');
+  });
+});
+
+/**
+ * Recording an agency as exhausted.
+ *
+ * selection-v1.0.8. `nextWork` could already SAY an agency was exhausted, but nothing could
+ * record it: no command wrote to `log.exhausted`, so the scan could not advance past the first
+ * agency that failed to qualify without hand-editing the log, which the protocol forbids.
+ *
+ * An exhaustion is a claim about the sample rather than bookkeeping. It is what makes the
+ * prevalence denominator "agencies searched" instead of "agencies that had a form", so it
+ * carries a timestamp, a frozen reason and the category-set versions it rests on, and it is
+ * sealed with the corpus.
+ */
+describe('an agency is recorded as exhausted explicitly', () => {
+  const agency = drawOrder[0].agency;
+  const second = drawOrder[1].agency;
+
+  /** Every category settled with a declared nil result: the state that permits exhaustion. */
+  function fullySearched(log, ag) {
+    for (const category of CATEGORY_ORDER) {
+      addDiscovery(log, { agency: ag, category, outcome: 'no-candidates' });
+      recordCandidates(log, { agency: ag, category, urls: [], declaration: 'none' });
+      lockCandidateSet(log, { agency: ag, category });
+      approveCandidateSet(log, { agency: ag, category, approved: true });
+    }
+    return log;
+  }
+
+  test('the valid transition: a fully searched agency is exhausted, and next advances', () => {
+    const log = fullySearched(emptyLog(), agency);
+    assert.equal(nextWork(log, drawOrder).exhaustedAgency, true);
+
+    const record = exhaustAgency(log, drawOrder);
+    assert.equal(record.agency, agency);
+    assert.match(record.exhaustedAt, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
+    assert.equal(record.reason, EXHAUSTION_REASON);
+    assert.deepEqual(Object.keys(record.categorySetVersions).sort(), [...CATEGORY_ORDER].sort());
+    assert.equal(record.categorySetVersions['account-registration'], 1);
+
+    // Only now does the scan move on.
+    const next = nextWork(log, drawOrder);
+    assert.equal(next.agency, second);
+    assert.notEqual(next.agency, agency);
+  });
+
+  test('premature exhaustion is refused, and says what the next work actually is', () => {
+    const log = emptyLog();
+    addDiscovery(log, { agency, category: 'account-registration', outcome: 'no-candidates' });
+    assert.throws(
+      () => exhaustAgency(log, drawOrder),
+      /no agency is exhausted at this point in the frozen order. The next work is:/
+    );
+    assert.deepEqual(log.exhausted, [], 'nothing may be recorded on the way out');
+  });
+
+  test('an arbitrary agency cannot be named, so the draw order cannot be skipped', () => {
+    const log = fullySearched(emptyLog(), agency);
+    assert.throws(
+      () => exhaustAgency(log, drawOrder, { agency: second }),
+      new RegExp(`the next agency in the frozen order is .*, not ${second.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`)
+    );
+    assert.deepEqual(log.exhausted, []);
+  });
+
+  test('an unassessed locked candidate blocks exhaustion', () => {
+    const log = emptyLog();
+    for (const category of CATEGORY_ORDER) {
+      if (category === 'enquiry-or-contact') {
+        // A real candidate with no outcome yet.
+        addDiscovery(log, { agency, category, outcome: 'candidates-found' });
+        recordCandidates(log, { agency, category, urls: ['https://w.govt.nz/contact'] });
+        lockCandidateSet(log, { agency, category });
+        approveCandidateSet(log, { agency, category, approved: true });
+        continue;
+      }
+      addDiscovery(log, { agency, category, outcome: 'no-candidates' });
+      recordCandidates(log, { agency, category, urls: [], declaration: 'none' });
+      lockCandidateSet(log, { agency, category });
+      approveCandidateSet(log, { agency, category, approved: true });
+    }
+    assert.throws(() => exhaustAgency(log, drawOrder), /no agency is exhausted at this point/);
+    assert.deepEqual(log.exhausted, []);
+  });
+
+  test('a category still pending approval blocks exhaustion', () => {
+    const log = fullySearched(emptyLog(), agency);
+    log.candidateSets[`${agency}\u0000subscription-or-newsletter`].approval = APPROVAL.PENDING;
+    assert.throws(() => exhaustAgency(log, drawOrder), /no agency is exhausted at this point/);
+  });
+
+  test('exhaustion is recorded once; a duplicate is refused', () => {
+    const log = fullySearched(emptyLog(), agency);
+    exhaustAgency(log, drawOrder);
+    assert.equal(log.exhausted.length, 1);
+    // By name, which is how an operator would repeat it.
+    assert.throws(
+      () => exhaustAgency(log, drawOrder, { agency }),
+      /is already recorded as exhausted/
+    );
+    assert.equal(log.exhausted.length, 1);
+  });
+
+  test('an agency with an approved captured page is not exhausted', () => {
+    const log = fullySearched(emptyLog(), agency);
+    log.attempts.push({
+      agency, category: 'enquiry-or-contact', status: 'captured', approval: APPROVAL.APPROVED,
+      url: 'https://w.govt.nz/contact', finalUrl: 'https://w.govt.nz/contact',
+      pageId: 'qualified-page', file: 'q.html', htmlSha256: 'x',
+      inclusionEvidence: 'has a name field', capturedAt: '2026-09-25T00:00:00Z',
+    });
+    assert.throws(
+      () => exhaustAgency(log, drawOrder, { agency }),
+      /has an approved captured page \(qualified-page\); an agency that contributed a page/
+    );
+    assert.deepEqual(log.exhausted, []);
+  });
+
+  test('the exhaustion is sealed with the corpus and published in provenance', () => {
+    const log = fullySearched(emptyLog(), agency);
+    const record = exhaustAgency(log, drawOrder);
+
+    const draft = deriveDraft(log, { frameSha256: 'a'.repeat(64), drawOrderSha256: 'b'.repeat(64) });
+    assert.equal(draft.exhaustedAgencies.length, 1);
+    assert.equal(draft.exhaustedAgencies[0].agency, agency);
+    assert.equal(draft.exhaustedAgencies[0].reason, EXHAUSTION_REASON);
+    assert.equal(draft.exhaustedAgencies[0].exhaustedAt, record.exhaustedAt);
+
+    // Sealed: the hash the seal takes of the draft must change if the exhaustion changes.
+    const digest = (d) => createHash('sha256').update(JSON.stringify(d)).digest('hex');
+    const tampered = structuredClone(draft);
+    tampered.exhaustedAgencies = [];
+    assert.notEqual(digest(draft), digest(tampered));
+
+    const dir = mkdtempSync(join(tmpdir(), 'formfair-exhaust-'));
+    try {
+      const { provenancePath } = publishProvenance(log, { to: dir });
+      const published = JSON.parse(readFileSync(provenancePath, 'utf8'));
+      assert.equal(published.exhaustedAgencies.length, 1);
+      assert.equal(published.exhaustedAgencies[0].agency, agency);
+      assert.equal(published.exhaustedAgencies[0].reason, EXHAUSTION_REASON);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('a legacy bare-string exhaustion still counts, and still seals', () => {
+    // A log written before the record existed must not silently stop counting as exhausted,
+    // which would re-offer a finished agency as work.
+    const log = fullySearched(emptyLog(), agency);
+    log.exhausted = [agency];
+    assert.equal(nextWork(log, drawOrder).agency, second);
+    const draft = deriveDraft(log, { frameSha256: 'a'.repeat(64), drawOrderSha256: 'b'.repeat(64) });
+    assert.equal(draft.exhaustedAgencies[0].agency, agency);
+    assert.equal(draft.exhaustedAgencies[0].exhaustedAt, null);
   });
 });

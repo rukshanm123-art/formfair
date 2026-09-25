@@ -25,7 +25,7 @@ import { POLICY, parseRobots, isAllowed, createPacer } from './politeness.mjs';
 import {
   readLog, writeLog, appendAttempt, writeDerived, ELIGIBILITY_CRITERIA, APPROVAL,
   recordCandidates, lockCandidateSet, categorySettled, approveCandidateSet,
-  supersedeCandidateSet, publishProvenance,
+  supersedeCandidateSet, publishProvenance, exhaustAgency, EXHAUSTION_REASON,
 } from './run.mjs';
 import {
   DISCOVERY_KINDS, DISCOVERY_METHODS, DISCOVERY_OUTCOMES, remainingBudget, canonicalise,
@@ -66,6 +66,9 @@ const USAGE = `usage:
                           --reason "<why the rejected set is being redone>"
   cli-capture.mjs publish --out <dir> --to <tracked dir>
   cli-capture.mjs packet  --out <dir> --agency <name> --category <c>
+  cli-capture.mjs exhaust --out <dir> [--agency <name, checked against the draw order>]
+                          (records the next agency as searched in full with no eligible form;
+                           the agency is derived from the draw order, never supplied)
   cli-capture.mjs next    --out <dir>
   cli-capture.mjs budget  --out <dir> --agency <name> [--category <c>]
   cli-capture.mjs approve --out <dir> (--id <c-NNNN> | --url <url>)
@@ -511,8 +514,32 @@ function doNext() {
   work.pending.forEach((u) => console.log(`  - ${u}`));
 }
 
+/**
+ * Records the next agency in the frozen order as exhausted.
+ *
+ * `--agency` is a check, not an argument: the agency comes from the draw order, and naming a
+ * different one is refused rather than honoured, because exhausting out of turn would break the
+ * sampling claim the draw order makes.
+ */
+function doExhaust() {
+  const dir = require_('out');
+  const logPath = logPathFor(dir);
+  const log = readLog(logPath);
+  const drawOrder = parseDrawOrder(
+    readFile(new URL('../evaluation/frame/draw-order.csv', import.meta.url), 'utf8')
+  );
+  const record = exhaustAgency(log, drawOrder, { agency: flag('agency') });
+  writeLog(logPath, log);
+  writeDerived({ log, dir, frameSha256: flag('frame-sha256'), drawOrderSha256: flag('draw-order-sha256'), synthetic: has('synthetic') });
+  console.log(`exhausted: ${record.agency} at ${record.exhaustedAt}`);
+  console.log(`reason:    ${record.reason}`);
+  for (const [category, version] of Object.entries(record.categorySetVersions)) {
+    console.log(`  ${category.padEnd(28)} set v${version}`);
+  }
+}
+
 const commands = { packet: doPacket, candidates: doCandidates, lock: doLock, 'approve-set': doApproveSet,
-  'supersede-set': doSupersedeSet, publish: doPublish, next: doNext, capture: doCapture, exclude: doExclude, discovery: doDiscovery, budget: doBudget, approve: doApprove, status: doStatus, build: doBuild };
+  'supersede-set': doSupersedeSet, publish: doPublish, next: doNext, capture: doCapture, exclude: doExclude, discovery: doDiscovery, budget: doBudget, approve: doApprove, status: doStatus, build: doBuild, exhaust: doExhaust };
 if (!commands[command]) die(USAGE);
 try {
   await commands[command]();

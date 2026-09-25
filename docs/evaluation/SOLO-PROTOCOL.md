@@ -1070,3 +1070,75 @@ there is no directly linked form to admit. That reason is sufficient on its own.
 that record also observes that those are other organisations' support channels rather than the
 agency's own enquiry channel; **that observation is not an exclusion rule and must not be used
 as one.** Where the two could diverge, the direct-link test governs.
+
+## Amendment 9: an agency leaving the scan without a page
+
+**Dated 25 September 2026. Written before the first real exhaustion is recorded.**
+`selection-v1.0.8`. Moves no earlier tag.
+
+### The gap
+
+The second agency in the draw order was searched in all four categories and yielded no eligible
+form: no account registration anywhere on its single website, application forms published only
+as DOCX, contact by email, and a newsletter subscribed to by email. `next` said so — *"every
+category is settled with no eligible form. Record it as exhausted"* — and then nothing could
+record it.
+
+`nextWork` could return `exhaustedAgency`, but no command wrote to `log.exhausted`, the array
+stayed empty, and the scan therefore could not reach the third agency at all. The only way
+onward was to edit the log by hand, which this protocol forbids for exactly the reason that
+makes the prohibition worth keeping: a hand-written exhaustion would have no timestamp, no
+stated reason, and no evidence, and would be indistinguishable afterwards from an agency quietly
+skipped because its forms looked inconvenient.
+
+### Why this is not bookkeeping
+
+An exhaustion is a claim about the sample. It is the difference between *forty agencies were
+sampled* and *forty-five agencies were searched, of which forty had an eligible form*, and only
+the second of those supports a prevalence statement. The agencies that leave the scan
+contributing nothing are part of the denominator, so each needs to say when it left, why, and on
+what evidence.
+
+### The operation
+
+**The agency is derived from the draw order, never supplied.** `exhaust` asks `nextWork` whose
+turn it is and refuses anything else. `--agency` is a *check*: an operator states who they think
+it is, and a mismatch is refused rather than honoured. Accepting an agency would let the order be
+skipped — exhausting the seventh while the third is unfinished — and the draw order is the whole
+sampling claim.
+
+**Every category must be settled and approved.** All four sets must exist, be locked, be
+researcher-approved, and have an outcome for every locked candidate. This is re-verified in the
+operation rather than inferred from `nextWork` having said so, on the lesson already learned
+twice here: a rule that lives in one caller is a rule another caller does not have.
+
+**An agency that contributed a page is not exhausted.** An approved capture and an exhaustion are
+mutually exclusive, and the refusal names the page.
+
+**The record is structured and singular.** It carries the agency, the timestamp, the frozen
+reason, and the version of each category's candidate set. The reason is frozen rather than
+free text because it is the denominator's explanation: five agencies that did not qualify is
+interpretable only if all five left for the same stated reason. A duplicate is refused.
+
+**It is sealed, not merely held in memory.** The exhaustion records are carried into the corpus
+draft the seal hashes, and into the published provenance. A corpus that recorded only its pages
+would describe a sample of forty without saying how many agencies were examined to obtain them.
+A legacy bare-string entry is normalised so that an older log still seals and still counts as
+exhausted — otherwise a finished agency would be silently re-offered as work.
+
+**`next` advances only after this explicit action**, which is what the first test below asserts
+end to end.
+
+Nine tests: the valid transition with `next` advancing afterwards; premature exhaustion, which
+reports what the next work actually is; naming an arbitrary agency, which would skip the order;
+an unassessed locked candidate; a category still pending approval; a duplicate; an agency holding
+an approved capture; inclusion in both the sealed draft and the published provenance, including
+that the draft's hash changes if the exhaustion is removed; and the legacy bare-string case.
+Every one asserts that nothing is written on a refusal. The capture package has 161 tests.
+
+### A note on spelling
+
+The second agency's newsletter is the *Pānui*, with the macron, and it is written that way in
+this document and in the final report. The locked discovery record for that page spells it
+without the macron. That record is approved and sealed into its round; it is not rewritten for
+typography alone, and this note is the correction.

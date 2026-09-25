@@ -22,7 +22,7 @@ import { POLICY } from './politeness.mjs';
 import {
   DISCOVERY_KINDS, remainingBudget, MAX_CANDIDATES_PER_CATEGORY, MAX_CANDIDATES_PER_AGENCY,
   canonicalise, setKey, MAX_QUALIFIED_AGENCIES, CATEGORY_ORDER, lockCandidates, isSuperseded,
-  DISCOVERY_METHODS, DISCOVERY_OUTCOMES,
+  DISCOVERY_METHODS, DISCOVERY_OUTCOMES, nextWork, isExhausted,
 } from './selection.mjs';
 
 export const LOG_SCHEMA = 'formfair/capture-log@1';
@@ -547,6 +547,117 @@ export function approveCandidateSet(log, { agency, category, approved, note }) {
 }
 
 /**
+ * The frozen reason an agency leaves the scan without contributing a page.
+ *
+ * Frozen, not free text, because it is the denominator's explanation. Forty agencies that
+ * qualified and five that did not is only interpretable if every one of the five left for the
+ * same stated reason, and an operator-authored sentence per agency would not guarantee that.
+ */
+export const EXHAUSTION_REASON =
+  'all four categories in the frozen priority order were searched and none yielded an eligible form';
+
+/**
+ * Records that an agency is exhausted: searched in full, contributing no page.
+ *
+ * selection-v1.0.8. `nextWork` could already SAY an agency was exhausted, but nothing could
+ * record it - no command wrote to `log.exhausted`, so the scan could not advance past the first
+ * agency that failed to qualify without hand-editing the log, which the protocol forbids. An
+ * exhaustion is also a claim about the sample, not a bookkeeping detail: it is what makes the
+ * prevalence denominator "agencies searched" rather than "agencies with a form", so it needs a
+ * timestamp, a fixed reason, and the evidence it rests on.
+ *
+ * The agency is DERIVED from `nextWork` and never taken from the caller. Accepting an agency
+ * would let the draw order be skipped - exhausting agency seven while three is unfinished - and
+ * the draw order is the whole sampling claim. A caller may pass `agency` only to be checked
+ * against the derived one, which turns an operator's mistake into a refusal rather than a
+ * silent reordering.
+ */
+export function exhaustAgency(log, drawOrder, { agency = null } = {}) {
+  const approvedCaptureFor = (ag) =>
+    log.attempts.find((a) => a.agency === ag && a.status === 'captured' && a.approval === APPROVAL.APPROVED);
+
+  // Checked on the NAMED agency first, so that an operator who names the wrong one gets the
+  // specific reason rather than a generic "that is not the next work" message.
+  if (agency !== null) {
+    if (isExhausted(log, agency)) {
+      throw new Error(`${agency} is already recorded as exhausted; an exhaustion is recorded once`);
+    }
+    const qualified = approvedCaptureFor(agency);
+    if (qualified) {
+      throw new Error(
+        `${agency} has an approved captured page (${qualified.pageId}); an agency that ` +
+          'contributed a page to the corpus is not exhausted'
+      );
+    }
+  }
+
+  const work = nextWork(log, drawOrder);
+  if (!work.exhaustedAgency) {
+    const what = work.done
+      ? work.reason
+      : `${work.agency} / ${work.category ?? 'unknown category'}: ${
+          work.reason ?? (work.needsLock ? 'the candidate set is not locked' : 'candidates are unassessed')
+        }`;
+    throw new Error(
+      `no agency is exhausted at this point in the frozen order. The next work is: ${what}`
+    );
+  }
+  if (agency !== null && agency !== work.agency) {
+    throw new Error(
+      `the next agency in the frozen order is ${work.agency}, not ${agency}. An exhaustion is ` +
+        'derived from the draw order and cannot be recorded out of turn.'
+    );
+  }
+
+  const target = work.agency;
+  if (isExhausted(log, target)) {
+    throw new Error(`${target} is already recorded as exhausted; an exhaustion is recorded once`);
+  }
+  const qualified = approvedCaptureFor(target);
+  if (qualified) {
+    throw new Error(
+      `${target} has an approved captured page (${qualified.pageId}); an agency that contributed ` +
+        'a page to the corpus is not exhausted'
+    );
+  }
+
+  // Re-verified here rather than inferred from `nextWork` having said so. The rule belongs to
+  // the data, and the same lesson applies as at the approval gate: a guard that lives in one
+  // caller is a guard that another caller does not have.
+  const categorySetVersions = {};
+  for (const category of CATEGORY_ORDER) {
+    const set = log.candidateSets?.[setKey(target, category)];
+    if (!set) {
+      throw new Error(`${target} / ${category} was never searched; every category must be settled`);
+    }
+    if (!set.lockedAt) throw new Error(`${target} / ${category} is not locked`);
+    if (set.approval !== APPROVAL.APPROVED) {
+      throw new Error(`${target} / ${category} is ${set.approval ?? 'pending'}, not approved`);
+    }
+    const decided = new Set(
+      log.attempts.filter((a) => a.agency === target && a.status !== 'discovery').map((a) => a.url)
+    );
+    const unassessed = (set.locked ?? []).filter((u) => !decided.has(u));
+    if (unassessed.length) {
+      throw new Error(
+        `${target} / ${category} has ${unassessed.length} locked candidate(s) with no outcome: ` +
+          unassessed.join(', ')
+      );
+    }
+    categorySetVersions[category] = set.version;
+  }
+
+  const record = {
+    agency: target,
+    exhaustedAt: new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'),
+    reason: EXHAUSTION_REASON,
+    categorySetVersions,
+  };
+  (log.exhausted ??= []).push(record);
+  return record;
+}
+
+/**
  * Archives a rejected candidate set and opens a new version.
  *
  * A rejected set is not deleted. The reason it was rejected - here, discovery provenance
@@ -745,6 +856,15 @@ export function deriveDraft(log, { frameSha256, drawOrderSha256, selectionLedger
     drawOrderSha256,
     selectionLedgerFile,
     pages,
+    // selection-v1.0.8. Sealed, not merely held in memory. An agency that was searched in full
+    // and yielded nothing is part of the denominator, so a corpus that recorded only its pages
+    // would describe a sample of forty without saying how many agencies were looked at to get
+    // them. Legacy bare-string entries are normalised so an older log still seals.
+    exhaustedAgencies: (log.exhausted ?? []).map((e) =>
+      typeof e === 'string'
+        ? { agency: e, exhaustedAt: null, reason: EXHAUSTION_REASON, categorySetVersions: null }
+        : e
+    ),
   };
 }
 
@@ -790,6 +910,9 @@ export function publishProvenance(log, { to }) {
       acc[key] = (acc[key] ?? 0) + 1;
       return acc;
     }, {}),
+    exhaustedAgencies: (log.exhausted ?? []).map((e) =>
+      typeof e === 'string' ? { agency: e, exhaustedAt: null, reason: EXHAUSTION_REASON } : e
+    ),
     discoveryByRound: discovery.reduce((acc, a) => {
       const key = `${a.agency ?? '?'} / ${a.category ?? 'unattributed'} v${a.candidateSetVersion ?? '?'}`;
       acc[key] = (acc[key] ?? 0) + 1;

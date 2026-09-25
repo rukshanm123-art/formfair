@@ -153,6 +153,18 @@ export function lockCandidates(discovered) {
  * category cannot be reached before a higher one is finished.
  */
 /**
+ * Has this agency been recorded as exhausted?
+ *
+ * selection-v1.0.8. `log.exhausted` now holds a record per agency rather than a bare name, so
+ * that an exhaustion carries its timestamp, its reason and the category-set versions it rests
+ * on. A bare string is still recognised, because a log written before this change would
+ * otherwise silently stop counting as exhausted and the agency would be re-offered as work.
+ */
+export function isExhausted(log, agency) {
+  return (log.exhausted ?? []).some((e) => (typeof e === 'string' ? e : e?.agency) === agency);
+}
+
+/**
  * What this agency still has outstanding, or null.
  *
  * `requireEveryCategory` distinguishes the two callers. For an agency still being worked, a
@@ -226,7 +238,7 @@ export function nextWork(log, drawOrder) {
       if (outstanding) return outstanding;
       continue;
     }
-    if (log.exhausted?.includes(row.agency)) continue;
+    if (isExhausted(log, row.agency)) continue;
 
     const outstanding = unfinishedFor(log, row.agency, { requireEveryCategory: true });
     if (outstanding) return outstanding;
