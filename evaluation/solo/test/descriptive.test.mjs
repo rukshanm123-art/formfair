@@ -3,9 +3,9 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import {
   analyseDescriptively,
@@ -18,7 +18,7 @@ import {
   EXHAUSTION_CATEGORIES,
   SOLO_PROTOCOL_TAG,
 } from '../descriptive.mjs';
-import { loadSoloInstrument, SOLO_INSTRUMENT_TAG, SOLO_SEALER_TAG } from '../instrument.mjs';
+import { loadSoloInstrument, sealerIdentity, SOLO_INSTRUMENT_TAG, SOLO_SEALER_TAG } from '../instrument.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repo = join(here, '..', '..', '..');
@@ -321,21 +321,28 @@ describe('the corpus seal requires the exhaustion records', () => {
     return log;
   }
 
-  function prepareReal(dir, draftObj, { log = captureLogFor(draftObj) } = {}) {
-    writeFileSync(join(dir, 'selection-ledger.csv'), 'agency,status\n');
+  /**
+   * Mirrors the real layout: the capture ROOT holds `capture-log.json` and a `captures/`
+   * directory beside it. Flattening the two in a fixture would have let the path checks pass
+   * without ever being exercised.
+   */
+  function prepareReal(dir, draftObj, { log = captureLogFor(draftObj), logName = 'capture-log.json' } = {}) {
+    const capturesDir = join(dir, 'captures');
+    mkdirSync(capturesDir, { recursive: true });
+    writeFileSync(join(capturesDir, 'selection-ledger.csv'), 'agency,status\n');
     for (const p of draftObj.pages) {
-      writeFileSync(join(dir, p.file), '<form><label for="n">Full name</label><input id="n"></form>');
+      writeFileSync(join(capturesDir, p.file), '<form><label for="n">Full name</label><input id="n"></form>');
     }
-    const captureLogPath = join(dir, 'capture-log.json');
+    const captureLogPath = join(dir, logName);
     writeFileSync(captureLogPath, `${JSON.stringify(log, null, 2)}\n`);
-    return captureLogPath;
+    return { capturesDir, captureLogPath, captureRoot: dir };
   }
 
   test('a one-page corpus with no exhaustion cannot seal', async () => {
     await inTemp(async (dir) => {
       const d = realDraft({ pageCount: 1, exhaustedCount: 0 });
-      const captureLogPath = prepareReal(dir, d);
-      const sealed = sealCorpus({ draft: d, capturesDir: dir, instrument: identity, frameDir, captureLogPath });
+      const { capturesDir, captureLogPath } = prepareReal(dir, d);
+      const sealed = sealCorpus({ draft: d, capturesDir, instrument: identity, frameDir, captureLogPath });
       assert.equal(sealed.manifest, null, 'a one-page corpus must not seal');
       assert.ok(
         sealed.problems.some((p) => /every agency in the frozen order must be either a page or a recorded exhaustion/.test(p)),
@@ -348,14 +355,14 @@ describe('the corpus seal requires the exhaustion records', () => {
     await inTemp(async (dir) => {
       // A complete corpus: every agency in the frozen order is a page or an exhaustion.
       const complete = realDraft({ pageCount: 2, exhaustedCount: order.length - 2 });
-      const captureLogPath = prepareReal(dir, complete);
-      const ok = sealCorpus({ draft: complete, capturesDir: dir, instrument: identity, frameDir, captureLogPath });
+      const { capturesDir, captureLogPath } = prepareReal(dir, complete);
+      const ok = sealCorpus({ draft: complete, capturesDir, instrument: identity, frameDir, captureLogPath });
       assert.ok(ok.manifest, ok.problems.join('; '));
 
       // Remove one exhaustion; the same corpus must now refuse to seal.
       const missing = structuredClone(complete);
       missing.exhaustedAgencies = missing.exhaustedAgencies.slice(0, -1);
-      const failed = sealCorpus({ draft: missing, capturesDir: dir, instrument: identity, frameDir, captureLogPath });
+      const failed = sealCorpus({ draft: missing, capturesDir, instrument: identity, frameDir, captureLogPath });
       assert.equal(failed.manifest, null, 'removing an exhaustion must break the seal');
       assert.ok(
         failed.problems.some((p) => p.includes(order[order.length - 1])),
@@ -367,8 +374,8 @@ describe('the corpus seal requires the exhaustion records', () => {
   test('the exhaustion records reach the manifest and survive loading', async () => {
     await inTemp(async (dir) => {
       const complete = realDraft({ pageCount: 2, exhaustedCount: order.length - 2 });
-      const captureLogPath = prepareReal(dir, complete);
-      const sealed = sealCorpus({ draft: complete, capturesDir: dir, instrument: identity, frameDir, captureLogPath });
+      const { capturesDir, captureLogPath } = prepareReal(dir, complete);
+      const sealed = sealCorpus({ draft: complete, capturesDir, instrument: identity, frameDir, captureLogPath });
       assert.ok(sealed.manifest, sealed.problems.join('; '));
       assert.equal(sealed.manifest.exhaustedAgencies.length, order.length - 2);
       assert.equal(sealed.manifest.exhaustedAgencies[0].agency, order[2]);
@@ -380,7 +387,7 @@ describe('the corpus seal requires the exhaustion records', () => {
       writeFileSync(manifestPath, `${JSON.stringify(sealed.manifest, null, 2)}\n`);
       const reloaded = JSON.parse(readFileSync(manifestPath, 'utf8'));
       assert.deepEqual(reloaded.exhaustedAgencies, sealed.manifest.exhaustedAgencies);
-      const loaded = loadSealedPages({ manifest: reloaded, manifestPath, capturesDir: dir });
+      const loaded = loadSealedPages({ manifest: reloaded, manifestPath, capturesDir });
       assert.deepEqual(loaded.problems, [], 'loading must not object to the new field');
       assert.equal(loaded.pages.length, 2, 'loading the pages must still work alongside the records');
       // The records are part of what the manifest hash covers, so a study that verifies the
@@ -393,8 +400,8 @@ describe('the corpus seal requires the exhaustion records', () => {
     await inTemp(async (dir) => {
       const d = realDraft({ pageCount: 2, exhaustedCount: order.length - 2 });
       d.exhaustedAgencies[0].reason = 'no forms found';
-      const captureLogPath = prepareReal(dir, d);
-      const sealed = sealCorpus({ draft: d, capturesDir: dir, instrument: identity, frameDir, captureLogPath });
+      const { capturesDir, captureLogPath } = prepareReal(dir, d);
+      const sealed = sealCorpus({ draft: d, capturesDir, instrument: identity, frameDir, captureLogPath });
       assert.equal(sealed.manifest, null);
       assert.ok(sealed.problems.some((p) => /must be the frozen exhaustion reason/.test(p)));
     });
@@ -404,8 +411,8 @@ describe('the corpus seal requires the exhaustion records', () => {
     await inTemp(async (dir) => {
       const d = realDraft({ pageCount: 2, exhaustedCount: order.length - 2 });
       d.exhaustedAgencies[0] = { agency: order[2], exhaustedAt: null, reason: EXHAUSTION_REASON, categorySetVersions: null };
-      const captureLogPath = prepareReal(dir, d);
-      const sealed = sealCorpus({ draft: d, capturesDir: dir, instrument: identity, frameDir, captureLogPath });
+      const { capturesDir, captureLogPath } = prepareReal(dir, d);
+      const sealed = sealCorpus({ draft: d, capturesDir, instrument: identity, frameDir, captureLogPath });
       assert.equal(sealed.manifest, null);
       assert.ok(sealed.problems.some((p) => /predates the exhaustion operation/.test(p)));
       assert.ok(sealed.problems.some((p) => /categorySetVersions must name all four categories/.test(p)));
@@ -416,8 +423,8 @@ describe('the corpus seal requires the exhaustion records', () => {
     await inTemp(async (dir) => {
       const d = realDraft({ pageCount: 2, exhaustedCount: order.length - 2 });
       d.exhaustedAgencies.push(exhaustion(order[0]));
-      const captureLogPath = prepareReal(dir, d);
-      const sealed = sealCorpus({ draft: d, capturesDir: dir, instrument: identity, frameDir, captureLogPath });
+      const { capturesDir, captureLogPath } = prepareReal(dir, d);
+      const sealed = sealCorpus({ draft: d, capturesDir, instrument: identity, frameDir, captureLogPath });
       assert.equal(sealed.manifest, null);
       assert.ok(sealed.problems.some((p) => /is both a sealed page and an exhausted agency/.test(p)));
     });
@@ -427,8 +434,8 @@ describe('the corpus seal requires the exhaustion records', () => {
     await inTemp(async (dir) => {
       const d = realDraft({ pageCount: 2, exhaustedCount: order.length - 2 });
       d.exhaustedAgencies.push(exhaustion(order[2]));
-      const captureLogPath = prepareReal(dir, d);
-      const sealed = sealCorpus({ draft: d, capturesDir: dir, instrument: identity, frameDir, captureLogPath });
+      const { capturesDir, captureLogPath } = prepareReal(dir, d);
+      const sealed = sealCorpus({ draft: d, capturesDir, instrument: identity, frameDir, captureLogPath });
       assert.equal(sealed.manifest, null);
       assert.ok(sealed.problems.some((p) => /recorded as exhausted more than once/.test(p)));
     });
@@ -438,8 +445,8 @@ describe('the corpus seal requires the exhaustion records', () => {
     await inTemp(async (dir) => {
       const d = realDraft({ pageCount: 2, exhaustedCount: order.length - 2 });
       d.exhaustedAgencies[0] = exhaustion('Department of Nowhere');
-      const captureLogPath = prepareReal(dir, d);
-      const sealed = sealCorpus({ draft: d, capturesDir: dir, instrument: identity, frameDir, captureLogPath });
+      const { capturesDir, captureLogPath } = prepareReal(dir, d);
+      const sealed = sealCorpus({ draft: d, capturesDir, instrument: identity, frameDir, captureLogPath });
       assert.equal(sealed.manifest, null);
       assert.ok(sealed.problems.some((p) => /outside the frozen frame: Department of Nowhere/.test(p)));
     });
@@ -451,8 +458,8 @@ describe('the corpus seal requires the exhaustion records', () => {
       // order rather than from within the first forty-one: an agency was reached out of turn.
       const d = realDraft({ pageCount: 40, exhaustedCount: 0 });
       d.exhaustedAgencies = [exhaustion(order[44])];
-      const captureLogPath = prepareReal(dir, d);
-      const sealed = sealCorpus({ draft: d, capturesDir: dir, instrument: identity, frameDir, captureLogPath });
+      const { capturesDir, captureLogPath } = prepareReal(dir, d);
+      const sealed = sealCorpus({ draft: d, capturesDir, instrument: identity, frameDir, captureLogPath });
       assert.equal(sealed.manifest, null);
       assert.ok(
         sealed.problems.some((p) => /are not the first 41 of the frozen draw order/.test(p)),
@@ -464,8 +471,8 @@ describe('the corpus seal requires the exhaustion records', () => {
   test('forty pages and no exhaustions seals, being an exact prefix', async () => {
     await inTemp(async (dir) => {
       const d = realDraft({ pageCount: 40, exhaustedCount: 0 });
-      const captureLogPath = prepareReal(dir, d);
-      const sealed = sealCorpus({ draft: d, capturesDir: dir, instrument: identity, frameDir, captureLogPath });
+      const { capturesDir, captureLogPath } = prepareReal(dir, d);
+      const sealed = sealCorpus({ draft: d, capturesDir, instrument: identity, frameDir, captureLogPath });
       assert.ok(sealed.manifest, sealed.problems.join('; '));
       assert.deepEqual(sealed.manifest.exhaustedAgencies, []);
     });
@@ -501,8 +508,8 @@ describe('the corpus seal requires the exhaustion records', () => {
         supersededCandidateSets: [],
         exhausted: [],
       };
-      const captureLogPath = prepareReal(dir, d, { log: emptyLogFile });
-      const sealed = sealCorpus({ draft: d, capturesDir: dir, instrument: identity, frameDir, captureLogPath });
+      const { capturesDir, captureLogPath } = prepareReal(dir, d, { log: emptyLogFile });
+      const sealed = sealCorpus({ draft: d, capturesDir, instrument: identity, frameDir, captureLogPath });
 
       assert.equal(sealed.manifest, null, 'unsupported exhaustions must not seal');
       const unrecorded = sealed.problems.filter((p) => /is not recorded as exhausted in the capture log/.test(p));
@@ -515,8 +522,8 @@ describe('the corpus seal requires the exhaustion records', () => {
       const d = realDraft({ pageCount: 1, exhaustedCount: order.length - 1 });
       const log = captureLogFor(d);
       log.candidateSets[`${order[1]}\u0000service-application`].approval = 'pending';
-      const captureLogPath = prepareReal(dir, d, { log });
-      const sealed = sealCorpus({ draft: d, capturesDir: dir, instrument: identity, frameDir, captureLogPath });
+      const { capturesDir, captureLogPath } = prepareReal(dir, d, { log });
+      const sealed = sealCorpus({ draft: d, capturesDir, instrument: identity, frameDir, captureLogPath });
       assert.equal(sealed.manifest, null);
       assert.ok(sealed.problems.some((p) => /service-application set is pending, not approved/.test(p)));
     });
@@ -527,8 +534,8 @@ describe('the corpus seal requires the exhaustion records', () => {
       const d = realDraft({ pageCount: 1, exhaustedCount: order.length - 1 });
       const log = captureLogFor(d);
       log.candidateSets[`${order[1]}\u0000service-application`].version = 9;
-      const captureLogPath = prepareReal(dir, d, { log });
-      const sealed = sealCorpus({ draft: d, capturesDir: dir, instrument: identity, frameDir, captureLogPath });
+      const { capturesDir, captureLogPath } = prepareReal(dir, d, { log });
+      const sealed = sealCorpus({ draft: d, capturesDir, instrument: identity, frameDir, captureLogPath });
       assert.equal(sealed.manifest, null);
       assert.ok(sealed.problems.some((p) => /is version 9, but the exhaustion claims version 3/.test(p)));
     });
@@ -539,8 +546,8 @@ describe('the corpus seal requires the exhaustion records', () => {
     // against a forty-one agency prefix. The study takes at most forty.
     await inTemp(async (dir) => {
       const d = realDraft({ pageCount: 41, exhaustedCount: 0 });
-      const captureLogPath = prepareReal(dir, d);
-      const sealed = sealCorpus({ draft: d, capturesDir: dir, instrument: identity, frameDir, captureLogPath });
+      const { capturesDir, captureLogPath } = prepareReal(dir, d);
+      const sealed = sealCorpus({ draft: d, capturesDir, instrument: identity, frameDir, captureLogPath });
       assert.equal(sealed.manifest, null, 'forty-one pages must not seal');
       assert.ok(
         sealed.problems.some((p) => /41 agencies have a sealed page, which exceeds the target of 40/.test(p)),
@@ -552,8 +559,8 @@ describe('the corpus seal requires the exhaustion records', () => {
   test('a real seal requires the capture log to be supplied at all', async () => {
     await inTemp(async (dir) => {
       const d = realDraft({ pageCount: 2, exhaustedCount: order.length - 2 });
-      prepareReal(dir, d);
-      const sealed = sealCorpus({ draft: d, capturesDir: dir, instrument: identity, frameDir });
+      const { capturesDir } = prepareReal(dir, d);
+      const sealed = sealCorpus({ draft: d, capturesDir, instrument: identity, frameDir });
       assert.equal(sealed.manifest, null);
       assert.ok(sealed.problems.some((p) => /captureLogPath is required to seal a real corpus/.test(p)));
     });
@@ -564,8 +571,8 @@ describe('the corpus seal requires the exhaustion records', () => {
       const d = realDraft({ pageCount: 2, exhaustedCount: order.length - 2 });
       const log = captureLogFor(d);
       log.attempts[0].approval = 'pending';
-      const captureLogPath = prepareReal(dir, d, { log });
-      const sealed = sealCorpus({ draft: d, capturesDir: dir, instrument: identity, frameDir, captureLogPath });
+      const { capturesDir, captureLogPath } = prepareReal(dir, d, { log });
+      const sealed = sealCorpus({ draft: d, capturesDir, instrument: identity, frameDir, captureLogPath });
       assert.equal(sealed.manifest, null);
       assert.ok(sealed.problems.some((p) => /is not an approved capture in the capture log/.test(p)));
     });
@@ -574,10 +581,10 @@ describe('the corpus seal requires the exhaustion records', () => {
   test('the manifest names this protocol, the sealer, and the bound capture log', async () => {
     await inTemp(async (dir) => {
       const d = realDraft({ pageCount: 2, exhaustedCount: order.length - 2 });
-      const captureLogPath = prepareReal(dir, d);
+      const { capturesDir, captureLogPath } = prepareReal(dir, d);
       const sealer = { tag: SOLO_SEALER_TAG, commit: 'f'.repeat(40), dirty: false };
       const sealed = sealCorpus({
-        draft: d, capturesDir: dir, instrument: identity, frameDir, captureLogPath, sealer,
+        draft: d, capturesDir, instrument: identity, frameDir, captureLogPath, sealer,
       });
       assert.ok(sealed.manifest, sealed.problems.join('; '));
       // It used to default to solo-protocol-v1.0.0, so a v1.0.1 manifest misnamed its own rules.
@@ -593,6 +600,214 @@ describe('the corpus seal requires the exhaustion records', () => {
         sealed.manifest.captureLog.sha256,
         createHash('sha256').update(readFileSync(captureLogPath)).digest('hex')
       );
+    });
+  });
+});
+
+/**
+ * The official sealing command, and the capture log it binds.
+ *
+ * solo-protocol-v1.0.3. Two defects made the official command unusable or unsound.
+ *
+ * Both identities were read from one directory: `instrumentIdentity(instrumentDir)` and
+ * `sealerIdentity(instrumentDir)`. But `evaluation-v1.1.0` and the solo-protocol tag point at
+ * different commits, so no single checkout can satisfy both, and whichever check ran second
+ * always failed. Official sealing could not succeed at all.
+ *
+ * And the capture log was recorded but never re-verified, under a hardcoded filename. The
+ * manifest said `capture-log.json` while the seal had read whatever `--capture-log` pointed at,
+ * anywhere on disk, and nothing afterwards re-read it - so the one artefact proving which
+ * searches happened could be swapped or edited after sealing.
+ */
+describe('the sealer and the analyser are separate checkouts', () => {
+  test('sealerIdentity defaults to the checkout containing the sealer', () => {
+    const own = sealerIdentity();
+    assert.equal(own.directory, resolve(repo));
+    assert.equal(own.tag, SOLO_SEALER_TAG);
+  });
+
+  test('sealerIdentity does not follow the analyser directory', () => {
+    // The bug: passing the analyser checkout here made the two identities the same directory.
+    const elsewhere = mkdtempSync(join(tmpdir(), 'formfair-elsewhere-'));
+    try {
+      assert.equal(sealerIdentity(elsewhere).directory, resolve(elsewhere));
+      assert.notEqual(sealerIdentity().directory, resolve(elsewhere));
+    } finally {
+      rmSync(elsewhere, { recursive: true, force: true });
+    }
+  });
+
+  test('the official CLI reads the analyser identity from the environment, not from its own checkout', () => {
+    // A real seal with the analyser pointed at a non-git directory must fail on the ANALYSER
+    // tag. That it reaches that check at all is the evidence the sealer resolved itself
+    // separately: when both identities shared a directory, this could never be distinguished.
+    const elsewhere = mkdtempSync(join(tmpdir(), 'formfair-analyser-'));
+    try {
+      const result = spawnSync(
+        process.execPath,
+        [join(here, '..', 'cli-seal-corpus.mjs'), '--draft', 'x.json', '--captures', 'y', '--out', 'z.json'],
+        { encoding: 'utf8', env: { ...process.env, FORMFAIR_SOLO_INSTRUMENT_DIR: elsewhere } }
+      );
+      assert.equal(result.status, 1);
+      assert.match(result.stderr, new RegExp(`clean instrument tagged ${SOLO_INSTRUMENT_TAG}`));
+      assert.doesNotMatch(result.stderr, /clean sealer checkout/);
+    } finally {
+      rmSync(elsewhere, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('the sealed capture log is bound by path and re-verified', () => {
+  const frameDir = join(repo, 'evaluation', 'frame');
+  const order = readFileSync(join(frameDir, 'draw-order.csv'), 'utf8')
+    .split(/\r?\n/)
+    .filter((l) => /^\d+,/.test(l))
+    .map((l) => {
+      const out = []; let f = ''; let q = false;
+      for (let i = 0; i < l.length; i++) {
+        const c = l[i];
+        if (q) { if (c === '"' && l[i + 1] === '"') { f += '"'; i++; } else if (c === '"') q = false; else f += c; }
+        else if (c === '"') q = true; else if (c === ',') { out.push(f); f = ''; } else f += c;
+      }
+      out.push(f);
+      return { position: Number(out[0]), agency: out[1] };
+    })
+    .sort((a, b) => a.position - b.position)
+    .map((r) => r.agency);
+
+  const exhaustion = (agency) => ({
+    agency, exhaustedAt: '2026-09-25T04:00:00Z', reason: EXHAUSTION_REASON,
+    categorySetVersions: {
+      'account-registration': 1, 'service-application': 3,
+      'enquiry-or-contact': 1, 'subscription-or-newsletter': 1,
+    },
+  });
+
+  function build(dir, { logName = 'capture-log.json' } = {}) {
+    const pages = [{
+      pageId: 'real-001', agency: order[0], website: 'https://example.invalid/',
+      originalUrl: 'https://example.invalid/contact', finalUrl: 'https://example.invalid/contact',
+      capturedAt: '2026-09-22T00:00:00Z', browser: 'Chromium 153', automationTool: 'playwright 1.63.0',
+      viewport: { width: 1280, height: 800 }, locale: 'en-NZ', redirects: [],
+      category: 'enquiry-or-contact', file: 'real-001.html',
+    }];
+    const exhaustedAgencies = order.slice(1).map(exhaustion);
+    const d = {
+      schema: 'formfair/solo-corpus-draft@1', synthetic: false,
+      frameSha256: FROZEN_FRAME_SHA256, drawOrderSha256: FROZEN_DRAW_ORDER_SHA256,
+      selectionLedgerFile: 'selection-ledger.csv', pages, exhaustedAgencies,
+    };
+    const log = {
+      schema: 'formfair/capture-log@1',
+      attempts: [{
+        id: 'c-0001', agency: order[0], category: 'enquiry-or-contact', status: 'captured',
+        approval: 'approved', url: pages[0].originalUrl, finalUrl: pages[0].finalUrl, pageId: 'real-001',
+      }],
+      candidateSets: {}, supersededCandidateSets: [], exhausted: structuredClone(exhaustedAgencies),
+    };
+    for (const record of exhaustedAgencies) {
+      for (const [category, version] of Object.entries(record.categorySetVersions)) {
+        log.candidateSets[`${record.agency}\u0000${category}`] = {
+          agency: record.agency, category, version, discovered: [], locked: [], ordered: [],
+          droppedBeyondBound: [], lockedAt: '2026-09-25T03:00:00Z', approval: 'approved',
+          candidateDeclaration: 'none', declaredAt: '2026-09-25T03:00:00Z',
+          discoveryRecordIds: ['d-0001'], discoveryMethods: ['navigation'],
+        };
+      }
+    }
+    const capturesDir = join(dir, 'captures');
+    mkdirSync(capturesDir, { recursive: true });
+    writeFileSync(join(capturesDir, 'selection-ledger.csv'), 'agency,status\n');
+    writeFileSync(join(capturesDir, 'real-001.html'), '<form><label for="n">Full name</label><input id="n"></form>');
+    const captureLogPath = join(dir, logName);
+    writeFileSync(captureLogPath, `${JSON.stringify(log, null, 2)}\n`);
+    return { draft: d, capturesDir, captureLogPath, log };
+  }
+
+  test('the manifest stores the log\'s actual relative path, not a hardcoded name', async () => {
+    await inTemp(async (dir) => {
+      const { draft: d, capturesDir, captureLogPath } = build(dir, { logName: 'capture-log-v3.json' });
+      const sealed = sealCorpus({ draft: d, capturesDir, instrument: identity, frameDir, captureLogPath });
+      assert.ok(sealed.manifest, sealed.problems.join('; '));
+      // Previously this said 'capture-log.json' regardless of what was actually sealed.
+      assert.equal(sealed.manifest.captureLog.file, 'capture-log-v3.json');
+    });
+  });
+
+  test('a capture log outside the capture root is refused', async () => {
+    await inTemp(async (dir) => {
+      const { draft: d, capturesDir } = build(dir);
+      const outside = mkdtempSync(join(tmpdir(), 'formfair-outside-'));
+      try {
+        const smuggled = join(outside, 'capture-log.json');
+        writeFileSync(smuggled, readFileSync(join(dir, 'capture-log.json')));
+        const sealed = sealCorpus({ draft: d, capturesDir, instrument: identity, frameDir, captureLogPath: smuggled });
+        assert.equal(sealed.manifest, null);
+        assert.ok(sealed.problems.some((p) => /outside the capture root/.test(p)), sealed.problems.join('; '));
+      } finally {
+        rmSync(outside, { recursive: true, force: true });
+      }
+    });
+  });
+
+  test('loadSealedPages refuses a capture log tampered with after sealing', async () => {
+    await inTemp(async (dir) => {
+      const { draft: d, capturesDir, captureLogPath, log } = build(dir);
+      const sealed = sealCorpus({ draft: d, capturesDir, instrument: identity, frameDir, captureLogPath });
+      assert.ok(sealed.manifest, sealed.problems.join('; '));
+      const manifestPath = join(dir, 'corpus.json');
+      writeFileSync(manifestPath, `${JSON.stringify(sealed.manifest, null, 2)}\n`);
+
+      // Edit the log AFTER sealing: add an exhaustion nobody searched. Same byte length is not
+      // attempted; both the hash and the length are checked.
+      const tampered = structuredClone(log);
+      tampered.exhausted.push(exhaustion('Department of Nowhere'));
+      writeFileSync(captureLogPath, `${JSON.stringify(tampered, null, 2)}\n`);
+
+      const loaded = loadSealedPages({ manifest: sealed.manifest, manifestPath, capturesDir });
+      assert.equal(loaded.pages, null, 'a tampered capture log must not load');
+      assert.ok(loaded.problems.some((p) => /capture log hash mismatch/.test(p)), loaded.problems.join('; '));
+      assert.ok(loaded.problems.some((p) => /byte count mismatch/.test(p)), loaded.problems.join('; '));
+    });
+  });
+
+  test('loadSealedPages refuses a manifest that names a log which is not there', async () => {
+    await inTemp(async (dir) => {
+      const { draft: d, capturesDir, captureLogPath } = build(dir);
+      const sealed = sealCorpus({ draft: d, capturesDir, instrument: identity, frameDir, captureLogPath });
+      const manifestPath = join(dir, 'corpus.json');
+      writeFileSync(manifestPath, `${JSON.stringify(sealed.manifest, null, 2)}\n`);
+      rmSync(captureLogPath);
+      const loaded = loadSealedPages({ manifest: sealed.manifest, manifestPath, capturesDir });
+      assert.equal(loaded.pages, null);
+      assert.ok(loaded.problems.some((p) => /cannot read the sealed capture log/.test(p)));
+    });
+  });
+
+  test('loadSealedPages refuses a manifest whose sealed log path escapes the root', async () => {
+    await inTemp(async (dir) => {
+      const { draft: d, capturesDir, captureLogPath } = build(dir);
+      const sealed = sealCorpus({ draft: d, capturesDir, instrument: identity, frameDir, captureLogPath });
+      const manifestPath = join(dir, 'corpus.json');
+      // A manifest edited to point outside the root: "sealed one file but named another".
+      const escaped = structuredClone(sealed.manifest);
+      escaped.captureLog.file = '../../etc/hosts';
+      writeFileSync(manifestPath, `${JSON.stringify(escaped, null, 2)}\n`);
+      const loaded = loadSealedPages({ manifest: escaped, manifestPath, capturesDir });
+      assert.equal(loaded.pages, null);
+      assert.ok(loaded.problems.some((p) => /escapes the capture root/.test(p)));
+    });
+  });
+
+  test('an untampered corpus loads, and the log verifies', async () => {
+    await inTemp(async (dir) => {
+      const { draft: d, capturesDir, captureLogPath } = build(dir);
+      const sealed = sealCorpus({ draft: d, capturesDir, instrument: identity, frameDir, captureLogPath });
+      const manifestPath = join(dir, 'corpus.json');
+      writeFileSync(manifestPath, `${JSON.stringify(sealed.manifest, null, 2)}\n`);
+      const loaded = loadSealedPages({ manifest: sealed.manifest, manifestPath, capturesDir });
+      assert.deepEqual(loaded.problems, []);
+      assert.equal(loaded.pages.length, 1);
     });
   });
 });

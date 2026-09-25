@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { dirname, join, resolve } from 'node:path';
+import { pathToFileURL, fileURLToPath } from 'node:url';
 
 export const SOLO_INSTRUMENT_TAG = 'evaluation-v1.1.0';
 export const SOLO_CORPUS_TAG = 'corpus-v1.0.0';
@@ -15,15 +15,20 @@ export const SOLO_CORPUS_TAG = 'corpus-v1.0.0';
  * sealing rules produced it - and those rules changed materially at solo-protocol-v1.0.2, when the
  * seal began verifying exhaustion records against the capture log instead of trusting their shape.
  */
-export const SOLO_SEALER_TAG = 'solo-protocol-v1.0.2';
+export const SOLO_SEALER_TAG = 'solo-protocol-v1.0.3';
 
 /**
  * Identity of the checkout doing the sealing. A real seal requires it clean and tagged, on the
  * same reasoning as the analyser: a corpus sealed from a modified working tree cannot be
  * reproduced, and nothing afterwards would reveal which rules were actually applied.
  */
-export function sealerIdentity(dir) {
-  const at = resolve(dir);
+export function sealerIdentity(dir = null) {
+  // Defaults to the checkout that CONTAINS this file, which is the code doing the sealing.
+  // Passing the analyser directory made official sealing impossible: `evaluation-v1.1.0` and the
+  // solo-protocol tag point at different commits, so one checkout cannot satisfy both, and
+  // whichever identity was checked second always failed. The two are separate artefacts and must
+  // be resolved separately.
+  const at = resolve(dir ?? join(dirname(fileURLToPath(import.meta.url)), '..', '..'));
   const commit = git(at, ['rev-parse', 'HEAD']);
   const status = git(at, ['status', '--porcelain']);
   const tags = (git(at, ['tag', '--points-at', 'HEAD']) ?? '').split('\n').filter(Boolean).sort();

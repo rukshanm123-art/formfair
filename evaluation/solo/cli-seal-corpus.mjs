@@ -36,7 +36,9 @@ try {
   }
   // The sealer attests itself too. A corpus sealed from a modified working tree cannot be
   // reproduced, and nothing in the manifest would afterwards reveal which rules were applied.
-  const sealer = sealerIdentity(instrumentDir);
+  // Resolved from this file's own checkout, NOT from the analyser directory. They are tagged
+  // differently and at different commits.
+  const sealer = sealerIdentity();
   if (!development && !sealer.officialReady) {
     throw new Error(`real corpus sealing requires a clean sealer checkout tagged ${SOLO_SEALER_TAG}`);
   }

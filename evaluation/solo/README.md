@@ -52,10 +52,16 @@ requires that exact tag at `HEAD`, a clean working tree, a built package and a l
      --out corpus/corpus-v1.0.0.json
    ```
 
-   A real seal refuses unless that checkout is clean and tagged `evaluation-v1.1.0`, and the
-   sealing checkout is clean and tagged with the current solo-protocol tag. The manifest
-   records the protocol tag, the sealer's tag and commit, the analyser identity, and the hash
-   of the capture log it verified against.
+   The two identities come from **two different checkouts**, and must: the analyser tag and the
+   solo-protocol tag point at different commits, so no single checkout can carry both.
+   `FORMFAIR_SOLO_INSTRUMENT_DIR` gives the analyser checkout, which must be clean and tagged
+   `evaluation-v1.1.0`; the sealer is the checkout containing `cli-seal-corpus.mjs`, which must
+   be clean and tagged with the current solo-protocol tag. Run the command from the sealer
+   checkout.
+
+   `--capture-log` must sit inside the capture root — the directory holding `captures/` — and the
+   manifest records its actual relative path, its SHA-256 and its byte count. `solo:descriptive`
+   re-reads and re-verifies it, so a log edited after sealing fails to load.
 
 5. Commit the manifest, tag that commit `corpus-v1.0.0`, and leave the captured HTML
    outside version control. The tag is the evidence that the manifest existed before

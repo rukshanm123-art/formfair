@@ -1289,3 +1289,67 @@ a record existed and was well formed, which is a different thing from confirming
 describes ever happened. The pattern across all three is the same, and worth stating once: a gate
 that checks the form of a claim rather than the evidence for it is a gate that rewards a
 well-formatted assertion over a true one.
+
+## Amendment 12: the official seal could not have run
+
+**Dated 25 September 2026.** `solo-protocol-v1.0.3`. No capture-side code changed, so
+`selection-v1.0.9` stands. `solo-protocol-v1.0.0` through `v1.0.2` are not moved. No discovery,
+exclusion or approval is repeated.
+
+### The command was impossible
+
+`cli-seal-corpus.mjs` read both identities from one directory:
+
+```
+const identity = instrumentIdentity(instrumentDir);
+const sealer   = sealerIdentity(instrumentDir);
+```
+
+`instrumentDir` is the separate checkout tagged `evaluation-v1.1.0`. The solo-protocol tag points
+at a different commit, so that checkout cannot carry both tags — and whichever identity was
+checked second therefore always failed. The official sealing command, added one amendment earlier
+to make the seal trustworthy, could not succeed at all. It was never run, because the corpus is
+not finished, so nothing had surfaced it.
+
+The sealer identity now resolves the checkout that **contains** `cli-seal-corpus.mjs`, which is
+the code doing the sealing; the analyser identity still comes from
+`FORMFAIR_SOLO_INSTRUMENT_DIR`. They are separate artefacts under separate tags and are resolved
+separately. A real seal requires both checkouts clean, one tagged `evaluation-v1.1.0` and the
+other tagged `solo-protocol-v1.0.3`.
+
+### The capture log was named, not bound
+
+The manifest recorded the log's digest under the **hardcoded** filename `capture-log.json`, while
+the seal had read whatever `--capture-log` pointed at, anywhere on disk. So a manifest could name
+one file and have been sealed against another. And `loadSealedPages` never re-read it: the one
+artefact proving which searches actually happened could be edited after sealing, and no later step
+would notice.
+
+Now the log must sit inside the capture root — the directory holding `captures/` — the manifest
+stores its **actual relative path** with its SHA-256 and byte count, and `loadSealedPages`
+re-reads and re-verifies both. The byte count is checked as well as the digest because a
+truncation is then reported as a truncation rather than as an unexplained hash difference.
+
+Nine further tests: that `sealerIdentity` defaults to its own checkout and does not follow the
+analyser directory; that the official CLI reaches the *analyser* tag check when the analyser
+directory is wrong, which is only distinguishable now that the two are resolved apart; that the
+manifest stores the real filename rather than a hardcoded one; a log outside the capture root; a
+log tampered with after sealing, refused on both hash and byte count; a manifest naming a log that
+is not there; a manifest edited to point outside the root; and that an untampered corpus loads
+cleanly. The solo suite has 40 tests.
+
+The test fixtures were also restructured to mirror the real layout — a capture root holding
+`capture-log.json` beside a `captures/` directory — because the previous fixtures flattened the
+two, which would have let the path checks pass without ever being exercised.
+
+### The recurring shape
+
+This is the fourth consecutive amendment to the same area, and each defect has been of the same
+kind rather than a new one: a claim recorded but not checked (v1.0.1), a claim checked for form
+but not for evidence (v1.0.2), and now a check that could not run at all plus a binding that named
+its evidence without holding it (v1.0.3). The common cause is that each gate was written and
+tested against the shape of the thing it guards rather than against the thing itself, and the
+tests inherited the assumption from the code. Where a gate cannot be exercised end to end — as an
+official seal cannot be, before the corpus exists — that inheritance goes unchallenged, so the
+compensating discipline is to test the parts that *can* run against real layouts and real
+artefacts, not against fixtures shaped to agree.

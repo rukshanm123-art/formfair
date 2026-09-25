@@ -37,7 +37,7 @@ const increment = (record, key, by = 1) => {
   record[key] = (record[key] ?? 0) + by;
 };
 
-export function loadSealedPages({ manifest, manifestPath, capturesDir }) {
+export function loadSealedPages({ manifest, manifestPath, capturesDir, captureRoot = null }) {
   const problems = [];
   if (manifest?.schema !== 'formfair/solo-corpus@1') problems.push('manifest schema must be formfair/solo-corpus@1');
   if (!Array.isArray(manifest?.pages) || manifest.pages.length === 0) problems.push('manifest must contain at least one page');
@@ -57,6 +57,37 @@ export function loadSealedPages({ manifest, manifestPath, capturesDir }) {
         if (actual !== manifest.selectionLedger.sha256) problems.push('selection ledger hash mismatch');
       } catch (error) {
         problems.push(`cannot read selection ledger: ${error.message}`);
+      }
+    }
+  }
+
+  // solo-protocol-v1.0.3. The capture log is re-read and re-verified, not merely recorded.
+  //
+  // The manifest carried its digest and nothing ever checked it again, so the one artefact
+  // proving which searches actually happened could be edited after sealing without any later
+  // step noticing. Both the hash and the byte count are checked: a length check catches a
+  // truncation cheaply and makes a mismatch easier to diagnose than a bare digest difference.
+  if (manifest?.captureLog !== null && manifest?.captureLog !== undefined) {
+    const seal = manifest.captureLog;
+    if (typeof seal?.file !== 'string' || typeof seal?.sha256 !== 'string' || !Number.isInteger(seal?.bytes)) {
+      problems.push('manifest.captureLog must name the log file, its sha256 and its byte count');
+    } else {
+      const logRoot = resolve(captureRoot ?? dirname(root));
+      const logPath = resolve(logRoot, seal.file);
+      if (relative(logRoot, logPath).startsWith('..')) {
+        problems.push('the sealed capture log escapes the capture root');
+      } else {
+        try {
+          const bytes = readFileSync(logPath);
+          if (bytes.length !== seal.bytes) {
+            problems.push(
+              `capture log byte count mismatch: sealed ${seal.bytes}, on disk ${bytes.length}`
+            );
+          }
+          if (sha256(bytes) !== seal.sha256) problems.push('capture log hash mismatch');
+        } catch (error) {
+          problems.push(`cannot read the sealed capture log: ${error.message}`);
+        }
       }
     }
   }
@@ -137,7 +168,7 @@ const FRAME_FILES = [
  * exhaustion records at all. A manifest that misnames its own protocol is worse than one that
  * omits it: a reader checking which rules a corpus was sealed under would be told the wrong ones.
  */
-export const SOLO_PROTOCOL_TAG = 'solo-protocol-v1.0.2';
+export const SOLO_PROTOCOL_TAG = 'solo-protocol-v1.0.3';
 
 export const EXHAUSTION_REASON =
   'all four categories in the frozen priority order were searched and none yielded an eligible form';
@@ -183,7 +214,7 @@ const isoUtc = (value) => typeof value === 'string' && !Number.isNaN(Date.parse(
 
 export function sealCorpus({
   draft, capturesDir, instrument, frameDir, sealer = null, captureLogPath = null,
-  protocol = SOLO_PROTOCOL_TAG,
+  captureRoot = null, protocol = SOLO_PROTOCOL_TAG,
 }) {
   const problems = [];
   if (draft?.schema !== 'formfair/solo-corpus-draft@1') {
@@ -412,16 +443,31 @@ export function sealCorpus({
           'about what was searched, and they are verified against the authoritative capture log'
       );
     } else {
+      // The log must live inside the capture root - the directory holding both `captures/` and
+      // `capture-log.json` - and the manifest stores its ACTUAL relative path. The previous
+      // version hardcoded the name `capture-log.json` in the manifest while sealing whatever
+      // `--capture-log` pointed at, so a manifest could name one file and have been sealed
+      // against another, anywhere on disk.
+      const logRoot = resolve(captureRoot ?? dirname(resolve(capturesDir)));
+      const logPath = resolve(captureLogPath);
+      const logRelative = relative(logRoot, logPath);
       let bytes = null;
       let log = null;
-      try {
-        bytes = readFileSync(resolve(captureLogPath));
-        log = JSON.parse(bytes.toString('utf8'));
-      } catch (error) {
-        problems.push(`cannot read the capture log at ${captureLogPath}: ${error.message}`);
+      if (logRelative.startsWith('..') || isAbsolute(logRelative)) {
+        problems.push(
+          `the capture log at ${captureLogPath} is outside the capture root ${logRoot}; the log ` +
+            'the corpus is sealed against must live with the captures it describes'
+        );
+      } else {
+        try {
+          bytes = readFileSync(logPath);
+          log = JSON.parse(bytes.toString('utf8'));
+        } catch (error) {
+          problems.push(`cannot read the capture log at ${captureLogPath}: ${error.message}`);
+        }
       }
       if (log) {
-        captureLogSeal = { sha256: sha256(bytes), bytes: bytes.length };
+        captureLogSeal = { file: logRelative, sha256: sha256(bytes), bytes: bytes.length };
         const logExhausted = Array.isArray(log.exhausted) ? log.exhausted : [];
         const sets = log.candidateSets ?? {};
         const attempts = Array.isArray(log.attempts) ? log.attempts : [];
@@ -529,9 +575,7 @@ export function sealCorpus({
       sealer: sealer
         ? { tag: sealer.tag, commit: sealer.commit, dirty: sealer.dirty }
         : null,
-      captureLog: captureLogSeal
-        ? { file: 'capture-log.json', sha256: captureLogSeal.sha256, bytes: captureLogSeal.bytes }
-        : null,
+      captureLog: captureLogSeal,
     },
     problems: [],
   };
