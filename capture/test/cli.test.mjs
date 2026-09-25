@@ -118,7 +118,15 @@ const seal = (args) =>
 let discoveryTick = 0;
 const lockSet = async (dir, agency, category, urls) => {
   // A set must be supported by the discovery round that produced it.
-  const at = new Date(Date.UTC(2026, 8, 24, 0, discoveryTick++ * 2)).toISOString().replace(/\.\d{3}Z$/, 'Z');
+  // selection-v1.0.12: a permit authorises a FUTURE request, so the navigation must fall after
+  // the permit is issued. A fixed past timestamp now correctly fails that check.
+  //
+  // Which leaves the five-second pacing minimum to satisfy honestly: the time really has to
+  // pass, because a synthetic future timestamp would then precede the next real capture and
+  // break pacing in the other direction. The capture path already sleeps for the pacer, so this
+  // waits only where a discovery record is the thing being spaced.
+  discoveryTick++;
+  await new Promise((r) => setTimeout(r, 6500));
   const discoveryUrl = `${origin}/discovery/${category}/${discoveryTick}`;
   // selection-v1.0.11: the robots check happens BEFORE the navigation, so a discovery record
   // needs a permit issued by preflight. The synthetic server serves no robots.txt, which is a
@@ -127,6 +135,10 @@ const lockSet = async (dir, agency, category, urls) => {
     '--website', origin, '--url', discoveryUrl, '--category', category,
     '--set-version', '1', '--method', 'navigation']);
   assert.equal(permit.status, 0, permit.stderr);
+  // Taken AFTER the permit exists. Timestamps are truncated to the second, so a value read
+  // before the preflight can land a second earlier than the permit and be rejected as
+  // retrospective - which is the check working, and the fixture getting the order wrong.
+  const at = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
   const disc = await run(['discovery', '--out', dir, '--agency', agency, '--website', origin,
     '--url', discoveryUrl, '--method', 'navigation',
     '--outcome', 'candidates-found', '--category', category, '--set-version', '1',
@@ -137,6 +149,10 @@ const lockSet = async (dir, agency, category, urls) => {
   const locked = await run(['lock', '--out', dir, '--agency', agency, '--category', category]);
   assert.equal(locked.status, 0, locked.stderr);
   // Assessment requires the researcher to approve the set, which is its own gate.
+  // And spaced from whatever navigates next: each CLI invocation builds a fresh pacer, so a
+  // following `capture` in its own process does not sleep on this record's behalf. In a real run
+  // that gap is the operator's own working time.
+  await new Promise((r) => setTimeout(r, 6500));
   const approved = await run(['approve-set', '--out', dir, '--agency', agency, '--category', category]);
   assert.equal(approved.status, 0, approved.stderr);
   return locked;

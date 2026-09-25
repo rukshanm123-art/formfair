@@ -17,7 +17,7 @@ export const nextTimestamp = () =>
   new Date(Date.UTC(2026, 8, 24, 0, tick++ * 2)).toISOString().replace(/\.\d{3}Z$/, 'Z');
 
 /** One discovery record, enough to support a set. */
-export function addDiscovery(log, { agency, category, version = 1, url, method = 'navigation', outcome = 'candidates-found' }) {
+export function addDiscovery(log, { agency, category, version = 1, url, method = 'navigation', outcome = 'candidates-found', supersedes = null }) {
   const at = nextTimestamp();
   appendAttempt(log, {
     examinedAt: at, agency, website: 'https://w.govt.nz/',
@@ -28,6 +28,7 @@ export function addDiscovery(log, { agency, category, version = 1, url, method =
     // not a judgement to approve. The helper left it pending, so fixtures diverged from the
     // production path and every test had to work around a state no real log contains.
     approval: 'approved',
+    ...(supersedes ? { supersedesDiscoveryId: supersedes } : {}),
   });
   return log.attempts.at(-1);
 }

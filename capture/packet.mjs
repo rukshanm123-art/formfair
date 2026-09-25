@@ -30,7 +30,15 @@ export function buildPacket(log, { agency, category }) {
     website: w,
     inspections: records
       .filter((r) => r.website === w)
-      .map((r) => ({ method: r.discoveryKind, outcome: r.outcome, url: r.url, note: r.note ?? null })),
+      .map((r) => ({
+        method: r.discoveryKind, outcome: r.outcome, url: r.url, note: r.note ?? null,
+        // selection-v1.0.12: a corrected record and its replacement are both shown. Hiding the
+        // superseded one would let a correction read as though it were the original finding,
+        // and the reviewer is approving the round's judgement, not a tidied summary of it.
+        id: r.id ?? null,
+        supersededBy: log.attempts.find((o) => o.supersedesDiscoveryId === r.id)?.id ?? null,
+        corrects: r.supersedesDiscoveryId ?? null,
+      })),
   }));
 
   // Anything a reviewer should look at twice, most decision-relevant first.
@@ -106,6 +114,10 @@ export function renderPacket(p) {
     out.push(`  ${w.website}`);
     for (const i of w.inspections) {
       out.push(`    ${pad(i.method, 16)} ${pad(i.outcome, 17)} ${i.url}`);
+      if (i.supersededBy) {
+        out.push(`    ${' '.repeat(34)}SUPERSEDED by ${i.supersededBy}; not evidence for this set`);
+      }
+      if (i.corrects) out.push(`    ${' '.repeat(34)}corrects ${i.corrects}`);
       if (i.note) out.push(`    ${' '.repeat(34)}${i.note}`);
     }
   }

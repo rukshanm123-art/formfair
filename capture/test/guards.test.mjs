@@ -17,6 +17,7 @@ import {
   emptyLog, appendAttempt, ELIGIBILITY_CRITERIA, recordCandidates, lockCandidateSet,
   categorySettled, deriveDraft, APPROVAL, approveCandidateSet,
   exhaustAgency, EXHAUSTION_REASON, publishProvenance,
+  unresolvedDiscoveryRounds, issueDiscoveryPermit, isDiscoverySuperseded, supersedeCandidateSet,
 } from '../run.mjs';
 import { prepareSet, addDiscovery } from './helpers.mjs';
 import {
@@ -524,5 +525,192 @@ describe('an agency is recorded as exhausted explicitly', () => {
     const draft = deriveDraft(log, { frameSha256: 'a'.repeat(64), drawOrderSha256: 'b'.repeat(64) });
     assert.equal(draft.exhaustedAgencies[0].agency, agency);
     assert.equal(draft.exhaustedAgencies[0].exhaustedAt, null);
+  });
+});
+
+/**
+ * Unfinished discovery cannot disappear from the corpus gate.
+ *
+ * selection-v1.0.12, reproduced from the live ledger. Twenty-six discovery records existed for a
+ * Ministry of Health round with no candidate-set object at all, because a set was created only
+ * when candidates were first recorded. Every gate keyed off candidate sets, so:
+ *
+ *     status -> nothing outstanding; the corpus draft is not withheld
+ *     draft  -> BUILT: 1 page, 1 exhaustion, 26 Ministry records ignored
+ *
+ * An entire agency's round sat in the log, unlocked and unreviewed, and the corpus gate could not
+ * see it. Discovery that never reached the step which creates the set was invisible.
+ */
+describe('discovery without a resolved set blocks the corpus', () => {
+  const CAT = 'account-registration';
+  const agency = drawOrder[0].agency;
+  const opts = { frameSha256: 'a'.repeat(64), drawOrderSha256: 'b'.repeat(64) };
+
+  const capturedFor = (ag) => ({
+    agency: ag, category: 'enquiry-or-contact', status: 'captured', approval: APPROVAL.APPROVED,
+    url: 'https://w.govt.nz/1', finalUrl: 'https://w.govt.nz/1',
+    pageId: 'page-1', file: '1.html', htmlSha256: 'x', inclusionEvidence: 'has a name field',
+    capturedAt: '2026-09-24T00:00:00Z', browser: 'Chromium 1', automationTool: 'playwright 1',
+    viewport: { width: 1280, height: 800 }, locale: 'en-NZ', redirects: [],
+  });
+
+  test('THE BYPASS: discovery records with no candidate set are detected', () => {
+    const log = emptyLog();
+    addDiscovery(log, { agency, category: CAT, outcome: 'no-candidates' });
+    assert.equal(log.candidateSets[`${agency}\u0000${CAT}`], undefined, 'the state being reproduced');
+
+    const unresolved = unresolvedDiscoveryRounds(log);
+    assert.equal(unresolved.length, 1);
+    assert.equal(unresolved[0].agency, agency);
+    assert.equal(unresolved[0].records, 1);
+    assert.match(unresolved[0].reason, /no candidate set exists/);
+  });
+
+  test('THE BYPASS: the corpus draft refuses while such a round exists', () => {
+    const log = emptyLog();
+    log.attempts.push(capturedFor(agency));
+    addDiscovery(log, { agency, category: CAT, outcome: 'no-candidates' });
+    assert.throws(
+      () => deriveDraft(log, opts),
+      /discovery round\(s\) are not resolved into a locked, approved set/
+    );
+  });
+
+  test('a locked but unapproved set is not double-counted as an unresolved round', () => {
+    // It is already an outstanding candidate-set approval; reporting it twice would turn one
+    // outstanding item into two.
+    const log = emptyLog();
+    prepareSet(log, agency, CAT, ['https://w.govt.nz/a'], { approve: false });
+    assert.deepEqual(unresolvedDiscoveryRounds(log), []);
+  });
+
+  test('a round whose set was superseded is history, not unfinished work', () => {
+    const log = emptyLog();
+    prepareSet(log, agency, CAT, ['https://w.govt.nz/a']);
+    approveCandidateSet(log, { agency, category: CAT, approved: false });
+    supersedeCandidateSet(log, { agency, category: CAT, reason: 'redone' });
+    assert.deepEqual(unresolvedDiscoveryRounds(log), [], 'a superseded round is preserved, not outstanding');
+  });
+
+  test('an unconsumed permit blocks the corpus', () => {
+    // A permit issued and never consumed means a request was authorised that nothing accounts for.
+    const log = emptyLog();
+    log.attempts.push(capturedFor(agency));
+    issueDiscoveryPermit(log, {
+      agency, category: CAT, candidateSetVersion: 1,
+      url: 'https://w.govt.nz/unvisited', robotsCheckId: 'r-0001',
+    });
+    assert.throws(() => deriveDraft(log, opts), /issued and never consumed/);
+  });
+
+  test('a resolved round with no open permits builds', () => {
+    const log = emptyLog();
+    log.attempts.push(capturedFor(agency));
+    for (const category of CATEGORY_ORDER) {
+      addDiscovery(log, { agency, category, outcome: 'no-candidates' });
+      recordCandidates(log, { agency, category, urls: [], declaration: 'none' });
+      lockCandidateSet(log, { agency, category });
+      approveCandidateSet(log, { agency, category, approved: true });
+    }
+    const draft = deriveDraft(log, opts);
+    assert.equal(draft.pages.length, 1);
+  });
+});
+
+/**
+ * Correcting one discovery record without redoing its round.
+ *
+ * A round of twenty-six inspections with one self-contradictory record does not need
+ * twenty-five re-observations, and repeating them would mean re-requesting pages already
+ * retrieved under permits - traffic with no evidential purpose.
+ */
+describe('a discovery record is corrected in place', () => {
+  const CAT = 'account-registration';
+  const agency = 'TPK';
+
+  function roundWith(log, { url, method = 'robots', outcome = 'disallowed' }) {
+    addDiscovery(log, { agency, category: CAT, url, method, outcome });
+    return log.attempts.at(-1);
+  }
+
+  test('a corrected record supersedes the original, which is preserved', () => {
+    const log = emptyLog();
+    const wrong = roundWith(log, { url: 'https://w.govt.nz/robots.txt' });
+    addDiscovery(log, {
+      agency, category: CAT, url: 'https://w.govt.nz/robots.txt', method: 'robots',
+      outcome: 'no-candidates', supersedes: wrong.id,
+    });
+
+    assert.equal(isDiscoverySuperseded(log, wrong.id), true);
+    assert.ok(log.attempts.find((a) => a.id === wrong.id), 'the original stays in the log');
+    assert.equal(log.attempts.find((a) => a.id === wrong.id).outcome, 'disallowed');
+  });
+
+  test('a correction must match agency, category, round, url and method', () => {
+    for (const [field, value] of [['url', 'https://w.govt.nz/other'], ['discoveryKind', 'sitemap']]) {
+      const log = emptyLog();
+      const wrong = roundWith(log, { url: 'https://w.govt.nz/robots.txt' });
+      const at = '2026-09-25T06:00:00Z';
+      assert.throws(
+        () => appendAttempt(log, {
+          examinedAt: at, agency, website: 'https://w.govt.nz/',
+          url: 'https://w.govt.nz/robots.txt', status: 'discovery', discoveryKind: 'robots',
+          outcome: 'no-candidates', category: CAT, candidateSetVersion: 1, navigatedAt: at,
+          approval: 'approved', supersedesDiscoveryId: wrong.id, [field]: value,
+        }),
+        /a correction must be for the same/
+      );
+    }
+  });
+
+  test('an id that matches nothing is refused', () => {
+    const log = emptyLog();
+    roundWith(log, { url: 'https://w.govt.nz/robots.txt' });
+    const at = '2026-09-25T06:00:00Z';
+    assert.throws(
+      () => appendAttempt(log, {
+        examinedAt: at, agency, website: 'https://w.govt.nz/', url: 'https://w.govt.nz/robots.txt',
+        status: 'discovery', discoveryKind: 'robots', outcome: 'no-candidates', category: CAT,
+        candidateSetVersion: 1, navigatedAt: at, approval: 'approved',
+        supersedesDiscoveryId: 'd-9999',
+      }),
+      /matches no recorded attempt/
+    );
+  });
+
+  test('the same record cannot be corrected twice', () => {
+    const log = emptyLog();
+    const wrong = roundWith(log, { url: 'https://w.govt.nz/robots.txt' });
+    addDiscovery(log, {
+      agency, category: CAT, url: 'https://w.govt.nz/robots.txt', method: 'robots',
+      outcome: 'no-candidates', supersedes: wrong.id,
+    });
+    const at = '2026-09-25T06:10:00Z';
+    assert.throws(
+      () => appendAttempt(log, {
+        examinedAt: at, agency, website: 'https://w.govt.nz/', url: 'https://w.govt.nz/robots.txt',
+        status: 'discovery', discoveryKind: 'robots', outcome: 'unavailable', category: CAT,
+        candidateSetVersion: 1, navigatedAt: at, approval: 'approved',
+        supersedesDiscoveryId: wrong.id,
+      }),
+      /has already been corrected/
+    );
+  });
+
+  test('locking binds the correction and not the record it replaced', () => {
+    const log = emptyLog();
+    const wrong = roundWith(log, { url: 'https://w.govt.nz/robots.txt', outcome: 'candidates-found' });
+    addDiscovery(log, {
+      agency, category: CAT, url: 'https://w.govt.nz/robots.txt', method: 'robots',
+      outcome: 'no-candidates', supersedes: wrong.id,
+    });
+    const fix = log.attempts.at(-1);
+
+    recordCandidates(log, { agency, category: CAT, urls: [], declaration: 'none' });
+    const set = lockCandidateSet(log, { agency, category: CAT });
+    assert.ok(set.discoveryRecordIds.includes(fix.id), 'the correction evidences the set');
+    assert.ok(!set.discoveryRecordIds.includes(wrong.id), 'the superseded record does not');
+    // And the withdrawn candidates-found finding no longer contradicts the nil declaration.
+    assert.deepEqual(set.locked, []);
   });
 });

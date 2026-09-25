@@ -530,10 +530,14 @@ describe('discovery requires a permit issued before navigation', () => {
     run(['preflight-discovery', '--out', dir, '--agency', agency, '--website', `${origin}/`,
       '--url', url, '--category', CAT, '--set-version', '1', '--method', method]);
 
-  const record = (dir, url, outcome, method = 'internal-search') =>
+  // Navigation times must fall after the permit and at least five seconds apart.
+  let navTick = 0;
+  const nextNav = () => new Date(Date.now() + (++navTick) * 6000).toISOString().replace(/\.\d{3}Z$/, 'Z');
+
+  const record = (dir, url, outcome, method = 'internal-search', at = null) =>
     run(['discovery', '--out', dir, '--agency', agency, '--website', `${origin}/`, '--url', url,
       '--method', method, '--outcome', outcome, '--category', CAT,
-      '--set-version', '1', '--navigated-at', '2026-09-25T05:00:00Z']);
+      '--set-version', '1', '--navigated-at', at ?? nextNav()]);
 
   test('THE FIX: a disallowed target receives zero requests', async () => {
     await withLog(() => {}, async (dir) => {
@@ -571,7 +575,7 @@ describe('discovery requires a permit issued before navigation', () => {
       // A second record for the same URL must not ride the spent permit.
       const again = await run(['discovery', '--out', dir, '--agency', agency, '--website', `${origin}/`,
         '--url', `${origin}/contact`, '--method', 'navigation', '--outcome', 'no-candidates',
-        '--category', CAT, '--set-version', '1', '--navigated-at', '2026-09-25T05:02:00Z']);
+        '--category', CAT, '--set-version', '1', '--navigated-at', nextNav()]);
       assert.equal(again.status, 1);
       assert.match(again.stderr, /no open navigation permit/);
     });
@@ -588,7 +592,7 @@ describe('discovery requires a permit issued before navigation', () => {
       // Same URL, different round.
       const otherRound = await run(['discovery', '--out', dir, '--agency', agency, '--website', `${origin}/`,
         '--url', `${origin}/contact`, '--method', 'navigation', '--outcome', 'no-candidates',
-        '--category', CAT, '--set-version', '2', '--navigated-at', '2026-09-25T05:02:00Z']);
+        '--category', CAT, '--set-version', '2', '--navigated-at', nextNav()]);
       assert.equal(otherRound.status, 1, 'a permit for one round must not authorise another');
     });
   });
@@ -665,5 +669,28 @@ describe('robots policy follows RFC 9309 status semantics', () => {
 
   test('Tatai\'s 403 permits, which is why it is recorded as unavailable rather than forbidden', () => {
     assert.equal(dispositionForStatus(403), 'allow-all');
+  });
+});
+
+/**
+ * A `Disallow: /` file disallows its own path by the letter of the rules.
+ *
+ * Found by running a real round: minhealthnz.shinyapps.io publishes `Disallow: /`, and the
+ * robots inspection recorded ITSELF as disallowed and not navigated - while carrying a note
+ * describing the file's contents, which only reading it could supply. A self-contradictory
+ * record, produced by honouring the rules against the file that states them.
+ */
+describe('robots.txt is exempt from the rules it carries', () => {
+  test('a Disallow: / policy still permits its own path', () => {
+    const policy = { disposition: 'rules', httpStatus: 200, body: 'User-agent: *\nDisallow: /\n' };
+    assert.equal(evaluatePolicy(policy, '/robots.txt').allowed, true);
+    assert.equal(evaluatePolicy(policy, '/anything').allowed, false);
+  });
+
+  test('the exemption holds under every disposition', () => {
+    for (const disposition of ['rules', 'allow-all', 'disallow-all']) {
+      const policy = { disposition, httpStatus: disposition === 'rules' ? 200 : 503, body: 'User-agent: *\nDisallow: /\n' };
+      assert.equal(evaluatePolicy(policy, '/robots.txt').allowed, true, disposition);
+    }
   });
 });

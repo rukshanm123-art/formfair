@@ -28,6 +28,7 @@ import {
   supersedeCandidateSet, publishProvenance, exhaustAgency, EXHAUSTION_REASON,
   agenciesAwaitingExhaustion, findRobotsCheck, recordRobotsCheck,
   issueDiscoveryPermit, consumeDiscoveryPermit, findOpenPermit,
+  unresolvedDiscoveryRounds, openDiscoveryPermits, robotsCheckIsFresh, isDiscoverySuperseded,
 } from './run.mjs';
 import { fetchRobotsPolicy, evaluatePolicy, DISPOSITION } from './robots-policy.mjs';
 import {
@@ -59,6 +60,7 @@ const USAGE = `usage:
                           (checks robots BEFORE navigating: issues a single-use permit, or
                            records the disallowed outcome without any request to the target)
   cli-capture.mjs discovery --out <dir> --agency <name> --website <url> --url <url>
+                          [--supersedes-discovery-id <d-NNNN>]
                           --method <${DISCOVERY_METHODS.join('|')}>
                           --outcome <${DISCOVERY_OUTCOMES.join('|')}>
                           --category <c> --set-version <n> --navigated-at <ISO8601Z>
@@ -342,6 +344,19 @@ function doStatus() {
   // "nothing outstanding; the corpus draft is not withheld" while `next` was simultaneously
   // saying an agency had to be recorded as exhausted - two commands contradicting each other
   // about the same log.
+  const unresolvedRounds = unresolvedDiscoveryRounds(log);
+  if (unresolvedRounds.length) {
+    console.log(`discovery rounds not resolved into a locked set ${unresolvedRounds.length}`);
+    for (const r of unresolvedRounds) {
+      console.log(`  - ${r.agency} / ${r.category} v${r.version}: ${r.records} records, ${r.reason}`);
+    }
+  }
+  const permitsOpen = openDiscoveryPermits(log);
+  if (permitsOpen.length) {
+    console.log(`navigation permits issued and not consumed ${permitsOpen.length}`);
+    for (const p of permitsOpen.slice(0, 5)) console.log(`  - ${p.id} ${p.url}`);
+  }
+
   const awaitingExhaustion = agenciesAwaitingExhaustion(log);
   if (awaitingExhaustion.length) {
     console.log(`agencies awaiting an exhaustion record ${awaitingExhaustion.length}`);
@@ -349,7 +364,7 @@ function doStatus() {
   }
 
   const blocking = pendingAttempts + pendingSets.length + rejectedSets.length + danglingRejections
-    + awaitingExhaustion.length;
+    + awaitingExhaustion.length + unresolvedRounds.length + permitsOpen.length;
   console.log(
     blocking === 0
       ? 'nothing outstanding; the corpus draft is not withheld'
@@ -387,10 +402,12 @@ async function doDiscovery() {
   validateUrl(url);
   const permit = consumeDiscoveryPermit(log, {
     agency: require_('agency'), category, candidateSetVersion: setVersion, url,
+    navigatedAt: flag('navigated-at'),
   });
 
   appendAttempt(log, {
     permitId: permit.id,
+    ...(flag('supersedes-discovery-id') ? { supersedesDiscoveryId: flag('supersedes-discovery-id') } : {}),
     examinedAt: now(), agency: require_('agency'), website: require_('website'),
     url, status: 'discovery', discoveryKind: kind,
     outcome, category, candidateSetVersion: setVersion,
@@ -593,7 +610,21 @@ async function doPreflightDiscovery() {
   const logPath = logPathFor(dir);
   const log = readLog(logPath);
 
-  let check = has('recheck-robots') ? null : findRobotsCheck(log, parsed.origin);
+  // selection-v1.0.12: the round exists from its first inspection. Previously a candidate set
+  // was created only when candidates were recorded, so a round could accumulate discovery
+  // records that no gate could see - every gate keyed off the set.
+  const openedSet = recordCandidates(log, { agency, category, urls: [] });
+  if (openedSet.version !== setVersion) {
+    die(
+      `the active round for ${agency} / ${category} is version ${openedSet.version}, not ` +
+        `${setVersion}. Supersede the set before starting a new round.`
+    );
+  }
+
+  // RFC 9309 section 2.4: cached robots content should generally not be used beyond 24 hours. A
+  // permanently cached policy could authorise a path that has since become disallowed.
+  const cached = findRobotsCheck(log, parsed.origin);
+  let check = has('recheck-robots') || !robotsCheckIsFresh(cached) ? null : cached;
   let fetched = false;
   if (!check) {
     check = recordRobotsCheck(log, await fetchRobotsPolicy(parsed.origin));

@@ -168,11 +168,38 @@ export function appendAttempt(log, attempt) {
       (a) => a.status === 'discovery' && a.agency === attempt.agency && a.url === attempt.url &&
         a.category === attempt.category && a.candidateSetVersion === attempt.candidateSetVersion
     );
-    if (sameRound) {
+    if (sameRound && !attempt.supersedesDiscoveryId) {
       throw new Error(
         `${attempt.url} is already recorded for ${attempt.agency} / ${attempt.category} ` +
-          `round ${attempt.candidateSetVersion}`
+          `round ${attempt.candidateSetVersion}. If that record is wrong, correct it with ` +
+          'supersedesDiscoveryId rather than recording the page twice.'
       );
+    }
+  }
+
+  // selection-v1.0.12. One wrong discovery record is corrected in place, without redoing a
+  // whole round. A round of twenty-six inspections with one self-contradictory record does not
+  // need twenty-five re-observations, and repeating them would mean re-requesting pages that
+  // were legitimately retrieved under permits.
+  if (attempt.supersedesDiscoveryId) {
+    const target = log.attempts.find((a) => a.id === attempt.supersedesDiscoveryId);
+    if (!target) {
+      throw new Error(`supersedesDiscoveryId ${attempt.supersedesDiscoveryId} matches no recorded attempt`);
+    }
+    if (target.status !== 'discovery') {
+      throw new Error(`${target.id} is a ${target.status} attempt; only a discovery record is corrected this way`);
+    }
+    for (const [field, label] of [['agency', 'agency'], ['category', 'category'],
+      ['candidateSetVersion', 'round'], ['url', 'url'], ['discoveryKind', 'method']]) {
+      if (target[field] !== attempt[field]) {
+        throw new Error(
+          `a correction must be for the same ${label}: ${target.id} is ` +
+            `${JSON.stringify(target[field])}, this record is ${JSON.stringify(attempt[field])}`
+        );
+      }
+    }
+    if (isDiscoverySuperseded(log, target.id)) {
+      throw new Error(`${target.id} has already been corrected; correct the correction instead`);
     }
   }
   const priorForUrl = log.attempts.filter(
@@ -503,7 +530,11 @@ export function lockCandidateSet(log, { agency, category }) {
   // additions to the first.
   const supporting = log.attempts.filter(
     (a) => a.status === 'discovery' && a.agency === agency && a.category === category &&
-      a.candidateSetVersion === set.version
+      a.candidateSetVersion === set.version &&
+      // A corrected record is preserved in the log but does not evidence the set; its
+      // replacement does. Binding both would count one inspection twice and keep a finding the
+      // operator has explicitly withdrawn.
+      !isDiscoverySuperseded(log, a.id)
   );
   if (supporting.length === 0) {
     throw new Error(
@@ -807,6 +838,23 @@ export function deriveDraft(log, { frameSha256, drawOrderSha256, selectionLedger
     );
   }
 
+  // selection-v1.0.12. Discovery that never reached a locked, approved set must not vanish.
+  const unresolved = unresolvedDiscoveryRounds(log);
+  if (unresolved.length) {
+    throw new Error(
+      `${unresolved.length} discovery round(s) are not resolved into a locked, approved set: ` +
+        unresolved.map((r) => `${r.agency} / ${r.category} v${r.version} (${r.records} records: ${r.reason})`).join('; ')
+    );
+  }
+  const openPermits = openDiscoveryPermits(log);
+  if (openPermits.length) {
+    throw new Error(
+      `${openPermits.length} navigation permit(s) were issued and never consumed: ` +
+        `${openPermits.map((p) => `${p.id} ${p.url}`).join(', ')}. Either record the inspection ` +
+        'they authorised or the log does not account for a request that was permitted.'
+    );
+  }
+
   // selection-v1.0.9. An agency that finished every category with nothing eligible must be
   // RECORDED as exhausted before the corpus is built. Without this the draft was produced while
   // an agency sat in limbo - searched, contributing no page, and absent from the denominator -
@@ -1066,7 +1114,7 @@ export function findOpenPermit(log, { agency, category, candidateSetVersion, url
   ) ?? null;
 }
 
-export function consumeDiscoveryPermit(log, { agency, category, candidateSetVersion, url }) {
+export function consumeDiscoveryPermit(log, { agency, category, candidateSetVersion, url, navigatedAt = null }) {
   const permit = findOpenPermit(log, { agency, category, candidateSetVersion, url });
   if (!permit) {
     throw new Error(
@@ -1075,6 +1123,105 @@ export function consumeDiscoveryPermit(log, { agency, category, candidateSetVers
         'happen before the request, not when the record is written.'
     );
   }
+
+  // selection-v1.0.12. A permit authorises a FUTURE request, so the navigation it covers must
+  // have happened after it was issued and within its life. Without this, a permit could be
+  // issued now and attached to an observation made days ago, which would make the check look
+  // preventative when it was retrospective - the exact appearance the permit exists to deny.
+  const issued = Date.parse(permit.issuedAt);
+  const now = Date.now();
+  if (now - issued > PERMIT_TTL_MS) {
+    throw new Error(
+      `permit ${permit.id} was issued at ${permit.issuedAt} and has expired. Re-run ` +
+        '`preflight-discovery`: a stale permit cannot authorise a request made much later, ' +
+        'because the policy may have changed in between.'
+    );
+  }
+  if (navigatedAt !== null) {
+    const navigated = Date.parse(navigatedAt);
+    if (Number.isNaN(navigated)) throw new Error(`navigatedAt ${navigatedAt} is not a timestamp`);
+    if (navigated < issued) {
+      throw new Error(
+        `the navigation at ${navigatedAt} precedes permit ${permit.id}, issued at ${permit.issuedAt}. ` +
+          'A permit authorises a request that has not happened yet; it cannot be attached to an ' +
+          'observation already made.'
+      );
+    }
+    if (navigated - issued > PERMIT_TTL_MS) {
+      throw new Error(
+        `the navigation at ${navigatedAt} is more than an hour after permit ${permit.id} was issued`
+      );
+    }
+  }
+
   permit.consumedAt = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
   return permit;
+}
+
+/** Has this discovery record been corrected by a later one? */
+export function isDiscoverySuperseded(log, id) {
+  return log.attempts.some((a) => a.supersedesDiscoveryId === id);
+}
+
+/** How long a navigation permit stays usable. A permit authorises an imminent request. */
+export const PERMIT_TTL_MS = 60 * 60 * 1000;
+
+/**
+ * RFC 9309 section 2.4: cached robots content should generally not be used for more than 24
+ * hours. A permanently cached policy could authorise a path that has since become disallowed.
+ */
+export const ROBOTS_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
+export function robotsCheckIsFresh(check, at = Date.now()) {
+  const fetched = Date.parse(check?.fetchedAt ?? '');
+  return !Number.isNaN(fetched) && at - fetched < ROBOTS_MAX_AGE_MS;
+}
+
+/**
+ * Discovery rounds that exist in the log but are not resolved into a locked, approved set.
+ *
+ * The bypass this closes: twenty-six discovery records were written for a round with no candidate
+ * set object at all. Every gate keyed off candidate sets, so `status` reported nothing
+ * outstanding and the corpus draft built while an entire agency's round sat in the log, unlocked
+ * and unreviewed. Unfinished discovery could disappear from the corpus gate simply by never
+ * reaching the step that creates the set.
+ */
+export function unresolvedDiscoveryRounds(log) {
+  const rounds = new Map();
+  for (const a of log.attempts) {
+    if (a.status !== 'discovery') continue;
+    if (isDiscoverySuperseded(log, a.id)) continue;
+    const key = `${a.agency}\u0000${a.category}\u0000${a.candidateSetVersion}`;
+    if (!rounds.has(key)) {
+      rounds.set(key, { agency: a.agency, category: a.category, version: a.candidateSetVersion, records: 0 });
+    }
+    rounds.get(key).records += 1;
+  }
+
+  const out = [];
+  for (const round of rounds.values()) {
+    const set = log.candidateSets?.[setKey(round.agency, round.category)];
+    const archived = (log.supersededCandidateSets ?? []).some(
+      (v) => v.agency === round.agency && v.category === round.category && v.version === round.version
+    );
+    if (archived) continue; // its round was superseded with it, and is preserved as history
+    if (!set) {
+      out.push({ ...round, reason: 'no candidate set exists for this round' });
+      continue;
+    }
+    if (set.version !== round.version) {
+      out.push({ ...round, reason: `the active set is version ${set.version}, not ${round.version}` });
+      continue;
+    }
+    // Not locked is the bypass this detects. A set that is locked but awaiting approval is
+    // already counted as a pending candidate set, and reporting it here too would double-count
+    // one outstanding item as two.
+    if (!set.lockedAt) out.push({ ...round, reason: 'the candidate set is not locked' });
+  }
+  return out;
+}
+
+/** Permits issued and never consumed: a navigation authorised and never accounted for. */
+export function openDiscoveryPermits(log) {
+  return (log.discoveryPermits ?? []).filter((p) => p.consumedAt === null);
 }

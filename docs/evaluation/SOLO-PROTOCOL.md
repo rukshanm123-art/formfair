@@ -1482,3 +1482,70 @@ re-fetched only when asked. A test asserts three separate CLI calls produce one 
 
 Eleven tests. The capture package has 178 tests. One earlier CLI test was updated rather than the
 rule relaxed: its end-to-end flow now preflights before recording, as a real round does.
+
+## Amendment 15: unfinished discovery could disappear from the corpus gate
+
+**Dated 25 September 2026.** `selection-v1.0.12`. Moves no earlier tag.
+
+### The bypass, reproduced from the live ledger
+
+Twenty-six discovery records existed for a Ministry of Health round — `d-0198` to `d-0223` — and
+no candidate-set object for that round at all, because a set was created only when candidates were
+first recorded. Every gate keyed off candidate sets, so all of them looked past it:
+
+```
+status -> nothing outstanding; the corpus draft is not withheld
+next   -> record discovered candidates, then lock the set
+draft  -> BUILT: 1 page, 1 exhaustion, 26 Ministry records ignored
+```
+
+An entire agency's round sat in the log, unlocked and unreviewed, and the corpus could have been
+sealed without it. Discovery that never reached the step which creates the set was invisible to
+every check meant to notice unfinished work.
+
+### The corrections
+
+**A round exists from its first inspection.** `preflight-discovery` opens the candidate set, so
+records can no longer accumulate outside one.
+
+**`status` and `deriveDraft` refuse** discovery rounds with no set, or with a set that is not
+locked; open permits, which mean a request was authorised that nothing accounts for; and sets
+that are not approved. A locked-but-unapproved set is deliberately *not* reported as an
+unresolved round as well, because it is already an outstanding candidate-set approval and would
+otherwise turn one outstanding item into two.
+
+**Permit chronology and expiry.** A permit authorises a *future* request, so the navigation it
+covers must fall after the permit was issued and within an hour of it. Without this a permit
+could be issued now and attached to an observation made days earlier, which would make the check
+look preventative when it was retrospective — the exact appearance the permit exists to deny.
+This is why the plan to "redo the round with no new browsing" was wrong, and it is enforced
+rather than remembered.
+
+**Robots policies expire after 24 hours**, per RFC 9309 section 2.4. A permanently cached policy
+could authorise a path that has since become disallowed.
+
+**A single discovery record is corrected in place.** A corrected record names
+`supersedesDiscoveryId`; the correction must match the original's agency, category, round, URL and
+method; the original is preserved; locking binds the correction and *not* what it replaced; and
+the approval packet shows both, marking the superseded one as not evidence. A round of twenty-six
+inspections with one wrong record does not need twenty-five re-observations, and repeating them
+would mean re-requesting pages already retrieved under permits — traffic with no evidential
+purpose.
+
+**`/robots.txt` is exempt from the rules it carries.** Found by running a real round:
+`minhealthnz.shinyapps.io` publishes `Disallow: /`, which by the letter of the rules disallows its
+own policy file, so the robots inspection recorded *itself* as disallowed and not navigated while
+carrying a note describing the file's contents — which only reading it could supply. A
+self-contradictory record produced by honouring the rules against the file that states them.
+
+Eleven tests, including both live bypasses reproduced end to end. The capture package has 191
+tests.
+
+### Two fixtures corrected rather than rules relaxed
+
+The end-to-end CLI fixture used fixed past timestamps for its discovery records, which the
+chronology check now correctly rejects. Replacing them exposed a second fault in the fixture
+itself: it read the navigation time *before* running the preflight, and since timestamps are
+truncated to the second, that value could land a second earlier than the permit it was supposed to
+follow. Both were the fixture being wrong about the order of events, not the rule being too
+strict.
