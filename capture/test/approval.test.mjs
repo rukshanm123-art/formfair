@@ -684,3 +684,146 @@ describe('the approval gate revalidates the set against its evidence', () => {
     assert.ok(clean.id, 'the clean record exists but is not what this set claims');
   });
 });
+
+/**
+ * The binding itself has to be sound.
+ *
+ * selection-v1.0.6, from attacks reproduced against v1.0.5. Revalidating at the approval gate
+ * was the right move, but it trusted `discoveryRecordIds` as a given. The resolver mapped ids
+ * to records and dropped whatever did not resolve, so:
+ *
+ *   - a set bound entirely to ids that do not exist validated cleanly, because it then had no
+ *     contradicting evidence - true only in the sense that it had no evidence at all;
+ *   - a set bound to another agency's record validated against that agency's inspections.
+ *
+ * Both reached APPROVED. Probing the same surface found five more of the same family, all
+ * held below. The shape of the bug: a check that resolves references leniently is not a check,
+ * because the lenient path is exactly what an inconsistent record takes.
+ */
+describe('a locked set is bound soundly to its own round', () => {
+  const CAT = 'account-registration';
+  const KEY = `TPK\u0000${CAT}`;
+
+  /** A locked, declared, empty set with whatever binding the test wants to probe. */
+  function boundTo(log, discoveryRecordIds) {
+    log.candidateSets[KEY] = {
+      agency: 'TPK', category: CAT, version: 1,
+      discovered: [], locked: [], ordered: [], droppedBeyondBound: [],
+      lockedAt: '2026-09-24T10:00:00Z', approval: APPROVAL.PENDING,
+      candidateDeclaration: 'none', declaredAt: '2026-09-25T02:57:32Z',
+      discoveryRecordIds, discoveryMethods: ['navigation'],
+    };
+    return log.candidateSets[KEY];
+  }
+  const approve = (log) => () => approveCandidateSet(log, { agency: 'TPK', category: CAT, approved: true });
+
+  test('THE ATTACK: bound to a discovery id that does not exist', () => {
+    const log = emptyLog();
+    addDiscovery(log, { agency: 'TPK', category: CAT, outcome: 'no-candidates' });
+    const set = boundTo(log, ['d-9999']);
+    assert.throws(approve(log), /bound to discovery record d-9999, which does not exist/);
+    assert.equal(set.approval, APPROVAL.PENDING);
+  });
+
+  test('THE ATTACK: bound to another agency\'s discovery record', () => {
+    const log = emptyLog();
+    const foreign = addDiscovery(log, { agency: 'Other Agency', category: CAT, outcome: 'no-candidates' });
+    const set = boundTo(log, [foreign.id]);
+    assert.throws(approve(log), /belongs to Other Agency \/ account-registration round 1/);
+    assert.equal(set.approval, APPROVAL.PENDING);
+  });
+
+  test('a partially real binding is refused, not silently narrowed to the real part', () => {
+    // The lenient resolver would have kept the good record and dropped the bad one, so the
+    // set would validate against a subset of what it claims.
+    const log = emptyLog();
+    const real = addDiscovery(log, { agency: 'TPK', category: CAT, outcome: 'no-candidates' });
+    boundTo(log, [real.id, 'd-9999']);
+    assert.throws(approve(log), /d-9999, which does not exist/);
+  });
+
+  test('bound to a record from another category is refused', () => {
+    const log = emptyLog();
+    const other = addDiscovery(log, {
+      agency: 'TPK', category: 'enquiry-or-contact', outcome: 'no-candidates',
+    });
+    boundTo(log, [other.id]);
+    assert.throws(approve(log), /belongs to TPK \/ enquiry-or-contact round 1/);
+  });
+
+  test('bound to a record from another round is refused', () => {
+    const log = emptyLog();
+    const v2 = addDiscovery(log, { agency: 'TPK', category: CAT, version: 2, outcome: 'no-candidates' });
+    boundTo(log, [v2.id]);
+    assert.throws(approve(log), /round 1 is bound to .*round 2/);
+  });
+
+  test('the same record bound twice is refused', () => {
+    const log = emptyLog();
+    const r = addDiscovery(log, { agency: 'TPK', category: CAT, outcome: 'no-candidates' });
+    boundTo(log, [r.id, r.id]);
+    assert.throws(approve(log), new RegExp(`more than once \\(${r.id}\\)`));
+  });
+
+  test('bound to a candidate attempt rather than a discovery record is refused', () => {
+    // The candidate attempt has to be created legitimately - through an approved set - before
+    // the binding can be repointed at it, because appendAttempt refuses an assessment with no
+    // locked set behind it.
+    const log = emptyLog();
+    ready(log, 'TPK', CAT, ['https://w.govt.nz/page']);
+    appendAttempt(log, outcome('TPK', CAT, 'https://w.govt.nz/page'));
+    const candidate = candidates(log).at(-1);
+    assert.notEqual(candidate.status, 'discovery');
+
+    const set = boundTo(log, [candidate.id]);
+    assert.equal(set.approval, APPROVAL.PENDING);
+    assert.throws(approve(log), /not a discovery record/);
+  });
+
+  test('a locked set with an empty binding is refused, and does not fall back to its round', () => {
+    // The fallback was the real danger: a set that named nothing was judged against every
+    // record for the round, so an unbound set looked as well evidenced as a bound one.
+    const log = emptyLog();
+    addDiscovery(log, { agency: 'TPK', category: CAT, outcome: 'no-candidates' });
+    boundTo(log, []);
+    assert.throws(approve(log), /locked but names no discovery records/);
+  });
+
+  test('a soundly bound set still approves', () => {
+    const log = emptyLog();
+    const a = addDiscovery(log, { agency: 'TPK', category: CAT, outcome: 'no-candidates' });
+    const b = addDiscovery(log, {
+      agency: 'TPK', category: CAT, outcome: 'unavailable', method: 'sitemap',
+    });
+    boundTo(log, [a.id, b.id]);
+    const set = approveCandidateSet(log, { agency: 'TPK', category: CAT, approved: true });
+    assert.equal(set.approval, APPROVAL.APPROVED);
+  });
+
+  test('an unsound binding can still be REJECTED', () => {
+    const log = emptyLog();
+    addDiscovery(log, { agency: 'TPK', category: CAT, outcome: 'no-candidates' });
+    boundTo(log, ['d-9999']);
+    const set = approveCandidateSet(log, {
+      agency: 'TPK', category: CAT, approved: false, note: 'binding names a record that does not exist',
+    });
+    assert.equal(set.approval, APPROVAL.REJECTED);
+  });
+
+  test('a set locked by the normal path is soundly bound by construction', () => {
+    // The guard must not be reachable in ordinary use: every set the tooling produces passes.
+    const log = emptyLog();
+    const [url] = ready(log, 'TPK', CAT, ['https://w.govt.nz/register']);
+    const set = log.candidateSets[KEY];
+    assert.ok(set.discoveryRecordIds.length > 0);
+    for (const id of set.discoveryRecordIds) {
+      const record = log.attempts.find((a) => a.id === id);
+      assert.equal(record.status, 'discovery');
+      assert.equal(record.agency, 'TPK');
+      assert.equal(record.category, CAT);
+      assert.equal(record.candidateSetVersion, set.version);
+    }
+    assert.equal(new Set(set.discoveryRecordIds).size, set.discoveryRecordIds.length);
+    assert.ok(url);
+  });
+});

@@ -804,3 +804,42 @@ so the nil result stands and no further discovery round is needed. Its `declared
 25 September is later than its `lockedAt` of 24 September, and that gap is disclosed here
 rather than smoothed over: the declaration was made when the set was locked, and the tooling
 of the day failed to persist it.
+
+### Correction, dated 25 September 2026: the binding itself had to be sound
+
+Revalidating at the approval gate was necessary, but `selection-v1.0.5` trusted
+`discoveryRecordIds` as a given. The resolver mapped ids to records and discarded whatever
+failed to resolve, which meant:
+
+- **a set bound entirely to ids that do not exist validated cleanly**, because it then had no
+  contradicting evidence — true only in the sense that it had no evidence at all;
+- **a set bound to another agency's record was validated against that agency's inspections.**
+
+Both reached **APPROVED**. Probing the same surface found five more of the same family, and
+all seven are now refused: a foreign category, a foreign round, the same id bound twice, a
+candidate attempt bound as though it were an inspection, and a locked set with an empty
+binding.
+
+The last of those was the most dangerous, because it was not a lenient resolution but a
+deliberate fallback: a locked set naming no records was judged against *every* record for its
+round, so an unbound set looked exactly as well evidenced as a bound one.
+
+**The binding is now verified before it is used.** Every bound id must exist; ids must be
+unique; every record must be a `discovery` record and must match the set's own agency,
+category and version; and a locked set must name at least one record, with no fallback to
+general round records. A locked set stands on its binding and on nothing else.
+
+The shape of this defect is worth stating plainly, because it is the same one twice over: a
+check that resolves references leniently is not a check, since the lenient path is precisely
+the one an inconsistent record takes. `.filter(Boolean)` turned every integrity question into
+a silent no-op.
+
+Eleven further tests, the first two being the reproduced attacks. They also hold that a
+*partially* real binding is refused rather than quietly narrowed to its real part, that an
+unsound binding can still be rejected, and — as a guard against over-tightening — that a set
+locked by the ordinary tooling path is soundly bound by construction. The capture package has
+137 tests.
+
+**Agency 2 already satisfies every one of these conditions**, so no new discovery, declaration
+or round is required: its five bound records all exist, are unique, are `discovery` records,
+and belong to its own agency, category and round.

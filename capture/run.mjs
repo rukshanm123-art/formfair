@@ -294,14 +294,68 @@ export function appendAttempt(log, attempt) {
  * they are what gets rechecked. A set not yet locked has none, and falls back to its round.
  */
 function supportingRecords(log, set) {
-  if (Array.isArray(set.discoveryRecordIds) && set.discoveryRecordIds.length > 0) {
-    const byId = new Map(log.attempts.map((a) => [a.id, a]));
-    return set.discoveryRecordIds.map((id) => byId.get(id)).filter(Boolean);
+  const where = `${set.agency} / ${set.category}`;
+
+  // selection-v1.0.6. A locked set stands on its binding, and on nothing else. Falling back
+  // to "any discovery record for this round" let a set be judged against evidence it never
+  // claimed, and made an empty binding indistinguishable from a complete one.
+  if (set.lockedAt) {
+    if (!Array.isArray(set.discoveryRecordIds) || set.discoveryRecordIds.length === 0) {
+      throw new Error(
+        `${where} is locked but names no discovery records. A locked set is evidenced by the ` +
+          'records it is bound to; an unbound set cannot be validated and must be superseded.'
+      );
+    }
+  } else if (!Array.isArray(set.discoveryRecordIds) || set.discoveryRecordIds.length === 0) {
+    // Not yet locked: `lockCandidateSet` computes and passes its own records, so this is only
+    // reached by a caller validating a set mid-construction.
+    return log.attempts.filter(
+      (a) => a.status === 'discovery' && a.agency === set.agency && a.category === set.category &&
+        a.candidateSetVersion === set.version
+    );
   }
-  return log.attempts.filter(
-    (a) => a.status === 'discovery' && a.agency === set.agency && a.category === set.category &&
-      a.candidateSetVersion === set.version
-  );
+
+  const ids = set.discoveryRecordIds;
+  const duplicated = ids.filter((id, i) => ids.indexOf(id) !== i);
+  if (duplicated.length > 0) {
+    throw new Error(
+      `${where} names discovery record(s) more than once (${[...new Set(duplicated)].join(', ')}). ` +
+        'A duplicated binding would count one inspection as several.'
+    );
+  }
+
+  const byId = new Map(log.attempts.map((a) => [a.id, a]));
+  const records = [];
+  for (const id of ids) {
+    const record = byId.get(id);
+    // Resolved strictly: a missing id used to be dropped silently, so a set bound entirely to
+    // ids that do not exist validated as though it had no contradicting evidence - which is
+    // true only because it had no evidence at all.
+    if (!record) {
+      throw new Error(
+        `${where} is bound to discovery record ${id}, which does not exist in the log. A set ` +
+          'cannot be evidenced by a record that is not there.'
+      );
+    }
+    if (record.status !== 'discovery') {
+      throw new Error(
+        `${where} is bound to ${id}, which is a ${record.status} attempt, not a discovery ` +
+          'record. Only an inspection can evidence a candidate set.'
+      );
+    }
+    // The binding must be to THIS set's round. Otherwise one agency's inspections could
+    // evidence another's set, or an earlier round could evidence a later one.
+    if (record.agency !== set.agency || record.category !== set.category ||
+        record.candidateSetVersion !== set.version) {
+      throw new Error(
+        `${where} round ${set.version} is bound to ${id}, which belongs to ${record.agency} / ` +
+          `${record.category} round ${record.candidateSetVersion}. A set may only be evidenced ` +
+          'by its own round.'
+      );
+    }
+    records.push(record);
+  }
+  return records;
 }
 
 /**
