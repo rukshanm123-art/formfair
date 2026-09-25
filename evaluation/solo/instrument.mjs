@@ -7,6 +7,36 @@ import { pathToFileURL } from 'node:url';
 export const SOLO_INSTRUMENT_TAG = 'evaluation-v1.1.0';
 export const SOLO_CORPUS_TAG = 'corpus-v1.0.0';
 
+/**
+ * The sealer's own tag, attested separately from the analyser's.
+ *
+ * The seal and the analyser are different artefacts frozen under different tags. A manifest that
+ * recorded only `evaluation-v1.1.0` said which analyser would read the corpus but not which
+ * sealing rules produced it - and those rules changed materially at solo-protocol-v1.0.2, when the
+ * seal began verifying exhaustion records against the capture log instead of trusting their shape.
+ */
+export const SOLO_SEALER_TAG = 'solo-protocol-v1.0.2';
+
+/**
+ * Identity of the checkout doing the sealing. A real seal requires it clean and tagged, on the
+ * same reasoning as the analyser: a corpus sealed from a modified working tree cannot be
+ * reproduced, and nothing afterwards would reveal which rules were actually applied.
+ */
+export function sealerIdentity(dir) {
+  const at = resolve(dir);
+  const commit = git(at, ['rev-parse', 'HEAD']);
+  const status = git(at, ['status', '--porcelain']);
+  const tags = (git(at, ['tag', '--points-at', 'HEAD']) ?? '').split('\n').filter(Boolean).sort();
+  return {
+    directory: at,
+    tag: SOLO_SEALER_TAG,
+    commit,
+    tagsAtCommit: tags,
+    dirty: status === null ? null : status.length > 0,
+    officialReady: commit !== null && status === '' && tags.includes(SOLO_SEALER_TAG),
+  };
+}
+
 const sha256 = (buffer) => createHash('sha256').update(buffer).digest('hex');
 
 function git(dir, args) {

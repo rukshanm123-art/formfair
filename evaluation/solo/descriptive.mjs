@@ -129,6 +129,16 @@ const FRAME_FILES = [
  * these constants are identical to the capture package's. The seal is the authority: a record
  * whose reason differs from this string does not seal, whatever wrote it.
  */
+/**
+ * The protocol version this sealer implements.
+ *
+ * It was a default of `solo-protocol-v1.0.0`, so a manifest produced by the v1.0.1 sealer
+ * declared it had been sealed under the previous protocol - the one whose seal did not read the
+ * exhaustion records at all. A manifest that misnames its own protocol is worse than one that
+ * omits it: a reader checking which rules a corpus was sealed under would be told the wrong ones.
+ */
+export const SOLO_PROTOCOL_TAG = 'solo-protocol-v1.0.2';
+
 export const EXHAUSTION_REASON =
   'all four categories in the frozen priority order were searched and none yielded an eligible form';
 export const MAX_QUALIFIED_AGENCIES = 40;
@@ -171,7 +181,10 @@ function drawOrderAgencies(text) {
 
 const isoUtc = (value) => typeof value === 'string' && !Number.isNaN(Date.parse(value)) && value.endsWith('Z');
 
-export function sealCorpus({ draft, capturesDir, instrument, frameDir, protocol = 'solo-protocol-v1.0.0' }) {
+export function sealCorpus({
+  draft, capturesDir, instrument, frameDir, sealer = null, captureLogPath = null,
+  protocol = SOLO_PROTOCOL_TAG,
+}) {
   const problems = [];
   if (draft?.schema !== 'formfair/solo-corpus-draft@1') {
     problems.push('draft schema must be formfair/solo-corpus-draft@1');
@@ -326,6 +339,18 @@ export function sealCorpus({ draft, capturesDir, instrument, frameDir, protocol 
       );
     }
 
+    // An upper bound, not only a target. The branch below tested `>= MAX_QUALIFIED_AGENCIES`,
+    // which treats forty-one pages as "reached the target" and lets a forty-one page corpus seal
+    // against a forty-one agency prefix. The study takes at most forty, so forty-one is not a
+    // corpus that overshot: it is one whose selection did not stop where the protocol says.
+    if (uniquePageAgencies.size > MAX_QUALIFIED_AGENCIES) {
+      problems.push(
+        `${uniquePageAgencies.size} agencies have a sealed page, which exceeds the target of ` +
+          `${MAX_QUALIFIED_AGENCIES}. The scan stops at exactly ${MAX_QUALIFIED_AGENCIES} ` +
+          'qualifying pages.'
+      );
+    }
+
     let order;
     try {
       order = drawOrderAgencies(readFileSync(join(frameRoot, 'draw-order.csv'), 'utf8'));
@@ -340,7 +365,7 @@ export function sealCorpus({ draft, capturesDir, instrument, frameDir, protocol 
         problems.push(`agencies outside the frozen frame: ${[...new Set(outside)].join(', ')}`);
       } else {
         const touched = new Set([...uniquePageAgencies, ...exhaustedAgencies]);
-        if (uniquePageAgencies.size >= MAX_QUALIFIED_AGENCIES) {
+        if (uniquePageAgencies.size === MAX_QUALIFIED_AGENCIES) {
           // The scan stopped on reaching the target, so what was touched must be exactly the
           // prefix of the draw order up to that point - no agency skipped over, none reached past.
           const prefix = order.slice(0, touched.size);
@@ -371,6 +396,112 @@ export function sealCorpus({ draft, capturesDir, instrument, frameDir, protocol 
     }
   }
 
+  // solo-protocol-v1.0.2. The exhaustions are checked against the authoritative log, not only
+  // for shape.
+  //
+  // Validating shape alone left the completion rule trivially satisfiable: a hand-written draft
+  // could carry forty-four well-formed exhaustion records for agencies nobody ever searched, and
+  // the seal would accept it as a complete scan. The sealed selection ledger does not close this,
+  // because it holds examined URLs and outcomes - not candidate-set versions, approvals, or
+  // exhaustion records. So the log itself is bound by hash and read.
+  let captureLogSeal = null;
+  if (draft?.synthetic !== true) {
+    if (typeof captureLogPath !== 'string' || captureLogPath.length === 0) {
+      problems.push(
+        'captureLogPath is required to seal a real corpus: the exhaustion records are claims ' +
+          'about what was searched, and they are verified against the authoritative capture log'
+      );
+    } else {
+      let bytes = null;
+      let log = null;
+      try {
+        bytes = readFileSync(resolve(captureLogPath));
+        log = JSON.parse(bytes.toString('utf8'));
+      } catch (error) {
+        problems.push(`cannot read the capture log at ${captureLogPath}: ${error.message}`);
+      }
+      if (log) {
+        captureLogSeal = { sha256: sha256(bytes), bytes: bytes.length };
+        const logExhausted = Array.isArray(log.exhausted) ? log.exhausted : [];
+        const sets = log.candidateSets ?? {};
+        const attempts = Array.isArray(log.attempts) ? log.attempts : [];
+
+        for (const record of exhausted) {
+          const where = `exhaustedAgencies[${record.agency}]`;
+
+          // The record must BE in the log, not merely resemble one.
+          const inLog = logExhausted.find((e) => (typeof e === 'string' ? e : e?.agency) === record.agency);
+          if (!inLog || typeof inLog === 'string') {
+            problems.push(
+              `${where} is not recorded as exhausted in the capture log. An exhaustion in the ` +
+                'draft that the log does not contain is an assertion about a search that has no record.'
+            );
+            continue;
+          }
+          if (inLog.exhaustedAt !== record.exhaustedAt || inLog.reason !== record.reason) {
+            problems.push(`${where} does not match the capture log's record of it`);
+          }
+          for (const category of EXHAUSTION_CATEGORIES) {
+            if (inLog.categorySetVersions?.[category] !== record.categorySetVersions?.[category]) {
+              problems.push(`${where}.categorySetVersions.${category} disagrees with the capture log`);
+            }
+          }
+
+          // No approved capture: an agency cannot both contribute a page and be exhausted.
+          const captured = attempts.find(
+            (a) => a.agency === record.agency && a.status === 'captured' && a.approval === 'approved'
+          );
+          if (captured) {
+            problems.push(`${where} has an approved captured page (${captured.pageId}) in the capture log`);
+          }
+
+          // Four candidate sets, at the recorded versions, approved and settled.
+          for (const category of EXHAUSTION_CATEGORIES) {
+            const set = sets[`${record.agency}\u0000${category}`];
+            if (!set) {
+              problems.push(`${where}: the capture log has no ${category} candidate set for this agency`);
+              continue;
+            }
+            if (set.version !== record.categorySetVersions?.[category]) {
+              problems.push(
+                `${where}: the log's ${category} set is version ${set.version}, but the exhaustion ` +
+                  `claims version ${record.categorySetVersions?.[category]}`
+              );
+            }
+            if (!set.lockedAt) problems.push(`${where}: the log's ${category} set is not locked`);
+            if (set.approval !== 'approved') {
+              problems.push(`${where}: the log's ${category} set is ${set.approval ?? 'pending'}, not approved`);
+            }
+            const decided = new Set(
+              attempts.filter((a) => a.agency === record.agency && a.status !== 'discovery').map((a) => a.url)
+            );
+            const unassessed = (set.locked ?? []).filter((u) => !decided.has(u));
+            if (unassessed.length) {
+              problems.push(`${where}: the log's ${category} set has ${unassessed.length} unassessed candidate(s)`);
+            }
+          }
+        }
+
+        // The symmetric check: a sealed page must be an approved capture in the log.
+        for (const page of pages) {
+          const match = attempts.find(
+            (a) => a.status === 'captured' && a.approval === 'approved' && a.pageId === page.pageId
+          );
+          if (!match) {
+            problems.push(
+              `pages[${page.pageId}] is not an approved capture in the capture log`
+            );
+          } else if (match.agency !== page.agency) {
+            problems.push(
+              `pages[${page.pageId}] is attributed to ${page.agency} but the capture log records ` +
+                `${match.agency}`
+            );
+          }
+        }
+      }
+    }
+  }
+
   if (problems.length > 0) return { manifest: null, problems };
   return {
     manifest: {
@@ -392,6 +523,15 @@ export function sealCorpus({ draft, capturesDir, instrument, frameDir, protocol 
       },
       pages,
       exhaustedAgencies: exhausted,
+      // The sealer attests itself, separately from the analyser it will later run. They are
+      // different artefacts under different tags, and a manifest that named only the analyser
+      // could not say which sealing rules produced it.
+      sealer: sealer
+        ? { tag: sealer.tag, commit: sealer.commit, dirty: sealer.dirty }
+        : null,
+      captureLog: captureLogSeal
+        ? { file: 'capture-log.json', sha256: captureLogSeal.sha256, bytes: captureLogSeal.bytes }
+        : null,
     },
     problems: [],
   };

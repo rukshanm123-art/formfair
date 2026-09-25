@@ -39,19 +39,29 @@ requires that exact tag at `HEAD`, a clean working tree, a built package and a l
    a selection ledger.
 3. Save the full rendered page at 1280 x 800 and complete a copy of
    `corpus-draft.template.json`.
-4. Build the content-hash corpus manifest:
+4. Build the content-hash corpus manifest. The **capture log is required**: the exhaustion
+   records are claims about which agencies were searched, and the seal verifies each one
+   against the log rather than trusting its shape. `FORMFAIR_SOLO_INSTRUMENT_DIR` must point
+   at the frozen analyser checkout **for sealing as well as for analysis** — the sealer
+   attests both the analyser identity it records and its own clean, tagged checkout:
 
    ```bash
+   FORMFAIR_SOLO_INSTRUMENT_DIR=/path/to/evaluation-v1.1.0 \
    npm run solo:seal-corpus -- --draft data/corpus-draft.json \
-     --captures data/captures --out corpus/corpus-v1.0.0.json
+     --captures data/captures --capture-log data/capture/capture-log.json \
+     --out corpus/corpus-v1.0.0.json
    ```
+
+   A real seal refuses unless that checkout is clean and tagged `evaluation-v1.1.0`, and the
+   sealing checkout is clean and tagged with the current solo-protocol tag. The manifest
+   records the protocol tag, the sealer's tag and commit, the analyser identity, and the hash
+   of the capture log it verified against.
 
 5. Commit the manifest, tag that commit `corpus-v1.0.0`, and leave the captured HTML
    outside version control. The tag is the evidence that the manifest existed before
    FormFair output was seen; a hash cannot prove its own timing.
-6. Check out `evaluation-v1.1.0` separately, set
-   `FORMFAIR_SOLO_INSTRUMENT_DIR` to that checkout, and produce the report from the
-   `corpus-v1.0.0` checkout:
+6. Produce the report from the `corpus-v1.0.0` checkout, with
+   `FORMFAIR_SOLO_INSTRUMENT_DIR` still pointing at the `evaluation-v1.1.0` checkout:
 
    ```bash
    npm run solo:descriptive -- --manifest corpus/corpus-v1.0.0.json \

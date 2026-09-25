@@ -1226,3 +1226,66 @@ including that every agency in the draw order is present in the frame under exac
 This is the second defect in this scan found not by a test but by needing a value to be correct
 for something else. Both were in code that had passed every test written for it, because the tests
 had been written from the same wrong assumption as the code.
+
+## Amendment 11: the seal now checks evidence, not shape
+
+**Dated 25 September 2026.** `solo-protocol-v1.0.2`. No capture-side code changed, so
+`selection-v1.0.9` stands; `solo-protocol-v1.0.0` and `v1.0.1` are not moved. No discovery,
+exclusion or approval is repeated.
+
+### Three blockers in the v1.0.1 sealer
+
+**The manifest named the wrong protocol.** `sealCorpus` defaulted to `solo-protocol-v1.0.0`, so
+every manifest the v1.0.1 sealer produced declared it had been sealed under the *previous*
+protocol — the one whose seal did not read the exhaustion records at all. A manifest that misnames
+its own rules is worse than one that omits them: a reader checking which rules a corpus was sealed
+under would be told the wrong ones, and would be told so by the artefact whose job is to be
+authoritative.
+
+**Exhaustions were validated by shape, never against evidence.** The seal checked that a record
+had an agency, a timestamp, the frozen reason and four positive versions — and checked none of it
+against anything. So a hand-written draft could carry forty-four perfectly well-formed exhaustion
+records for agencies nobody ever searched, satisfy the forty-five-agency completion rule, and seal
+a one-page corpus as a complete scan of the frame. The sealed selection ledger does not close this
+hole, because it records examined URLs and outcomes and contains no candidate-set versions,
+approvals, or exhaustion records.
+
+**More than forty pages could seal.** The completion branch tested
+`uniquePageAgencies.size >= MAX_QUALIFIED_AGENCIES`, which treats forty-one pages as having
+reached the target and seals them against a forty-one agency prefix. Forty-one is not a corpus
+that overshot; it is one whose selection did not stop where the protocol says it stops.
+
+### What the seal does now
+
+**The authoritative capture log is bound by hash and read.** A real seal requires
+`--capture-log`, records its digest in the manifest so it cannot be swapped afterwards, and
+verifies every exhaustion against it: the record must *be* in the log with the same timestamp,
+reason and versions; the agency must have four candidate sets at exactly those versions, each
+locked, approved and with an outcome for every locked candidate; and the agency must hold no
+approved captured page. The symmetric check is made too — a sealed page must be an approved
+capture in the log, attributed to the same agency.
+
+**Forty is an upper bound as well as a target.** More than forty sealed pages is refused outright,
+and the prefix rule now applies at exactly forty.
+
+**The sealer attests itself.** A real seal requires a clean checkout tagged with the current
+solo-protocol tag, and the manifest records the sealer's tag and commit alongside — not instead of
+— the `evaluation-v1.1.0` analyser identity. They are different artefacts under different tags,
+and the sealing rules changed materially at this version, so a manifest naming only the analyser
+could not say which rules produced it. The README now states that the frozen analyser checkout is
+supplied during sealing as well as analysis.
+
+Seven further tests, the first being the fabrication itself: forty-four well-shaped but unsupported
+exhaustion records with a one-page corpus, refused with one objection per record. Also a pending
+candidate set in the log, a version the log disagrees with, forty-one pages, a real seal attempted
+with no capture log at all, a page the log does not record as approved, and that the manifest names
+this protocol, this sealer, the analyser and the bound log's hash. The solo suite has 31 tests.
+
+### What this says about the previous two amendments
+
+Amendment 9 claimed the exhaustion records were sealed; Amendment 10 made that true of the
+manifest's *contents*. This one makes it true of their *meaning*: until now the seal could confirm
+a record existed and was well formed, which is a different thing from confirming the search it
+describes ever happened. The pattern across all three is the same, and worth stating once: a gate
+that checks the form of a claim rather than the evidence for it is a gate that rewards a
+well-formatted assertion over a true one.
