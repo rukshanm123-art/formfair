@@ -556,3 +556,131 @@ describe('a locked set must agree with its discovery round', () => {
     );
   });
 });
+
+/**
+ * The approval gate revalidates the evidence.
+ *
+ * selection-v1.0.5, from an attack reproduced against v1.0.4. The consistency rule lived
+ * inside `lockCandidateSet`, which made it a property of one code path rather than of the
+ * data. A set locked before the rule existed could be handed the retrospective nil
+ * declaration and then approved, because approval rechecked nothing - so an empty set whose
+ * own bound discovery record said `candidates-found` reached APPROVED.
+ *
+ * The lesson generalises past this bug: validating where a value is written is not the same
+ * as validating where it is trusted, and the last gate is the one that has to hold.
+ */
+describe('the approval gate revalidates the set against its evidence', () => {
+  const CAT = 'account-registration';
+
+  /**
+   * A set as a log written before selection-v1.0.4 holds it: locked, empty, and bound to a
+   * record with the given outcome. Built directly, because no current code path can produce
+   * it - which is the point, since logs on disk already contain sets like this.
+   */
+  function legacyLockedEmptySet(outcome, { declared = false } = {}) {
+    const log = emptyLog();
+    const record = addDiscovery(log, {
+      agency: 'TPK', category: CAT, outcome, url: 'https://w.govt.nz/d-legacy',
+    });
+    log.candidateSets[`TPK\u0000${CAT}`] = {
+      agency: 'TPK', category: CAT, version: 1,
+      discovered: [], locked: [], ordered: [], droppedBeyondBound: [],
+      lockedAt: '2026-09-24T10:00:00Z', approval: APPROVAL.PENDING,
+      discoveryRecordIds: [record.id], discoveryMethods: ['navigation'],
+      ...(declared ? { candidateDeclaration: 'none', declaredAt: '2026-09-25T02:57:32Z' } : {}),
+    };
+    return { log, record };
+  }
+
+  test('THE ATTACK: legacy empty set + candidates-found + retrospective declaration + approve', () => {
+    const { log, record } = legacyLockedEmptySet('candidates-found');
+
+    // Step 3 of the attack. The migration is a blessing too, so it validates and refuses
+    // before the declaration is ever attached.
+    assert.throws(
+      () => recordCandidates(log, { agency: 'TPK', category: CAT, urls: [], declaration: 'none' }),
+      new RegExp(`report candidates-found \\(${record.id}\\)`)
+    );
+    const set = log.candidateSets[`TPK\u0000${CAT}`];
+    assert.equal(set.candidateDeclaration, undefined, 'the declaration must not have been attached');
+
+    // Step 4 of the attack, reached independently: a log that already carries the
+    // declaration must still be refused at approval.
+    set.candidateDeclaration = 'none';
+    set.declaredAt = '2026-09-25T02:57:32Z';
+    assert.throws(
+      () => approveCandidateSet(log, { agency: 'TPK', category: CAT, approved: true }),
+      new RegExp(`report candidates-found \\(${record.id}\\)`)
+    );
+    assert.equal(set.approval, APPROVAL.PENDING, 'nothing may be approved on the way out');
+  });
+
+  test('approval is refused for a legacy empty set that was never declared at all', () => {
+    const { log } = legacyLockedEmptySet('no-candidates');
+    assert.throws(
+      () => approveCandidateSet(log, { agency: 'TPK', category: CAT, approved: true }),
+      /no candidates and no nil declaration/
+    );
+  });
+
+  test('approval is refused for a locked non-empty set with no candidates-found record', () => {
+    const log = emptyLog();
+    const record = addDiscovery(log, {
+      agency: 'TPK', category: CAT, outcome: 'no-candidates', url: 'https://w.govt.nz/d-legacy',
+    });
+    log.candidateSets[`TPK\u0000${CAT}`] = {
+      agency: 'TPK', category: CAT, version: 1,
+      discovered: ['https://w.govt.nz/register'], locked: ['https://w.govt.nz/register'],
+      ordered: ['https://w.govt.nz/register'], droppedBeyondBound: [],
+      lockedAt: '2026-09-24T10:00:00Z', approval: APPROVAL.PENDING,
+      discoveryRecordIds: [record.id], discoveryMethods: ['navigation'],
+    };
+    assert.throws(
+      () => approveCandidateSet(log, { agency: 'TPK', category: CAT, approved: true }),
+      /no discovery record for this round reports candidates-found/
+    );
+  });
+
+  test('a set whose evidence contradicts itself can still be REJECTED', () => {
+    // Refusing the rejection would leave the contradiction in the log with no way to resolve
+    // it: rejection is the mechanism for correcting exactly this.
+    const { log } = legacyLockedEmptySet('candidates-found', { declared: true });
+    const set = approveCandidateSet(log, {
+      agency: 'TPK', category: CAT, approved: false, note: 'evidence conflict',
+    });
+    assert.equal(set.approval, APPROVAL.REJECTED);
+    assert.equal(set.approvalNote, 'evidence conflict');
+  });
+
+  test('a consistent legacy set still approves, including its disclosed later declaredAt', () => {
+    const { log } = legacyLockedEmptySet('no-candidates', { declared: true });
+    const set = approveCandidateSet(log, { agency: 'TPK', category: CAT, approved: true });
+    assert.equal(set.approval, APPROVAL.APPROVED);
+    // The migration is disclosed, not hidden: declaredAt is later than lockedAt, on purpose.
+    assert.ok(Date.parse(set.declaredAt) > Date.parse(set.lockedAt));
+  });
+
+  test('approval revalidates against the records the set is BOUND to, not merely its round', () => {
+    // A set bound to one record while another exists for the same round: the binding is the
+    // claim, so the binding is what gets rechecked.
+    const log = emptyLog();
+    const clean = addDiscovery(log, {
+      agency: 'TPK', category: CAT, outcome: 'no-candidates', url: 'https://w.govt.nz/d-clean',
+    });
+    const dirty = addDiscovery(log, {
+      agency: 'TPK', category: CAT, outcome: 'candidates-found', url: 'https://w.govt.nz/d-dirty',
+    });
+    log.candidateSets[`TPK\u0000${CAT}`] = {
+      agency: 'TPK', category: CAT, version: 1,
+      discovered: [], locked: [], ordered: [], droppedBeyondBound: [],
+      lockedAt: '2026-09-24T10:00:00Z', approval: APPROVAL.PENDING,
+      candidateDeclaration: 'none', declaredAt: '2026-09-25T02:57:32Z',
+      discoveryRecordIds: [dirty.id], discoveryMethods: ['navigation'],
+    };
+    assert.throws(
+      () => approveCandidateSet(log, { agency: 'TPK', category: CAT, approved: true }),
+      new RegExp(`report candidates-found \\(${dirty.id}\\)`)
+    );
+    assert.ok(clean.id, 'the clean record exists but is not what this set claims');
+  });
+});

@@ -287,6 +287,69 @@ export function appendAttempt(log, attempt) {
  * grow; once locked it cannot, and only then may its members be assessed. That ordering is
  * what stops a candidate being added after an earlier one has already produced an outcome.
  */
+/**
+ * The discovery records a set stands on: the ones it is bound to, or failing that its round.
+ *
+ * A locked set names its supporting records, and those are what it claims as evidence, so
+ * they are what gets rechecked. A set not yet locked has none, and falls back to its round.
+ */
+function supportingRecords(log, set) {
+  if (Array.isArray(set.discoveryRecordIds) && set.discoveryRecordIds.length > 0) {
+    const byId = new Map(log.attempts.map((a) => [a.id, a]));
+    return set.discoveryRecordIds.map((id) => byId.get(id)).filter(Boolean);
+  }
+  return log.attempts.filter(
+    (a) => a.status === 'discovery' && a.agency === set.agency && a.category === set.category &&
+      a.candidateSetVersion === set.version
+  );
+}
+
+/**
+ * selection-v1.0.5. The one place the set-versus-evidence rule is expressed.
+ *
+ * It lived inside `lockCandidateSet`, which made it a property of one code path rather than
+ * of the data. A legacy set locked before the rule existed could take a retrospective nil
+ * declaration and then be approved, because approval never rechecked anything - so an empty
+ * set whose own bound record said `candidates-found` reached APPROVED. Validating at the lock
+ * is not enough: the gate has to be at every point that blesses a set, and above all at the
+ * last one.
+ *
+ * `members` and `declaration` are passed rather than read off the set, because the lock
+ * validates values it has just computed and the migration validates a declaration it is
+ * about to apply.
+ */
+export function assertSetAgreesWithRound(log, set, { members, declaration, supporting } = {}) {
+  const records = supporting ?? supportingRecords(log, set);
+  const found = records.filter((a) => a.outcome === 'candidates-found');
+  const agency = set.agency;
+  const category = set.category;
+
+  if (members.length === 0) {
+    if (declaration !== 'none') {
+      throw new Error(
+        `${agency} / ${category} has no candidates and no nil declaration. An empty set must ` +
+          'be declared deliberately - run `candidates --none` - so that it cannot be ' +
+          'confused with a category that was never searched.'
+      );
+    }
+    if (found.length > 0) {
+      throw new Error(
+        `${agency} / ${category} is declared to have no candidates, but ` +
+          `${found.length} discovery record(s) report candidates-found ` +
+          `(${found.map((a) => a.id).join(', ')}). Record the candidate, or correct the ` +
+          'discovery outcome; the set and its evidence must agree.'
+      );
+    }
+  } else if (found.length === 0) {
+    throw new Error(
+      `${agency} / ${category} locks ${members.length} candidate(s), but no discovery record ` +
+        'for this round reports candidates-found. A candidate that no inspection records ' +
+        'finding has no provenance; correct the discovery outcome for the page it came from.'
+    );
+  }
+  return set;
+}
+
 export function recordCandidates(log, { agency, category, urls, declaration = null }) {
   if (!CATEGORY_ORDER.includes(category)) throw new Error(`unknown category ${category}`);
   const key = setKey(agency, category);
@@ -342,6 +405,10 @@ export function recordCandidates(log, { agency, category, urls, declaration = nu
         `the candidate set for ${agency} / ${category} was locked at ${set.lockedAt} and cannot grow`
       );
     }
+    // selection-v1.0.5: the migration is a blessing too, so it validates. Without this the
+    // declaration could be attached to a legacy set whose own bound record reports
+    // candidates-found, and the contradiction would be carried forward as though declared.
+    assertSetAgreesWithRound(log, set, { members: set.locked, declaration: 'none' });
   }
 
   if (declaration === 'none') {
@@ -382,33 +449,10 @@ export function lockCandidateSet(log, { agency, category }) {
 
   // selection-v1.0.4. The set and the round that produced it must agree. Binding the two
   // (above) proved only that a round happened; it did not check that the round SAYS what the
-  // set claims. Both of these passed until now, and each is a silent falsification: one
-  // reports no form for an agency whose discovery found one, the other reports a form that
-  // no inspection ever recorded finding.
-  const found = supporting.filter((a) => a.outcome === 'candidates-found');
-  if (locked.length === 0) {
-    if (set.candidateDeclaration !== 'none') {
-      throw new Error(
-        `${agency} / ${category} has no candidates and no nil declaration. An empty set must ` +
-          'be declared deliberately - run `candidates --none` - so that it cannot be ' +
-          'confused with a category that was never searched.'
-      );
-    }
-    if (found.length > 0) {
-      throw new Error(
-        `${agency} / ${category} is declared to have no candidates, but ` +
-          `${found.length} discovery record(s) report candidates-found ` +
-          `(${found.map((a) => a.id).join(', ')}). Record the candidate, or correct the ` +
-          'discovery outcome; the set and its evidence must agree.'
-      );
-    }
-  } else if (found.length === 0) {
-    throw new Error(
-      `${agency} / ${category} locks ${locked.length} candidate(s), but no discovery record ` +
-        'for this round reports candidates-found. A candidate that no inspection records ' +
-        'finding has no provenance; correct the discovery outcome for the page it came from.'
-    );
-  }
+  // set claims. Validated here against the values just computed, and again at approval.
+  assertSetAgreesWithRound(log, set, {
+    members: locked, declaration: set.candidateDeclaration ?? null, supporting,
+  });
 
   set.ordered = ordered;
   set.locked = locked;
@@ -430,6 +474,18 @@ export function approveCandidateSet(log, { agency, category, approved, note }) {
   const set = log.candidateSets[setKey(agency, category)];
   if (!set) throw new Error(`no candidate set for ${agency} / ${category}`);
   if (!set.lockedAt) throw new Error('the set must be locked before it can be approved');
+  // selection-v1.0.5. The last gate revalidates the evidence. Checking only at the lock made
+  // the rule a property of one code path: a set locked before the rule existed, or reached by
+  // any route that did not pass through `lockCandidateSet`, was approved unchecked.
+  //
+  // Rejection is deliberately NOT gated. A set whose evidence contradicts itself is exactly
+  // the kind that has to be rejectable, and refusing to record the rejection would leave the
+  // contradiction sitting in the log with no way to resolve it.
+  if (approved) {
+    assertSetAgreesWithRound(log, set, {
+      members: set.locked ?? [], declaration: set.candidateDeclaration ?? null,
+    });
+  }
   set.approval = approved ? APPROVAL.APPROVED : APPROVAL.REJECTED;
   set.approvedAt = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
   if (note) set.approvalNote = note;

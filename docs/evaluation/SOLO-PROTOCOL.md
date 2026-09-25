@@ -760,3 +760,47 @@ library creation of an undeclared empty set, and the four ways a declaration can
 with a candidate list. Three earlier tests were corrected rather than the rule relaxed: they
 had recorded a candidate against a `no-candidates` round, which is now exactly what is
 forbidden. The capture package has 120 tests.
+
+### Correction, dated 25 September 2026: the gate was in the wrong place
+
+`selection-v1.0.4` put the consistency rule inside `lockCandidateSet`. Review then
+reproduced an attack that walked straight past it:
+
+1. Begin with a set locked empty before the rule existed.
+2. Its bound discovery record reports `candidates-found`.
+3. Attach the retrospective nil declaration.
+4. Approve it.
+
+The result was **APPROVED**, with the set claiming no form for an agency whose own bound
+evidence said an inspection found one. Nothing was tampered with and no file was hand-edited;
+the attack simply used a code path that did not pass through the lock. Approval had never
+revalidated anything, because the rule had been written as a property of one function rather
+than of the data.
+
+**The rule is now one shared validator, `assertSetAgreesWithRound`, called from three
+places**: the lock, the retrospective declaration, and — decisively — `approveCandidateSet`.
+It resolves the records a set is *bound to* rather than merely the records of its round,
+because the binding is the claim being made, and rechecks the round's outcomes against the
+set's membership and declaration.
+
+**Rejection is deliberately not gated.** A set whose evidence contradicts itself is precisely
+the kind that must remain rejectable; refusing to record the rejection would leave the
+contradiction in the log with no way to resolve it.
+
+The general lesson, which outlives this defect: validating where a value is *written* is not
+the same as validating where it is *trusted*. The last gate before a set becomes evidence is
+the one that has to hold, and it must hold against states no current code path can produce,
+because logs already on disk contain them.
+
+Six further tests, the first of which is the four-step attack above, run end to end and
+asserting that nothing is approved on the way out. They also cover a legacy empty set never
+declared at all, a locked non-empty set with no `candidates-found` record, that a
+contradictory set can still be rejected, that a *consistent* legacy set still approves with
+its disclosed later `declaredAt`, and that revalidation follows the binding rather than the
+round. The capture package has 126 tests.
+
+**Agency 2's records are consistent** — five inspections, none reporting `candidates-found` —
+so the nil result stands and no further discovery round is needed. Its `declaredAt` of
+25 September is later than its `lockedAt` of 24 September, and that gap is disclosed here
+rather than smoothed over: the declaration was made when the set was locked, and the tooling
+of the day failed to persist it.
