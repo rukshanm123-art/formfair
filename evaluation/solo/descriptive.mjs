@@ -119,6 +119,56 @@ const FRAME_FILES = [
   { key: 'drawOrderSha256', file: 'draw-order.csv', frozen: FROZEN_DRAW_ORDER_SHA256 },
 ];
 
+
+/**
+ * The exhaustion contract, duplicated here deliberately.
+ *
+ * `evaluation/` is dependency-free by design: building evaluation tooling must not be able to
+ * change the instrument the evaluation runs with, and importing the capture package would end
+ * that. So the frozen reason and the qualification target are restated here, and a test asserts
+ * these constants are identical to the capture package's. The seal is the authority: a record
+ * whose reason differs from this string does not seal, whatever wrote it.
+ */
+export const EXHAUSTION_REASON =
+  'all four categories in the frozen priority order were searched and none yielded an eligible form';
+export const MAX_QUALIFIED_AGENCIES = 40;
+export const EXHAUSTION_CATEGORIES = Object.freeze([
+  'account-registration',
+  'service-application',
+  'enquiry-or-contact',
+  'subscription-or-newsletter',
+]);
+
+/** Splits one CSV line, honouring quoted fields: two frame agencies have commas in their names. */
+function splitCsvLine(line) {
+  const out = [];
+  let field = '';
+  let quoted = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (quoted) {
+      if (c === '"' && line[i + 1] === '"') { field += '"'; i += 1; }
+      else if (c === '"') quoted = false;
+      else field += c;
+    } else if (c === '"') quoted = true;
+    else if (c === ',') { out.push(field); field = ''; }
+    else field += c;
+  }
+  out.push(field);
+  return out;
+}
+
+/** The frozen draw order as an ordered list of agency names. */
+function drawOrderAgencies(text) {
+  return String(text)
+    .split(/\r?\n/)
+    .filter((l) => l && !l.startsWith('#') && !l.startsWith('position,'))
+    .map(splitCsvLine)
+    .filter((f) => f.length >= 3 && /^\d+$/.test(f[0]))
+    .sort((a, b) => Number(a[0]) - Number(b[0]))
+    .map((f) => f[1]);
+}
+
 const isoUtc = (value) => typeof value === 'string' && !Number.isNaN(Date.parse(value)) && value.endsWith('Z');
 
 export function sealCorpus({ draft, capturesDir, instrument, frameDir, protocol = 'solo-protocol-v1.0.0' }) {
@@ -203,6 +253,124 @@ export function sealCorpus({ draft, capturesDir, instrument, frameDir, protocol 
     if (capture) pages.push({ ...page, sha256: sha256(capture.bytes), bytes: capture.bytes.length });
   }
 
+  // solo-protocol-v1.0.1. The exhaustion records, validated and carried into the manifest.
+  //
+  // Until now the seal ignored them entirely: it constructed a manifest from the pages and the
+  // ledger, so a corpus could be sealed that recorded forty pages without recording how many
+  // agencies were searched to obtain them. The denominator of every prevalence figure lived in
+  // an array the seal did not read.
+  const exhausted = [];
+  const exhaustedAgencies = new Set();
+  const rawExhausted = draft?.exhaustedAgencies;
+  if (rawExhausted !== undefined && !Array.isArray(rawExhausted)) {
+    problems.push('exhaustedAgencies must be an array when present');
+  }
+  for (const [index, record] of (Array.isArray(rawExhausted) ? rawExhausted : []).entries()) {
+    const where = `exhaustedAgencies[${index}]`;
+    if (typeof record?.agency !== 'string' || record.agency.length === 0) {
+      problems.push(`${where}.agency is required`);
+      continue;
+    }
+    if (exhaustedAgencies.has(record.agency)) {
+      problems.push(`${where}: ${record.agency} is recorded as exhausted more than once`);
+    }
+    exhaustedAgencies.add(record.agency);
+    if (!isoUtc(record?.exhaustedAt)) {
+      problems.push(
+        `${where}.exhaustedAt must be ISO 8601 UTC ending in Z. A record without one predates ` +
+          'the exhaustion operation and must be re-recorded rather than sealed.'
+      );
+    }
+    if (record?.reason !== EXHAUSTION_REASON) {
+      problems.push(
+        `${where}.reason must be the frozen exhaustion reason. Five agencies that did not ` +
+          'qualify are interpretable only if every one left for the same stated reason.'
+      );
+    }
+    const versions = record?.categorySetVersions;
+    if (versions === null || typeof versions !== 'object') {
+      problems.push(`${where}.categorySetVersions must name all four categories`);
+    } else {
+      for (const category of EXHAUSTION_CATEGORIES) {
+        const v = versions[category];
+        if (!Number.isInteger(v) || v < 1) {
+          problems.push(`${where}.categorySetVersions.${category} must be a positive integer`);
+        }
+      }
+      const extra = Object.keys(versions).filter((k) => !EXHAUSTION_CATEGORIES.includes(k));
+      if (extra.length) problems.push(`${where}.categorySetVersions has unknown categories: ${extra.join(', ')}`);
+    }
+    exhausted.push({
+      agency: record.agency,
+      exhaustedAt: record.exhaustedAt,
+      reason: record.reason,
+      categorySetVersions: record.categorySetVersions,
+    });
+  }
+
+  // Completion. A synthetic corpus is explicitly not the study's corpus - its agencies are not
+  // frame agencies and its page count is arbitrary - so the frame and completion rules apply to
+  // a real seal only. The manifest records which it is.
+  if (draft?.synthetic !== true) {
+    const pageAgencies = [];
+    for (const page of draft?.pages ?? []) if (typeof page?.agency === 'string') pageAgencies.push(page.agency);
+    const uniquePageAgencies = new Set(pageAgencies);
+    if (uniquePageAgencies.size !== pageAgencies.length) {
+      problems.push('two pages name the same agency; the protocol takes at most one page per agency');
+    }
+    const overlap = [...uniquePageAgencies].filter((a) => exhaustedAgencies.has(a));
+    if (overlap.length) {
+      problems.push(
+        `${overlap.join(', ')} is both a sealed page and an exhausted agency; an agency either ` +
+          'contributed a page or was searched without one'
+      );
+    }
+
+    let order;
+    try {
+      order = drawOrderAgencies(readFileSync(join(frameRoot, 'draw-order.csv'), 'utf8'));
+    } catch {
+      order = null;
+      problems.push('cannot read draw-order.csv to verify that the scan covered the frozen order');
+    }
+    if (order) {
+      const known = new Set(order);
+      const outside = [...uniquePageAgencies, ...exhaustedAgencies].filter((a) => !known.has(a));
+      if (outside.length) {
+        problems.push(`agencies outside the frozen frame: ${[...new Set(outside)].join(', ')}`);
+      } else {
+        const touched = new Set([...uniquePageAgencies, ...exhaustedAgencies]);
+        if (uniquePageAgencies.size >= MAX_QUALIFIED_AGENCIES) {
+          // The scan stopped on reaching the target, so what was touched must be exactly the
+          // prefix of the draw order up to that point - no agency skipped over, none reached past.
+          const prefix = order.slice(0, touched.size);
+          const missing = prefix.filter((a) => !touched.has(a));
+          const beyond = [...touched].filter((a) => !prefix.includes(a));
+          if (missing.length || beyond.length) {
+            problems.push(
+              `the ${touched.size} agencies with a page or an exhaustion are not the first ` +
+                `${touched.size} of the frozen draw order` +
+                (missing.length ? `; not accounted for: ${missing.join(', ')}` : '') +
+                (beyond.length ? `; reached out of turn: ${beyond.join(', ')}` : '')
+            );
+          }
+        } else {
+          // Fewer than the target qualified, so the scan must have run out of agencies: every
+          // one in the frame has to be accounted for as a page or an exhaustion.
+          const unaccounted = order.filter((a) => !touched.has(a));
+          if (unaccounted.length) {
+            problems.push(
+              `only ${uniquePageAgencies.size} agencies qualified, fewer than the target of ` +
+                `${MAX_QUALIFIED_AGENCIES}, so every agency in the frozen order must be either a ` +
+                `page or a recorded exhaustion. ${unaccounted.length} are neither: ` +
+                `${unaccounted.slice(0, 5).join(', ')}${unaccounted.length > 5 ? ', …' : ''}`
+            );
+          }
+        }
+      }
+    }
+  }
+
   if (problems.length > 0) return { manifest: null, problems };
   return {
     manifest: {
@@ -223,6 +391,7 @@ export function sealCorpus({ draft, capturesDir, instrument, frameDir, protocol 
         bytes: ledger.bytes.length,
       },
       pages,
+      exhaustedAgencies: exhausted,
     },
     problems: [],
   };

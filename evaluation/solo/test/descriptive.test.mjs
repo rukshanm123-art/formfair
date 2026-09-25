@@ -13,6 +13,9 @@ import {
   sealCorpus,
   FROZEN_FRAME_SHA256,
   FROZEN_DRAW_ORDER_SHA256,
+  EXHAUSTION_REASON,
+  MAX_QUALIFIED_AGENCIES,
+  EXHAUSTION_CATEGORIES,
 } from '../descriptive.mjs';
 import { loadSoloInstrument, SOLO_INSTRUMENT_TAG } from '../instrument.mjs';
 
@@ -204,5 +207,239 @@ describe('the corpus seal verifies the frame rather than trusting the draft', ()
       createHash('sha256').update(readFileSync(new URL(f, frameDir))).digest('hex');
     assert.equal(digest('frame.csv'), FROZEN_FRAME_SHA256);
     assert.equal(digest('draw-order.csv'), FROZEN_DRAW_ORDER_SHA256);
+  });
+});
+
+/**
+ * The seal must require and preserve the exhaustion records.
+ *
+ * solo-protocol-v1.0.1. An earlier test asserted only that hashing the draft JSON changed when
+ * an exhaustion was removed - which proves nothing, because `sealCorpus` does not hash the
+ * draft. It builds a new manifest from the pages and the ledger, and it ignored
+ * `exhaustedAgencies` completely. The claim "sealed with the corpus" was false, and these tests
+ * exercise the sealer itself.
+ *
+ * The denominator is the point: forty pages say nothing about prevalence unless the corpus also
+ * records how many agencies were searched to obtain them.
+ */
+describe('the corpus seal requires the exhaustion records', () => {
+  const frameDir = join(repo, 'evaluation', 'frame');
+  const order = readFileSync(join(frameDir, 'draw-order.csv'), 'utf8')
+    .split(/\r?\n/)
+    .filter((l) => /^\d+,/.test(l))
+    .map((l) => {
+      // Quoted fields: two frame agencies have commas in their names.
+      const out = []; let f = ''; let q = false;
+      for (let i = 0; i < l.length; i++) {
+        const c = l[i];
+        if (q) { if (c === '"' && l[i + 1] === '"') { f += '"'; i++; } else if (c === '"') q = false; else f += c; }
+        else if (c === '"') q = true; else if (c === ',') { out.push(f); f = ''; } else f += c;
+      }
+      out.push(f);
+      return { position: Number(out[0]), agency: out[1] };
+    })
+    .sort((a, b) => a.position - b.position)
+    .map((r) => r.agency);
+
+  const exhaustion = (agency) => ({
+    agency,
+    exhaustedAt: '2026-09-25T04:00:00Z',
+    reason: EXHAUSTION_REASON,
+    categorySetVersions: {
+      'account-registration': 1,
+      'service-application': 3,
+      'enquiry-or-contact': 1,
+      'subscription-or-newsletter': 1,
+    },
+  });
+
+  const pageFor = (agency, n) => ({
+    pageId: `real-${String(n).padStart(3, '0')}`,
+    agency,
+    website: 'https://example.invalid/',
+    originalUrl: 'https://example.invalid/contact',
+    finalUrl: 'https://example.invalid/contact',
+    capturedAt: '2026-09-22T00:00:00Z',
+    browser: 'Chromium 153',
+    automationTool: 'playwright 1.63.0',
+    viewport: { width: 1280, height: 800 },
+    locale: 'en-NZ',
+    redirects: [],
+    category: 'enquiry-or-contact',
+    file: `real-${String(n).padStart(3, '0')}.html`,
+  });
+
+  /** A real (non-synthetic) draft covering a prefix of the frozen draw order. */
+  function realDraft({ pageCount, exhaustedCount }) {
+    const pages = [];
+    const exhaustedAgencies = [];
+    for (let i = 0; i < pageCount; i++) pages.push(pageFor(order[i], i + 1));
+    for (let i = pageCount; i < pageCount + exhaustedCount; i++) exhaustedAgencies.push(exhaustion(order[i]));
+    return {
+      schema: 'formfair/solo-corpus-draft@1',
+      synthetic: false,
+      frameSha256: FROZEN_FRAME_SHA256,
+      drawOrderSha256: FROZEN_DRAW_ORDER_SHA256,
+      selectionLedgerFile: 'selection-ledger.csv',
+      pages,
+      exhaustedAgencies,
+    };
+  }
+
+  function prepareReal(dir, draftObj) {
+    writeFileSync(join(dir, 'selection-ledger.csv'), 'agency,status\n');
+    for (const p of draftObj.pages) {
+      writeFileSync(join(dir, p.file), '<form><label for="n">Full name</label><input id="n"></form>');
+    }
+  }
+
+  test('a one-page corpus with no exhaustion cannot seal', async () => {
+    await inTemp(async (dir) => {
+      const d = realDraft({ pageCount: 1, exhaustedCount: 0 });
+      prepareReal(dir, d);
+      const sealed = sealCorpus({ draft: d, capturesDir: dir, instrument: identity, frameDir });
+      assert.equal(sealed.manifest, null, 'a one-page corpus must not seal');
+      assert.ok(
+        sealed.problems.some((p) => /every agency in the frozen order must be either a page or a recorded exhaustion/.test(p)),
+        sealed.problems.join('; ')
+      );
+    });
+  });
+
+  test('THE REAL TEST: removing the exhaustion makes sealing fail', async () => {
+    await inTemp(async (dir) => {
+      // A complete corpus: every agency in the frozen order is a page or an exhaustion.
+      const complete = realDraft({ pageCount: 2, exhaustedCount: order.length - 2 });
+      prepareReal(dir, complete);
+      const ok = sealCorpus({ draft: complete, capturesDir: dir, instrument: identity, frameDir });
+      assert.ok(ok.manifest, ok.problems.join('; '));
+
+      // Remove one exhaustion; the same corpus must now refuse to seal.
+      const missing = structuredClone(complete);
+      missing.exhaustedAgencies = missing.exhaustedAgencies.slice(0, -1);
+      const failed = sealCorpus({ draft: missing, capturesDir: dir, instrument: identity, frameDir });
+      assert.equal(failed.manifest, null, 'removing an exhaustion must break the seal');
+      assert.ok(
+        failed.problems.some((p) => p.includes(order[order.length - 1])),
+        `the refusal should name the unaccounted agency: ${failed.problems.join('; ')}`
+      );
+    });
+  });
+
+  test('the exhaustion records reach the manifest and survive loading', async () => {
+    await inTemp(async (dir) => {
+      const complete = realDraft({ pageCount: 2, exhaustedCount: order.length - 2 });
+      prepareReal(dir, complete);
+      const sealed = sealCorpus({ draft: complete, capturesDir: dir, instrument: identity, frameDir });
+      assert.ok(sealed.manifest, sealed.problems.join('; '));
+      assert.equal(sealed.manifest.exhaustedAgencies.length, order.length - 2);
+      assert.equal(sealed.manifest.exhaustedAgencies[0].agency, order[2]);
+      assert.equal(sealed.manifest.exhaustedAgencies[0].reason, EXHAUSTION_REASON);
+      assert.equal(sealed.manifest.exhaustedAgencies[0].categorySetVersions['service-application'], 3);
+
+      // Survives being written and read back, which is how the study consumes it.
+      const manifestPath = join(dir, 'corpus.json');
+      writeFileSync(manifestPath, `${JSON.stringify(sealed.manifest, null, 2)}\n`);
+      const reloaded = JSON.parse(readFileSync(manifestPath, 'utf8'));
+      assert.deepEqual(reloaded.exhaustedAgencies, sealed.manifest.exhaustedAgencies);
+      const loaded = loadSealedPages({ manifest: reloaded, manifestPath, capturesDir: dir });
+      assert.deepEqual(loaded.problems, [], 'loading must not object to the new field');
+      assert.equal(loaded.pages.length, 2, 'loading the pages must still work alongside the records');
+      // The records are part of what the manifest hash covers, so a study that verifies the
+      // manifest is verifying them too.
+      assert.match(loaded.manifestSha256, /^[0-9a-f]{64}$/);
+    });
+  });
+
+  test('an exhaustion without the frozen reason does not seal', async () => {
+    await inTemp(async (dir) => {
+      const d = realDraft({ pageCount: 2, exhaustedCount: order.length - 2 });
+      d.exhaustedAgencies[0].reason = 'no forms found';
+      prepareReal(dir, d);
+      const sealed = sealCorpus({ draft: d, capturesDir: dir, instrument: identity, frameDir });
+      assert.equal(sealed.manifest, null);
+      assert.ok(sealed.problems.some((p) => /must be the frozen exhaustion reason/.test(p)));
+    });
+  });
+
+  test('a legacy exhaustion with no timestamp or versions does not seal', async () => {
+    await inTemp(async (dir) => {
+      const d = realDraft({ pageCount: 2, exhaustedCount: order.length - 2 });
+      d.exhaustedAgencies[0] = { agency: order[2], exhaustedAt: null, reason: EXHAUSTION_REASON, categorySetVersions: null };
+      prepareReal(dir, d);
+      const sealed = sealCorpus({ draft: d, capturesDir: dir, instrument: identity, frameDir });
+      assert.equal(sealed.manifest, null);
+      assert.ok(sealed.problems.some((p) => /predates the exhaustion operation/.test(p)));
+      assert.ok(sealed.problems.some((p) => /categorySetVersions must name all four categories/.test(p)));
+    });
+  });
+
+  test('an agency cannot be both a page and an exhaustion', async () => {
+    await inTemp(async (dir) => {
+      const d = realDraft({ pageCount: 2, exhaustedCount: order.length - 2 });
+      d.exhaustedAgencies.push(exhaustion(order[0]));
+      prepareReal(dir, d);
+      const sealed = sealCorpus({ draft: d, capturesDir: dir, instrument: identity, frameDir });
+      assert.equal(sealed.manifest, null);
+      assert.ok(sealed.problems.some((p) => /is both a sealed page and an exhausted agency/.test(p)));
+    });
+  });
+
+  test('a duplicated exhaustion does not seal', async () => {
+    await inTemp(async (dir) => {
+      const d = realDraft({ pageCount: 2, exhaustedCount: order.length - 2 });
+      d.exhaustedAgencies.push(exhaustion(order[2]));
+      prepareReal(dir, d);
+      const sealed = sealCorpus({ draft: d, capturesDir: dir, instrument: identity, frameDir });
+      assert.equal(sealed.manifest, null);
+      assert.ok(sealed.problems.some((p) => /recorded as exhausted more than once/.test(p)));
+    });
+  });
+
+  test('an agency outside the frozen frame does not seal', async () => {
+    await inTemp(async (dir) => {
+      const d = realDraft({ pageCount: 2, exhaustedCount: order.length - 2 });
+      d.exhaustedAgencies[0] = exhaustion('Department of Nowhere');
+      prepareReal(dir, d);
+      const sealed = sealCorpus({ draft: d, capturesDir: dir, instrument: identity, frameDir });
+      assert.equal(sealed.manifest, null);
+      assert.ok(sealed.problems.some((p) => /outside the frozen frame: Department of Nowhere/.test(p)));
+    });
+  });
+
+  test('at the target of forty, the agencies touched must be a prefix of the draw order', async () => {
+    await inTemp(async (dir) => {
+      // Forty pages and one exhaustion, but the exhaustion is taken from the far end of the
+      // order rather than from within the first forty-one: an agency was reached out of turn.
+      const d = realDraft({ pageCount: 40, exhaustedCount: 0 });
+      d.exhaustedAgencies = [exhaustion(order[44])];
+      prepareReal(dir, d);
+      const sealed = sealCorpus({ draft: d, capturesDir: dir, instrument: identity, frameDir });
+      assert.equal(sealed.manifest, null);
+      assert.ok(
+        sealed.problems.some((p) => /are not the first 41 of the frozen draw order/.test(p)),
+        sealed.problems.join('; ')
+      );
+    });
+  });
+
+  test('forty pages and no exhaustions seals, being an exact prefix', async () => {
+    await inTemp(async (dir) => {
+      const d = realDraft({ pageCount: 40, exhaustedCount: 0 });
+      prepareReal(dir, d);
+      const sealed = sealCorpus({ draft: d, capturesDir: dir, instrument: identity, frameDir });
+      assert.ok(sealed.manifest, sealed.problems.join('; '));
+      assert.deepEqual(sealed.manifest.exhaustedAgencies, []);
+    });
+  });
+
+  test('the sealer and the capture package agree on the frozen exhaustion contract', async () => {
+    // Duplicated across two packages on purpose, since evaluation/ must not import capture/.
+    // The duplication is only safe if it is checked.
+    const capture = await import(pathToFileURL(join(repo, 'capture', 'run.mjs')).href);
+    const selection = await import(pathToFileURL(join(repo, 'capture', 'selection.mjs')).href);
+    assert.equal(capture.EXHAUSTION_REASON, EXHAUSTION_REASON);
+    assert.equal(selection.MAX_QUALIFIED_AGENCIES, MAX_QUALIFIED_AGENCIES);
+    assert.deepEqual([...selection.CATEGORY_ORDER], [...EXHAUSTION_CATEGORIES]);
   });
 });

@@ -26,6 +26,7 @@ import {
   readLog, writeLog, appendAttempt, writeDerived, ELIGIBILITY_CRITERIA, APPROVAL,
   recordCandidates, lockCandidateSet, categorySettled, approveCandidateSet,
   supersedeCandidateSet, publishProvenance, exhaustAgency, EXHAUSTION_REASON,
+  agenciesAwaitingExhaustion,
 } from './run.mjs';
 import {
   DISCOVERY_KINDS, DISCOVERY_METHODS, DISCOVERY_OUTCOMES, remainingBudget, canonicalise,
@@ -331,7 +332,18 @@ function doStatus() {
   const approvedCaptures = by((a) => a.status === 'captured' && a.approval === APPROVAL.APPROVED);
   console.log(`approved captures ${approvedCaptures} of a target of ${MAX_QUALIFIED_AGENCIES}`);
 
-  const blocking = pendingAttempts + pendingSets.length + rejectedSets.length + danglingRejections;
+  // selection-v1.0.9. An agency awaiting its exhaustion record is outstanding too. status said
+  // "nothing outstanding; the corpus draft is not withheld" while `next` was simultaneously
+  // saying an agency had to be recorded as exhausted - two commands contradicting each other
+  // about the same log.
+  const awaitingExhaustion = agenciesAwaitingExhaustion(log);
+  if (awaitingExhaustion.length) {
+    console.log(`agencies awaiting an exhaustion record ${awaitingExhaustion.length}`);
+    for (const a of awaitingExhaustion) console.log(`  - ${a}`);
+  }
+
+  const blocking = pendingAttempts + pendingSets.length + rejectedSets.length + danglingRejections
+    + awaitingExhaustion.length;
   console.log(
     blocking === 0
       ? 'nothing outstanding; the corpus draft is not withheld'

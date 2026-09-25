@@ -113,17 +113,46 @@ export const EFFORT_EXHAUSTED = 'effort bound exhausted — no eligible form loc
  * Agencies are attempted in this order and no other. The file is `frame-v1.0.0` material
  * and is never written by this package.
  */
+/**
+ * Splits one CSV line, honouring quoted fields.
+ *
+ * selection-v1.0.9. The frozen draw order DOES quote: two of the forty-five agencies have
+ * commas in their names, and both are quoted in the file. The previous parser assumed
+ * otherwise and reassembled the agency by joining the middle fields with commas, which
+ * returned the name still wrapped in its literal quote characters -
+ * `"Ministry of Business, Innovation and Employment"` with the quotes as part of the string.
+ *
+ * Nothing had noticed because the scan had not reached position 17 yet. It would have failed
+ * there: the quoted name would not match the frame, would not match what an operator types,
+ * and would key its candidate sets under a name no other artefact uses.
+ */
+export function splitCsvLine(line) {
+  const out = [];
+  let field = '';
+  let quoted = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (quoted) {
+      if (c === '"' && line[i + 1] === '"') { field += '"'; i += 1; }
+      else if (c === '"') quoted = false;
+      else field += c;
+    } else if (c === '"') quoted = true;
+    else if (c === ',') { out.push(field); field = ''; }
+    else field += c;
+  }
+  out.push(field);
+  return out;
+}
+
 export function parseDrawOrder(text) {
   const rows = [];
   for (const line of String(text).split(/\r?\n/)) {
     if (!line || line.startsWith('#') || line.startsWith('position,')) continue;
-    const [position, ...rest] = line.split(',');
+    const fields = splitCsvLine(line);
+    if (fields.length < 3) continue;
+    const [position, agency] = fields;
     if (!/^\d+$/.test(position)) continue;
-    // The agency name may contain commas only if quoted; the frozen file does not quote,
-    // so the draw key is the last field and the agency is everything between.
-    const key = rest[rest.length - 1];
-    const agency = rest.slice(0, -1).join(',');
-    rows.push({ position: Number(position), agency, drawKey: key });
+    rows.push({ position: Number(position), agency, drawKey: fields[fields.length - 1] });
   }
   return rows.sort((a, b) => a.position - b.position);
 }

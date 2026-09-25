@@ -1142,3 +1142,87 @@ The second agency's newsletter is the *Pānui*, with the macron, and it is writt
 this document and in the final report. The locked discovery record for that page spells it
 without the macron. That record is approved and sealed into its round; it is not rewritten for
 typography alone, and this note is the correction.
+
+## Amendment 10: the seal did not read the denominator
+
+**Dated 25 September 2026.** `selection-v1.0.9` for the capture-side gate and
+`solo-protocol-v1.0.1` for the sealer. `selection-v1.0.8` and `solo-protocol-v1.0.0` are not
+moved. No discovery, capture or approval is redone.
+
+### The claim that was false
+
+Amendment 9 said the exhaustion records were "sealed with the corpus". They were not.
+`sealCorpus` does not hash the corpus draft: it *constructs* a manifest from the pages and the
+selection ledger, and it never looked at `exhaustedAgencies`. The test offered as proof hashed
+the draft JSON inside the test, which demonstrates only that `JSON.stringify` is sensitive to its
+input. It tested nothing about the sealer.
+
+So a corpus could have been sealed recording forty pages and saying nothing about how many
+agencies were searched to obtain them — the denominator of every prevalence figure in the study
+living in an array the seal did not read.
+
+Three further contradictions existed in the live state at the same moment: `next` said an agency
+had to be recorded as exhausted, `status` said *"nothing outstanding; the corpus draft is not
+withheld"*, and the draft built with one page and no exhaustion record. Three commands
+disagreeing about one log.
+
+### The capture-side gate
+
+**`status` counts an agency awaiting exhaustion as outstanding**, so it no longer contradicts
+`next`.
+
+**The corpus draft is withheld** until every agency that finished all four categories with
+nothing eligible has an exhaustion record. This is derived from the log rather than from
+`nextWork`, so it holds for every such agency at once and not only for whichever is next in turn.
+
+### What the seal now enforces
+
+**The records are validated and copied into the manifest.** Each must name its agency, carry an
+ISO 8601 UTC timestamp, carry the frozen reason verbatim, and give a positive integer version for
+each of the four categories and no others. A record without a timestamp or without versions
+predates the exhaustion operation and is refused with that explanation rather than sealed.
+
+**Completion is enforced**, for a real seal, against the frozen draw order read from disk:
+
+- at the target of forty qualified pages, the agencies holding a page or an exhaustion must be
+  exactly the first *n* of the draw order — nothing skipped over, nothing reached out of turn;
+- below the target, every one of the forty-five must be accounted for as a page or an exhaustion,
+  because fewer than forty qualifying means the scan ran out of agencies rather than stopping
+  early;
+- the two sets must be unique and disjoint — an agency either contributed a page or was searched
+  without one — and every name must be in the frozen frame.
+
+A **synthetic** corpus is exempt from the frame and completion rules and says so in its manifest.
+It is explicitly not the study's corpus: its agencies are not frame agencies and its page count is
+arbitrary.
+
+The frozen reason, the target of forty and the four categories are restated in the sealer because
+`evaluation/` must not import the capture package — that independence is what stops building
+evaluation tooling from changing the instrument. Duplication is only safe if it is checked, so a
+test asserts the two packages' constants are identical, and the seal is the authority: a record
+whose reason differs does not seal, whatever wrote it.
+
+Eleven tests replace the one that proved nothing, including that removing a single exhaustion from
+an otherwise complete corpus breaks the seal and the refusal names the unaccounted agency; that a
+one-page, zero-exhaustion corpus cannot seal; and that the records reach the manifest, survive
+being written and read back, and are covered by the manifest hash a study verifies.
+
+### A latent defect found while doing this, and fixed
+
+The completion check compares agency names against the draw order, which meant reading that file
+properly for the first time. **Two of the forty-five agencies have commas in their names, and the
+frozen file quotes them** — `Ministry for Cities, Environment, Regions and Transport` at position
+17 and `Ministry of Business, Innovation and Employment` at 41. `parseDrawOrder` carried a comment
+asserting the file does not quote, rebuilt the name by joining the middle fields with commas, and
+returned it **still wrapped in its literal quote characters**.
+
+Nothing had noticed because the scan had not reached position 17. It would have failed there, and
+quietly: the quoted name matches nothing in the frame, matches nothing an operator types, and
+would key its candidate sets under a name no other artefact uses — so that agency's entire round
+would have been recorded under a name that looks right in printed output and is wrong everywhere
+it is compared. Both files are now parsed with a quote-aware splitter, and five tests cover it,
+including that every agency in the draw order is present in the frame under exactly that name.
+
+This is the second defect in this scan found not by a test but by needing a value to be correct
+for something else. Both were in code that had passed every test written for it, because the tests
+had been written from the same wrong assumption as the code.

@@ -728,6 +728,34 @@ export function deriveLedger(log) {
 }
 
 /** The corpus draft, derived. Only approved captures; provenance only, never findings. */
+/**
+ * Agencies that finished every category with nothing eligible and have no exhaustion record.
+ *
+ * Derived from the log alone rather than from `nextWork`, so that `deriveDraft` does not need
+ * the draw order threaded into it, and so that the rule holds for every agency at once rather
+ * than only for whichever one is next in turn.
+ */
+export function agenciesAwaitingExhaustion(log) {
+  const agencies = new Set(Object.values(log.candidateSets ?? {}).map((s) => s.agency));
+  const out = [];
+  for (const agency of agencies) {
+    if (isExhausted(log, agency)) continue;
+    if (log.attempts.some((a) => a.agency === agency && a.status === 'captured' && a.approval === APPROVAL.APPROVED)) {
+      continue;
+    }
+    const settled = CATEGORY_ORDER.every((category) => {
+      const set = log.candidateSets?.[setKey(agency, category)];
+      if (!set?.lockedAt || set.approval !== APPROVAL.APPROVED) return false;
+      const decided = new Set(
+        log.attempts.filter((a) => a.agency === agency && a.status !== 'discovery').map((a) => a.url)
+      );
+      return (set.locked ?? []).every((u) => decided.has(u));
+    });
+    if (settled) out.push(agency);
+  }
+  return out;
+}
+
 export function deriveDraft(log, { frameSha256, drawOrderSha256, selectionLedgerFile = 'selection-ledger.csv', synthetic = false, frameAgencies = null }) {
   const pending = log.attempts.filter((a) => a.approval === APPROVAL.PENDING);
   if (pending.length) {
@@ -763,6 +791,20 @@ export function deriveDraft(log, { frameSha256, drawOrderSha256, selectionLedger
     throw new Error(
       `${danglingRejections.length} rejected attempt(s) have not been superseded by a ` +
         `correction: ${danglingRejections.map((a) => `${a.id} ${a.url}`).join(', ')}`
+    );
+  }
+
+  // selection-v1.0.9. An agency that finished every category with nothing eligible must be
+  // RECORDED as exhausted before the corpus is built. Without this the draft was produced while
+  // an agency sat in limbo - searched, contributing no page, and absent from the denominator -
+  // and the sealed corpus would have described a sample without saying how many agencies were
+  // examined to obtain it.
+  const awaiting = agenciesAwaitingExhaustion(log);
+  if (awaiting.length) {
+    throw new Error(
+      `${awaiting.length} agency(ies) finished every category with no eligible form and are not ` +
+        `recorded as exhausted: ${awaiting.join(', ')}. Run \`exhaust\` for each before ` +
+        'building the corpus.'
     );
   }
 

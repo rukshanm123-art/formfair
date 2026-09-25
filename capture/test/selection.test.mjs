@@ -7,9 +7,11 @@
 
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import {
   canonicalise, orderCandidates, remainingBudget, SEARCH_TERMS, CATEGORY_ORDER,
   MAX_CANDIDATES_PER_CATEGORY, MAX_CANDIDATES_PER_AGENCY, DISCOVERY_KINDS,
+  parseDrawOrder, splitCsvLine,
 } from '../selection.mjs';
 import { emptyLog, appendAttempt, ELIGIBILITY_CRITERIA, deriveLedger } from '../run.mjs';
 import { prepareSet, addDiscovery, nextTimestamp } from './helpers.mjs';
@@ -160,5 +162,61 @@ describe('the frozen search terms', () => {
     assert.deepEqual(Object.keys(SEARCH_TERMS), [...CATEGORY_ORDER]);
     assert.ok(all.includes('tono'), 'te reo terms are part of the frozen set');
     assert.ok(all.includes('whakapā'));
+  });
+});
+
+/**
+ * The frozen draw order quotes two agency names, and both must parse cleanly.
+ *
+ * selection-v1.0.9. Two of the forty-five agencies have commas in their names, and the file
+ * quotes them. The parser assumed it did not, rebuilt the name by joining the middle fields with
+ * commas, and returned it still wrapped in its literal quote characters. Nothing had noticed
+ * because the scan had not reached position 17.
+ *
+ * It would have failed there, and quietly: the quoted name matches nothing in the frame, matches
+ * nothing an operator types, and would key its candidate sets under a name no other artefact
+ * uses - so the agency's whole round would have been recorded under a name that looks right in
+ * output and is wrong everywhere it is compared.
+ */
+describe('the draw order parses quoted agency names', () => {
+  const rows = parseDrawOrder(
+    readFileSync(new URL('../../evaluation/frame/draw-order.csv', import.meta.url), 'utf8')
+  );
+
+  test('forty-five agencies, none carrying a stray quote character', () => {
+    assert.equal(rows.length, 45);
+    for (const row of rows) {
+      assert.ok(!row.agency.includes('"'), `${JSON.stringify(row.agency)} carries a quote character`);
+      assert.equal(row.agency, row.agency.trim());
+      assert.ok(row.agency.length > 0);
+    }
+  });
+
+  test('the two comma-bearing names are whole', () => {
+    const byPosition = new Map(rows.map((r) => [r.position, r.agency]));
+    assert.equal(byPosition.get(17), 'Ministry for Cities, Environment, Regions and Transport');
+    assert.equal(byPosition.get(41), 'Ministry of Business, Innovation and Employment');
+  });
+
+  test('every draw key is still a full digest, so the fields did not shift', () => {
+    // The bug reassembled fields; this catches a parser that mis-splits in the other direction.
+    for (const row of rows) assert.match(row.drawKey, /^[0-9a-f]{64}$/);
+  });
+
+  test('every agency in the draw order appears in the frame', () => {
+    const frame = readFileSync(new URL('../../evaluation/frame/frame.csv', import.meta.url), 'utf8');
+    const frameAgencies = new Set(
+      frame.split(/\r?\n/).filter((l) => l && !l.startsWith('#')).map((l) => splitCsvLine(l)[0])
+    );
+    for (const row of rows) {
+      assert.ok(frameAgencies.has(row.agency), `${row.agency} is not in frame.csv`);
+    }
+  });
+
+  test('splitCsvLine handles quotes, embedded commas and doubled quotes', () => {
+    assert.deepEqual(splitCsvLine('a,b,c'), ['a', 'b', 'c']);
+    assert.deepEqual(splitCsvLine('1,"Ministry of A, B and C",key'), ['1', 'Ministry of A, B and C', 'key']);
+    assert.deepEqual(splitCsvLine('1,"He said ""hi""",key'), ['1', 'He said "hi"', 'key']);
+    assert.deepEqual(splitCsvLine('a,,c'), ['a', '', 'c']);
   });
 });
