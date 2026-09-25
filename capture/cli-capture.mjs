@@ -49,6 +49,8 @@ const USAGE = `usage:
                           [--supersedes-attempt-id <c-NNNN>]
   cli-capture.mjs exclude --out <dir> --agency <name> --website <url> --url <url>
                           --reason "<why it was not captured>" --category <c>
+                          [--fails <eligibility criterion>]
+                          [--supersedes-attempt-id <c-NNNN>]
   cli-capture.mjs discovery --out <dir> --agency <name> --website <url> --url <url>
                           --method <${DISCOVERY_METHODS.join('|')}>
                           --outcome <${DISCOVERY_OUTCOMES.join('|')}>
@@ -228,11 +230,23 @@ function doExclude() {
   const dir = require_('out');
   const logPath = logPathFor(dir);
   const log = readLog(logPath);
+  // Which criterion the exclusion turns on, recorded structurally rather than left to prose.
+  // An exclusion whose reason is only a sentence cannot be counted: a study that reports how
+  // many candidates failed criterion five has to be able to compute that from the log, and
+  // `doCapture` already records `publiclyReachableWithoutSigningIn: false` for the same reason.
+  const fails = flag('fails');
+  if (fails !== null && !ELIGIBILITY_CRITERIA.includes(fails)) {
+    die(`--fails must be one of:\n  ${ELIGIBILITY_CRITERIA.join('\n  ')}`);
+  }
+  const eligibility = Object.fromEntries(ELIGIBILITY_CRITERIA.map((c) => [c, null]));
+  if (fails) eligibility[fails] = false;
+
   appendAttempt(log, {
     examinedAt: now(),
     agency: require_('agency'), website: require_('website'), url: require_('url'),
     status: 'excluded', exclusionReason: require_('reason'), category: flag('category') ?? undefined,
-    eligibility: Object.fromEntries(ELIGIBILITY_CRITERIA.map((c) => [c, null])),
+    eligibility,
+    ...(flag('supersedes-attempt-id') ? { supersedesAttemptId: flag('supersedes-attempt-id') } : {}),
   });
   writeLog(logPath, log);
   writeDerived({ log, dir, frameSha256: flag('frame-sha256'), drawOrderSha256: flag('draw-order-sha256'), synthetic: has('synthetic') });

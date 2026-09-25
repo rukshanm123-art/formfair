@@ -364,3 +364,65 @@ describe('the CLI refuses a set that contradicts its round', () => {
     );
   });
 });
+
+/**
+ * An exclusion says which criterion it turns on.
+ *
+ * The first real document candidates - nine PDF and DOCX application forms across the first
+ * two agencies - are all excluded for the same reason, that they are not HTML. Recording that
+ * only as a sentence would make "how many candidates failed criterion five" a question the log
+ * could not answer, although it is exactly the question this study's document-versus-web-form
+ * finding rests on. `doCapture` already records `publiclyReachableWithoutSigningIn: false`
+ * structurally; an exclusion had no equivalent.
+ */
+describe('exclude records the criterion that failed', () => {
+  const CAT = 'service-application';
+  const URL_ = 'https://w.govt.nz/form.pdf';
+
+  const withSet = (log) => prepareSet(log, agency, CAT, [URL_]);
+
+  test('--fails records that criterion as false and leaves the rest unknown', async () => {
+    await withLog(withSet, async (dir) => {
+      const r = await run([
+        'exclude', '--out', dir, '--agency', agency, '--website', 'https://w.govt.nz/',
+        '--url', URL_, '--category', CAT,
+        '--reason', 'PDF, not HTML', '--fails', 'normalHtmlOrBrowserRenderedNotPdfOrNative',
+      ]);
+      assert.equal(r.status, 0, r.stderr);
+      const log = JSON.parse(readFileSync(join(dir, 'capture-log.json'), 'utf8'));
+      const a = log.attempts.find((x) => x.url === URL_ && x.status === 'excluded');
+      assert.equal(a.eligibility.normalHtmlOrBrowserRenderedNotPdfOrNative, false);
+      // The others stay null: this exclusion establishes one thing, not five.
+      assert.equal(a.eligibility.asksForTheNameOfANaturalPerson, null);
+      assert.equal(a.eligibility.publiclyReachableWithoutSigningIn, null);
+    });
+  });
+
+  test('an unknown criterion is refused, and the valid ones are listed', async () => {
+    await withLog(withSet, async (dir) => {
+      const r = await run([
+        'exclude', '--out', dir, '--agency', agency, '--website', 'https://w.govt.nz/',
+        '--url', URL_, '--category', CAT, '--reason', 'PDF', '--fails', 'notAcriterion',
+      ]);
+      assert.equal(r.status, 1);
+      assert.match(r.stderr, /--fails must be one of/);
+      assert.match(r.stderr, /normalHtmlOrBrowserRenderedNotPdfOrNative/);
+      const log = JSON.parse(readFileSync(join(dir, 'capture-log.json'), 'utf8'));
+      assert.equal(log.attempts.filter((x) => x.status === 'excluded').length, 0);
+    });
+  });
+
+  test('omitting --fails still records an exclusion, with every criterion unknown', async () => {
+    // A robots exclusion turns on no eligibility criterion at all, so --fails is optional.
+    await withLog(withSet, async (dir) => {
+      const r = await run([
+        'exclude', '--out', dir, '--agency', agency, '--website', 'https://w.govt.nz/',
+        '--url', URL_, '--category', CAT, '--reason', 'robots.txt disallows this path',
+      ]);
+      assert.equal(r.status, 0, r.stderr);
+      const log = JSON.parse(readFileSync(join(dir, 'capture-log.json'), 'utf8'));
+      const a = log.attempts.find((x) => x.url === URL_ && x.status === 'excluded');
+      assert.ok(Object.values(a.eligibility).every((v) => v === null));
+    });
+  });
+});
