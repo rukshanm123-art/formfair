@@ -882,8 +882,10 @@ Both affected rounds were rejected with their reasons, superseded, and redone. T
 versions and their reasons stay in the log.
 
 **Family Violence and Sexual Violence Executive Board, service application.** Round 2 records
-the `application` search as `candidates-found`, locks the four DOCX forms as candidates, and
-each is then excluded under criterion five. Their content type was confirmed by request
+the `application` search as `candidates-found` and locks the four DOCX forms as candidates.
+They are **pending assessment** at the time of writing; each is expected to be excluded under
+criterion five, but that exclusion is a recorded outcome rather than a foregone one, and this
+amendment does not claim it has happened. Their content type was confirmed by request
 (`application/vnd.openxmlformats-officedocument.wordprocessingml.document`) rather than
 inferred from the file extension.
 
@@ -917,3 +919,50 @@ The defensible limitation is narrower, and is about the search rather than the f
 discovery may miss forms — shared-platform forms among them — that the monitored agency pages
 do not surface within the fixed terms and the effort bound. What is in scope is what an agency
 links; what may be missed is what no inspected agency page links.
+
+### Correction, dated 25 September 2026: unfinished work could be stepped over
+
+Two failures were reproduced in the live run while the corrections above were in flight, and
+both had the same cause: the guards asked about *attempts* and forgot that the candidate **set**
+is where the selection judgement lives.
+
+**`next` stepped over a correction in progress.** Te Puni Kōkiri's service-application set had
+been rejected, superseded, redone and locked, and was awaiting approval. But that agency already
+had an approved capture, and `nextWork` skipped a qualified agency on qualification alone — so
+the scan reported the *second* agency as the work to do and the correction became invisible. An
+operator following `next` would have carried on and never returned to it.
+
+`nextWork` now resolves everything outstanding for an agency before skipping it: unresolved
+outcomes, an active set that is pending or rejected, and an approved set with locked candidates
+that have no outcome. A category the agency never searched is deliberately *not* outstanding,
+because qualification is exactly what stops the later categories being searched; treating them
+as unfinished would strand every qualified agency forever.
+
+**`deriveDraft` built a corpus draft while two sets were pending.** It withheld the draft for
+pending *attempts* only, so a pending or rejected *set* was invisible to it — and it produced a
+clean one-page draft while both service-application corrections were mid-flight. That directly
+contradicted this protocol's own statement that the draft is withheld until nothing is
+unresolved, and it meant a corpus could be frozen from a sample whose selection was still under
+review.
+
+`deriveDraft` now refuses when any active candidate set is not approved (naming each set and its
+state), when an approved set has a locked candidate with no outcome, and when a rejected attempt
+has not been superseded by a correction. That last case was never checked at all: only `pending`
+was looked for, so a rejection left standing quietly dropped its candidate out of the corpus with
+no correction recorded anywhere.
+
+**Te Puni Kōkiri's round 2 was itself incomplete, and is rejected.** Round 1 inspected all four
+of that agency's frame websites; round 2 inspected only `www.tpk.govt.nz`, because it was written
+to correct one page's note rather than to replace a round. Under the binding rule introduced at
+`selection-v1.0.6` a set stands only on the records it is bound to, so round 2 cannot inherit the
+still-valid Te Haeata, Te Kāhui Māngai and Tupu records from the superseded round 1. Round 3
+covers all four websites. The rule and the incomplete redo were both correct in isolation; it is
+their combination that made the redo insufficient, which is the kind of interaction only a real
+run surfaces.
+
+Nine further tests hold these, including both reproduced bypasses, and — as a guard against
+over-tightening — that `next` *does* still step over a qualified agency once nothing is
+outstanding, and that a draft *does* build once every set is approved and every locked candidate
+assessed. One earlier test was corrected rather than the rule relaxed: it had used a dangling
+rejected attempt as a device to reach the category-ordering guard, which the new refusal now
+intercepts, so it supersedes the rejection to get there. The capture package has 146 tests.

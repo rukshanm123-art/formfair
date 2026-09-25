@@ -152,6 +152,55 @@ export function lockCandidates(discovered) {
  * agency cannot be skipped because its forms look interesting and a lower-priority
  * category cannot be reached before a higher one is finished.
  */
+/**
+ * What this agency still has outstanding, or null.
+ *
+ * `requireEveryCategory` distinguishes the two callers. For an agency still being worked, a
+ * category with no set yet is work to do. For an agency that has already qualified, it is not:
+ * qualification is precisely what stops the later categories being searched.
+ */
+export function unfinishedFor(log, agency, { requireEveryCategory = true } = {}) {
+  // An attempt that is pending or rejected is unfinished business for this agency, and work
+  // does not move past it - not to the next candidate, not to the next category and not to the
+  // next agency. A rejected decision must be superseded by a corrected one.
+  const unresolved = log.attempts.filter(
+    (a) => a.agency === agency && a.status !== 'discovery' &&
+      (a.approval === 'pending' || (a.approval === 'rejected' && !isSuperseded(log, a)))
+  );
+  if (unresolved.length > 0) {
+    return {
+      agency,
+      category: unresolved[0].category,
+      blocked: unresolved.map((a) => ({ url: a.url, approval: a.approval })),
+      reason: 'outcomes are pending or rejected and must be resolved before work continues',
+    };
+  }
+
+  for (const category of CATEGORY_ORDER) {
+    const set = log.candidateSets?.[setKey(agency, category)];
+    if (!set) {
+      if (requireEveryCategory) return { agency, category, needsLock: true };
+      continue;
+    }
+    if (!set.lockedAt) return { agency, category, needsLock: true };
+    if (set.approval !== 'approved') {
+      return {
+        agency, category, needsSetApproval: true,
+        locked: set.locked,
+        reason: `the locked candidate set is ${set.approval ?? 'pending'} and must be approved before assessment`,
+      };
+    }
+    const outcomes = new Set(
+      log.attempts.filter((a) => a.agency === agency && a.status !== 'discovery').map((a) => a.url)
+    );
+    const pending = set.locked.filter((u) => !outcomes.has(u));
+    if (pending.length > 0) return { agency, category, pending };
+    // Every locked candidate has an approved outcome and none qualified: the category is
+    // finished, not abandoned, so the next one may be searched.
+  }
+  return null;
+}
+
 export function nextWork(log, drawOrder) {
   // Only an APPROVED capture qualifies an agency. Counting a pending one would let forty
   // unreviewed captures end the scan, which is the opposite of what the approval gate is
@@ -162,44 +211,25 @@ export function nextWork(log, drawOrder) {
   if (qualified.size >= MAX_QUALIFIED_AGENCIES) {
     return { done: true, reason: `${MAX_QUALIFIED_AGENCIES} agencies have qualified` };
   }
+  // selection-v1.0.7. A qualified agency is skipped, but only once it has nothing left
+  // outstanding. Skipping on qualification alone hid a correction in progress: Te Puni Kokiri
+  // had an approved capture, so its superseded-and-redone service-application set - locked and
+  // awaiting approval - was stepped over entirely, and the scan moved on as though the
+  // correction had been finished.
+  //
+  // A category this agency never searched is NOT outstanding. Qualification is what stops the
+  // remaining categories being searched, so counting them as unfinished would make every
+  // qualified agency permanently blocked.
   for (const row of drawOrder) {
-    if (qualified.has(row.agency)) continue;
+    if (qualified.has(row.agency)) {
+      const outstanding = unfinishedFor(log, row.agency, { requireEveryCategory: false });
+      if (outstanding) return outstanding;
+      continue;
+    }
     if (log.exhausted?.includes(row.agency)) continue;
 
-    // An attempt that is pending or rejected is unfinished business for this agency, and
-    // work does not move past it - not to the next candidate, not to the next category and
-    // not to the next agency. A rejected decision must be superseded by a corrected one.
-    const unresolved = log.attempts.filter(
-      (a) => a.agency === row.agency && a.status !== 'discovery' &&
-        (a.approval === 'pending' || (a.approval === 'rejected' && !isSuperseded(log, a)))
-    );
-    if (unresolved.length > 0) {
-      return {
-        agency: row.agency,
-        category: unresolved[0].category,
-        blocked: unresolved.map((a) => ({ url: a.url, approval: a.approval })),
-        reason: 'outcomes are pending or rejected and must be resolved before work continues',
-      };
-    }
-
-    for (const category of CATEGORY_ORDER) {
-      const set = log.candidateSets?.[setKey(row.agency, category)];
-      if (!set?.lockedAt) return { agency: row.agency, category, needsLock: true };
-      if (set.approval !== 'approved') {
-        return {
-          agency: row.agency, category, needsSetApproval: true,
-          locked: set.locked,
-          reason: `the locked candidate set is ${set.approval ?? 'pending'} and must be approved before assessment`,
-        };
-      }
-      const outcomes = new Set(
-        log.attempts.filter((a) => a.agency === row.agency && a.status !== 'discovery').map((a) => a.url)
-      );
-      const pending = set.locked.filter((u) => !outcomes.has(u));
-      if (pending.length > 0) return { agency: row.agency, category, pending };
-      // Every locked candidate has an approved outcome and none qualified: the category is
-      // finished, not abandoned, so the next one may be searched.
-    }
+    const outstanding = unfinishedFor(log, row.agency, { requireEveryCategory: true });
+    if (outstanding) return outstanding;
     return { agency: row.agency, exhaustedAgency: true };
   }
   return { done: true, reason: 'all agencies in the frozen order have been attempted' };

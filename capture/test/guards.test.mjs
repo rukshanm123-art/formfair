@@ -181,7 +181,18 @@ describe('what may enter the corpus', () => {
   test('a lower-priority category cannot be selected when a higher one also qualified', () => {
     const log = emptyLog();
     log.attempts.push(capture('TPK', 'enquiry-or-contact', 2));
-    log.attempts.push({ ...capture('TPK', 'account-registration', 1), approval: APPROVAL.REJECTED });
+    // The higher-priority capture is rejected so that it does not trip the one-page-per-agency
+    // guard first, and is then superseded, because selection-v1.0.7 refuses a draft while any
+    // rejection is left standing. What is under test here is the category ordering, reached
+    // only once every other unresolved state has been cleared.
+    log.attempts.push({
+      ...capture('TPK', 'account-registration', 1), approval: APPROVAL.REJECTED, id: 'c-0001',
+    });
+    log.attempts.push({
+      agency: 'TPK', category: 'account-registration', status: 'excluded', id: 'c-0002',
+      approval: APPROVAL.APPROVED, url: 'https://w.govt.nz/TPK/1',
+      exclusionReason: 'superseding correction', supersedesAttemptId: 'c-0001',
+    });
     assert.throws(() => deriveDraft(log, opts), /while account-registration also yielded one/);
   });
 });
@@ -215,5 +226,143 @@ describe('a third-party form shared by two agencies', () => {
       () => appendAttempt(log, capturedAttempt('Ministry of Health')),
       /duplicate shared form/
     );
+  });
+});
+
+/**
+ * Unfinished work cannot be stepped over, and cannot be frozen into a corpus.
+ *
+ * selection-v1.0.7, from two failures reproduced in the real run. A correction was in flight -
+ * Te Puni Kokiri's service-application set had been superseded, redone and locked, awaiting
+ * approval - and:
+ *
+ *   - `next` stepped over it entirely, because that agency already had an approved capture, so
+ *     the scan reported the SECOND agency as the work to do and the correction was invisible;
+ *   - `deriveDraft` built a one-page corpus draft while that set and one other were pending,
+ *     although the protocol states the draft is withheld while anything is unresolved.
+ *
+ * The cause in both cases is the same: the guards asked about ATTEMPTS and forgot that the
+ * candidate SET is where the selection judgement lives.
+ */
+describe('unfinished work blocks both the next step and the corpus', () => {
+  const CAT = 'service-application';
+  const agency = drawOrder[0].agency;
+  const second = drawOrder[1].agency;
+  const opts = { frameSha256: 'f', drawOrderSha256: 'd' };
+
+  const capturedFor = (ag, category, n) => ({
+    agency: ag, category, status: 'captured', approval: APPROVAL.APPROVED,
+    url: `https://w.govt.nz/${n}`, finalUrl: `https://w.govt.nz/${n}`,
+    pageId: `page-${n}`, file: `${n}.html`, htmlSha256: 'x', inclusionEvidence: 'has a name field',
+    capturedAt: '2026-09-24T00:00:00Z', browser: 'Chromium 1', automationTool: 'playwright 1',
+    viewport: { width: 1280, height: 800 }, locale: 'en-NZ', redirects: [],
+  });
+
+  /** A qualified agency that also has a locked-but-unapproved set: the real state. */
+  function qualifiedWithPendingCorrection() {
+    const log = emptyLog();
+    log.attempts.push(capturedFor(agency, 'enquiry-or-contact', 1));
+    log.candidateSets[`${agency}\u0000${CAT}`] = {
+      agency, category: CAT, version: 2,
+      discovered: [], locked: [], ordered: [], droppedBeyondBound: [],
+      lockedAt: '2026-09-25T03:29:01Z', approval: APPROVAL.PENDING,
+      candidateDeclaration: 'none', declaredAt: '2026-09-25T03:29:00Z',
+      discoveryRecordIds: ['d-0001'], discoveryMethods: ['navigation'],
+    };
+    return log;
+  }
+
+  test('THE BYPASS: next does not step over a qualified agency that has a pending set', () => {
+    const log = qualifiedWithPendingCorrection();
+    const work = nextWork(log, drawOrder);
+    assert.equal(work.agency, agency, `expected the correction, got ${work.agency}`);
+    assert.equal(work.category, CAT);
+    assert.ok(work.needsSetApproval);
+    assert.notEqual(work.agency, second, 'the scan must not advance to the next agency');
+  });
+
+  test('next does step over a qualified agency once nothing is outstanding', () => {
+    // The guard must not strand a finished agency: qualification is exactly what stops its
+    // remaining categories being searched, so an unsearched category is not unfinished work.
+    const log = qualifiedWithPendingCorrection();
+    log.candidateSets[`${agency}\u0000${CAT}`].approval = APPROVAL.APPROVED;
+    const work = nextWork(log, drawOrder);
+    assert.equal(work.agency, second);
+  });
+
+  test('next surfaces a qualified agency whose approved set has an unassessed candidate', () => {
+    const log = qualifiedWithPendingCorrection();
+    const set = log.candidateSets[`${agency}\u0000${CAT}`];
+    set.approval = APPROVAL.APPROVED;
+    set.candidateDeclaration = null;
+    set.locked = ['https://w.govt.nz/unassessed.docx'];
+    const work = nextWork(log, drawOrder);
+    assert.equal(work.agency, agency);
+    assert.deepEqual(work.pending, ['https://w.govt.nz/unassessed.docx']);
+  });
+
+  test('THE BYPASS: deriveDraft refuses while a candidate set is pending', () => {
+    const log = qualifiedWithPendingCorrection();
+    assert.throws(
+      () => deriveDraft(log, opts),
+      /1 candidate set\(s\) are not approved/
+    );
+  });
+
+  test('deriveDraft names the unresolved sets and their state', () => {
+    const log = qualifiedWithPendingCorrection();
+    log.candidateSets[`${second}\u0000${CAT}`] = {
+      agency: second, category: CAT, version: 1,
+      discovered: [], locked: [], ordered: [], droppedBeyondBound: [],
+      lockedAt: '2026-09-25T03:26:42Z', approval: APPROVAL.REJECTED,
+      candidateDeclaration: 'none', declaredAt: '2026-09-25T03:26:41Z',
+      discoveryRecordIds: ['d-0002'], discoveryMethods: ['navigation'],
+    };
+    assert.throws(() => deriveDraft(log, opts), /2 candidate set\(s\) are not approved/);
+    assert.throws(() => deriveDraft(log, opts), new RegExp(`${CAT} v2 \\(pending\\)`));
+    assert.throws(() => deriveDraft(log, opts), /\(rejected\)/);
+  });
+
+  test('deriveDraft refuses while a rejected set is unresolved', () => {
+    const log = qualifiedWithPendingCorrection();
+    log.candidateSets[`${agency}\u0000${CAT}`].approval = APPROVAL.REJECTED;
+    assert.throws(() => deriveDraft(log, opts), /not approved/);
+  });
+
+  test('deriveDraft refuses an approved set with a locked candidate that has no outcome', () => {
+    const log = qualifiedWithPendingCorrection();
+    const set = log.candidateSets[`${agency}\u0000${CAT}`];
+    set.approval = APPROVAL.APPROVED;
+    set.candidateDeclaration = null;
+    set.locked = ['https://w.govt.nz/form.docx'];
+    assert.throws(
+      () => deriveDraft(log, opts),
+      /has 1 locked candidate\(s\) with no outcome/
+    );
+  });
+
+  test('deriveDraft refuses a rejected attempt that nothing supersedes', () => {
+    // Only PENDING was ever checked, so a rejection left to stand quietly dropped its
+    // candidate out of the corpus with no correction recorded anywhere.
+    const log = qualifiedWithPendingCorrection();
+    log.candidateSets[`${agency}\u0000${CAT}`].approval = APPROVAL.APPROVED;
+    log.attempts.push({
+      agency, category: CAT, status: 'excluded', id: 'c-0099', approval: APPROVAL.REJECTED,
+      url: 'https://w.govt.nz/wrongly-excluded', exclusionReason: 'wrong reason given',
+    });
+    assert.throws(
+      () => deriveDraft(log, opts),
+      /1 rejected attempt\(s\) have not been superseded/
+    );
+  });
+
+  test('deriveDraft builds once every set is approved and every candidate assessed', () => {
+    const log = qualifiedWithPendingCorrection();
+    log.candidateSets[`${agency}\u0000${CAT}`].approval = APPROVAL.APPROVED;
+    // Real digests here: the placeholder hashes in `opts` are enough for the refusals above,
+    // which never reach the digest check, but a draft that actually builds must pass it.
+    const draft = deriveDraft(log, { frameSha256: 'a'.repeat(64), drawOrderSha256: 'b'.repeat(64) });
+    assert.equal(draft.pages.length, 1);
+    assert.equal(draft.pages[0].pageId, 'page-1');
   });
 });

@@ -624,6 +624,52 @@ export function deriveDraft(log, { frameSha256, drawOrderSha256, selectionLedger
       `${pending.length} attempt(s) still pending researcher approval; the corpus cannot be built until every inclusion and exclusion is approved`
     );
   }
+
+  // selection-v1.0.7. The draft was withheld only for pending ATTEMPTS. A pending or rejected
+  // candidate SET was invisible to it, so a corpus draft built cleanly while two corrections
+  // were mid-flight - which contradicts the protocol's own statement that the draft is
+  // withheld while anything is unresolved. The set is where the selection judgement sits, so a
+  // draft that ignores its state is a draft built from an unreviewed sample.
+  const unresolvedSets = Object.values(log.candidateSets ?? {}).filter(
+    (set) => set.approval !== APPROVAL.APPROVED
+  );
+  if (unresolvedSets.length) {
+    throw new Error(
+      `${unresolvedSets.length} candidate set(s) are not approved; the corpus cannot be built ` +
+        `until every active set is resolved: ${unresolvedSets
+          .map((s) => `${s.agency} / ${s.category} v${s.version} (${s.approval ?? 'pending'})`)
+          .join(', ')}`
+    );
+  }
+
+  // A rejected attempt that nothing supersedes is also unresolved. It was never checked,
+  // because only PENDING was looked for, so a rejection left to stand quietly dropped its
+  // candidate out of the corpus with no correction recorded anywhere.
+  const danglingRejections = log.attempts.filter(
+    (a) => a.status !== 'discovery' && a.approval === APPROVAL.REJECTED && !isSuperseded(log, a)
+  );
+  if (danglingRejections.length) {
+    throw new Error(
+      `${danglingRejections.length} rejected attempt(s) have not been superseded by a ` +
+        `correction: ${danglingRejections.map((a) => `${a.id} ${a.url}`).join(', ')}`
+    );
+  }
+
+  // An approved set whose locked candidates have no outcome is a category still being worked.
+  // Building from it would freeze a sample whose own selection was unfinished.
+  for (const set of Object.values(log.candidateSets ?? {})) {
+    const decided = new Set(
+      log.attempts.filter((a) => a.agency === set.agency && a.status !== 'discovery').map((a) => a.url)
+    );
+    const unassessed = (set.locked ?? []).filter((u) => !decided.has(u));
+    if (unassessed.length) {
+      throw new Error(
+        `${set.agency} / ${set.category} has ${unassessed.length} locked candidate(s) with no ` +
+          `outcome: ${unassessed.join(', ')}. Every locked candidate must be captured or ` +
+          'excluded before the corpus is built.'
+      );
+    }
+  }
   const approved = log.attempts.filter((a) => a.status === 'captured' && a.approval === APPROVAL.APPROVED);
 
   // One page per agency. The protocol takes at most one form page from each, and nothing
