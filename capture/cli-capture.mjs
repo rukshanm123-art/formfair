@@ -29,7 +29,7 @@ import {
   agenciesAwaitingExhaustion, findRobotsCheck, recordRobotsCheck,
   issueDiscoveryPermit, consumeDiscoveryPermit, findOpenPermit,
   unresolvedDiscoveryRounds, openDiscoveryPermits, robotsCheckIsFresh, isDiscoverySuperseded,
-  reopenCandidateSet, closeDiscoveryPermit, permitAudit, PERMIT_DISPOSITIONS,
+  reopenCandidateSet, closeDiscoveryPermit, permitAudit, PERMIT_DISPOSITIONS, corpusBlockers,
 } from './run.mjs';
 import { fetchRobotsPolicy, evaluatePolicy, DISPOSITION } from './robots-policy.mjs';
 import {
@@ -316,49 +316,15 @@ function doApprove() {
 function doStatus() {
   const log = readLog(logPathFor(require_('out')));
   const by = (p) => log.attempts.filter(p).length;
-  const sets = Object.values(log.candidateSets ?? {});
 
   console.log(`attempts        ${log.attempts.length}`);
   console.log(`  captured      ${by((a) => a.status === 'captured')}`);
   console.log(`  excluded      ${by((a) => a.status === 'excluded')}`);
   console.log(`  failed        ${by((a) => a.status === 'failed')}`);
 
-  // capture-v1.0.4. Attempts and candidate SETS are approved separately, and reporting one
-  // number for "pending approval" printed `0` while a locked set was waiting - which reads as
-  // nothing outstanding at the exact moment something is. It is the same attempts-versus-sets
-  // confusion that let the corpus draft build while two corrections were mid-flight.
-  const pendingAttempts = by((a) => a.approval === APPROVAL.PENDING);
-  const danglingRejections = log.attempts.filter(
-    (a) => a.status !== 'discovery' && a.approval === APPROVAL.REJECTED && !isSuperseded(log, a)
-  ).length;
-  const pendingSets = sets.filter((s) => s.approval === APPROVAL.PENDING);
-  const rejectedSets = sets.filter((s) => s.approval === APPROVAL.REJECTED);
-
-  console.log(`pending attempt approvals      ${pendingAttempts}`);
-  console.log(`pending candidate-set approvals ${pendingSets.length}`);
-  for (const s of pendingSets) console.log(`  - ${s.agency} / ${s.category} v${s.version}`);
-  if (rejectedSets.length) {
-    console.log(`rejected candidate sets awaiting supersession ${rejectedSets.length}`);
-    for (const s of rejectedSets) console.log(`  - ${s.agency} / ${s.category} v${s.version}`);
-  }
-  if (danglingRejections) {
-    console.log(`rejected attempts not yet superseded ${danglingRejections}`);
-  }
-
   const approvedCaptures = by((a) => a.status === 'captured' && a.approval === APPROVAL.APPROVED);
   console.log(`approved captures ${approvedCaptures} of a target of ${MAX_QUALIFIED_AGENCIES}`);
 
-  // selection-v1.0.9. An agency awaiting its exhaustion record is outstanding too. status said
-  // "nothing outstanding; the corpus draft is not withheld" while `next` was simultaneously
-  // saying an agency had to be recorded as exhausted - two commands contradicting each other
-  // about the same log.
-  const unresolvedRounds = unresolvedDiscoveryRounds(log);
-  if (unresolvedRounds.length) {
-    console.log(`discovery rounds not resolved into a locked set ${unresolvedRounds.length}`);
-    for (const r of unresolvedRounds) {
-      console.log(`  - ${r.agency} / ${r.category} v${r.version}: ${r.records} records, ${r.reason}`);
-    }
-  }
   const audit = permitAudit(log);
   if (audit.issued) {
     console.log(
@@ -367,24 +333,21 @@ function doStatus() {
         `${audit.open} open`
     );
   }
-  const permitsOpen = openDiscoveryPermits(log);
-  if (permitsOpen.length) {
-    console.log(`navigation permits issued and not consumed ${permitsOpen.length}`);
-    for (const p of permitsOpen.slice(0, 5)) console.log(`  - ${p.id} ${p.url}`);
+
+  // selection-v1.0.17. The same list the corpus gate reads. Computing it separately here is how
+  // `status` came to report "nothing outstanding" while `next` named four unassessed candidates
+  // and the draft refused for exactly that reason - three commands, three states, one log.
+  const blockers = corpusBlockers(log);
+  for (const b of blockers) {
+    console.log(b.summary);
+    for (const item of b.items.slice(0, 6)) console.log(`  - ${item}`);
+    if (b.items.length > 6) console.log(`  ... and ${b.items.length - 6} more`);
   }
 
-  const awaitingExhaustion = agenciesAwaitingExhaustion(log);
-  if (awaitingExhaustion.length) {
-    console.log(`agencies awaiting an exhaustion record ${awaitingExhaustion.length}`);
-    for (const a of awaitingExhaustion) console.log(`  - ${a}`);
-  }
-
-  const blocking = pendingAttempts + pendingSets.length + rejectedSets.length + danglingRejections
-    + awaitingExhaustion.length + unresolvedRounds.length + permitsOpen.length;
   console.log(
-    blocking === 0
+    blockers.length === 0
       ? 'nothing outstanding; the corpus draft is not withheld'
-      : `${blocking} item(s) outstanding; the corpus draft is withheld until each is resolved`
+      : `${blockers.length} kind(s) of unfinished work; the corpus draft is withheld until each is resolved`
   );
 }
 

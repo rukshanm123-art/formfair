@@ -1750,3 +1750,37 @@ Unchanged and clean under the stronger audit: 51 permits, 48 consumed, 48 record
 11 robots checks, **0 problems**. Four earlier fixtures needed seeding with a robots check, having
 issued permits that named one which did not exist — the fixtures were wrong in exactly the way the
 new invariant describes, and were corrected rather than the rule loosened.
+
+## Amendment 20: the gate and its report are one computation
+
+**Dated 25 September 2026.** `selection-v1.0.17`. Moves no earlier tag. Nothing is redone.
+
+`status` and `deriveDraft` each built their own list of unfinished work, and drifted apart twice.
+The second time, with a candidate set approved and its candidates unassessed, three commands
+described three different states of one log:
+
+```
+status:      nothing outstanding; the corpus draft is not withheld
+next:        assess 4 locked candidates still without an outcome
+deriveDraft: REFUSED - 4 locked candidates have no outcome
+```
+
+`status` was missing unassessed locked candidates and permit-ledger problems entirely. Amendment
+12 had already fixed one drift of exactly this kind by adding the checks `status` lacked — which
+is why adding more checks was not the remedy this time. Two lists maintained in parallel will
+diverge again; one list read twice cannot.
+
+`corpusBlockers(log)` is that list. `deriveDraft` refuses when it is non-empty; `status` prints it
+and counts it. The structural checks on a finished corpus — one page per agency, the forty-page
+bound, the draw-order prefix, frame membership — stay in `deriveDraft`, because they ask whether a
+*complete* sample is valid rather than whether the work is finished.
+
+Three tests, the last of which asserts the agreement itself rather than any single omission: across
+a pending attempt, an unapproved set, an open permit and a clean log, the gate refuses exactly when
+the report is non-empty. That is the property that was broken both times, and it is now the thing
+under test.
+
+The capture package has 227 tests. Four earlier tests asserted the previous wording or the previous
+weaker notion of "all clear"; they were updated to the unified message, and one fixture now
+declares a nil set rather than leaving a locked candidate unassessed — which under the corrected
+rule is outstanding work, exactly as the gate always said.

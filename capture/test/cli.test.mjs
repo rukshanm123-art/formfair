@@ -189,7 +189,7 @@ describe('capture CLI', () => {
 
       // The draft is withheld while approval is pending - the corpus cannot be built on
       // judgements nobody confirmed.
-      assert.match(cap.stdout, /draft held: .*pending researcher approval/);
+      assert.match(cap.stdout, /draft held: .*(pending researcher approval|work is unfinished)/);
       assert.ok(!existsSync(join(dir, 'corpus-draft.json')));
 
       const ok = await run(['approve', '--out', dir, '--url', `${origin}/contact`,

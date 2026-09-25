@@ -21,6 +21,7 @@ import {
   reopenCandidateSet, recordRobotsCheck, findRobotsCheck, robotsCheckIsFresh,
   consumeDiscoveryPermit, closeDiscoveryPermit, permitAudit, openDiscoveryPermits,
   checkPermitLedger,
+  corpusBlockers,
 } from '../run.mjs';
 import { prepareSet, addDiscovery } from './helpers.mjs';
 import {
@@ -345,7 +346,7 @@ describe('unfinished work blocks both the next step and the corpus', () => {
     set.locked = ['https://w.govt.nz/form.docx'];
     assert.throws(
       () => deriveDraft(log, opts),
-      /has 1 locked candidate\(s\) with no outcome/
+      /locked candidate\(s\) with no outcome/
     );
   });
 
@@ -1316,5 +1317,107 @@ describe('a permit and its inspection are one to one', () => {
     b.consumedAt = later;
     record(log, 'https://w.govt.nz/b', b.id, later);
     assert.deepEqual(checkPermitLedger(log), []);
+  });
+});
+
+/**
+ * The corpus gate and its report are one computation.
+ *
+ * selection-v1.0.17. `status` and `deriveDraft` each built their own list of unfinished work and
+ * drifted apart twice. The second time, with a set approved and its candidates unassessed:
+ *
+ *     status:      nothing outstanding; the corpus draft is not withheld
+ *     next:        assess 4 locked candidates still without an outcome
+ *     deriveDraft: REFUSED - 4 locked candidates have no outcome
+ *
+ * `status` was missing unassessed locked candidates and permit-ledger problems entirely. The
+ * property worth testing is not any single omission but the agreement itself: whatever withholds
+ * the draft must be what `status` reports.
+ */
+describe('status and the corpus gate cannot disagree', () => {
+  const CAT = 'account-registration';
+  const agency = drawOrder[0].agency;
+  const opts = { frameSha256: 'a'.repeat(64), drawOrderSha256: 'b'.repeat(64) };
+
+  const capturedPage = (ag) => ({
+    agency: ag, category: 'enquiry-or-contact', status: 'captured', approval: APPROVAL.APPROVED,
+    url: 'https://w.govt.nz/1', finalUrl: 'https://w.govt.nz/1', pageId: 'page-1', file: '1.html',
+    htmlSha256: 'x', inclusionEvidence: 'has a name field', capturedAt: '2026-09-24T00:00:00Z',
+    browser: 'Chromium 1', automationTool: 'playwright 1',
+    viewport: { width: 1280, height: 800 }, locale: 'en-NZ', redirects: [],
+  });
+
+  /** Every category settled, so only the state under test blocks. */
+  function settled(log, ag) {
+    for (const category of CATEGORY_ORDER) {
+      addDiscovery(log, { agency: ag, category, outcome: 'no-candidates' });
+      recordCandidates(log, { agency: ag, category, urls: [], declaration: 'none' });
+      lockCandidateSet(log, { agency: ag, category });
+      approveCandidateSet(log, { agency: ag, category, approved: true });
+    }
+    return log;
+  }
+
+  test('THE DRIFT: an approved set with unassessed candidates is reported and refused', () => {
+    const log = emptyLog();
+    log.attempts.push(capturedPage(agency));
+    // Three categories settled nil; the fourth has an approved set whose candidate was never
+    // assessed - the state in which status said "nothing outstanding" and the draft refused.
+    for (const category of CATEGORY_ORDER) {
+      if (category === CAT) {
+        addDiscovery(log, { agency, category, outcome: 'candidates-found', url: 'https://w.govt.nz/found' });
+        recordCandidates(log, { agency, category, urls: ['https://w.govt.nz/form'] });
+      } else {
+        addDiscovery(log, { agency, category, outcome: 'no-candidates' });
+        recordCandidates(log, { agency, category, urls: [], declaration: 'none' });
+      }
+      lockCandidateSet(log, { agency, category });
+      approveCandidateSet(log, { agency, category, approved: true });
+    }
+
+    const blockers = corpusBlockers(log);
+    assert.ok(blockers.some((b) => b.kind === 'unassessed-candidates'),
+      `status must report it: ${JSON.stringify(blockers.map((b) => b.kind))}`);
+    assert.throws(() => deriveDraft(log, opts), /locked candidate\(s\) with no outcome/);
+  });
+
+  test('a permit-ledger problem is reported as well as refused', () => {
+    const log = emptyLog();
+    log.attempts.push(capturedPage(agency));
+    settled(log, agency);
+    log.robotsChecks = [{
+      id: 'r-0001', origin: 'https://w.govt.nz', fetchedAt: '2026-09-25T08:00:00Z',
+      httpStatus: 200, disposition: 'rules', body: '',
+    }];
+    const permit = issueDiscoveryPermit(log, {
+      agency, category: CAT, candidateSetVersion: 1, url: 'https://w.govt.nz/x', robotsCheckId: 'r-0001',
+    });
+    permit.consumedAt = '2026-09-25T08:00:00Z'; // consumed, but no record names it
+
+    assert.ok(corpusBlockers(log).some((b) => b.kind === 'permit-ledger'));
+    assert.throws(() => deriveDraft(log, opts), /permit ledger problem|the corpus cannot be built/);
+  });
+
+  test('the gate refuses exactly when the report is non-empty, across several states', () => {
+    // The agreement itself, rather than any one omission.
+    const states = {
+      'pending attempt': (log) => { log.attempts.push({ ...capturedPage(agency), pageId: 'p2', url: 'https://w.govt.nz/2', finalUrl: 'https://w.govt.nz/2', approval: APPROVAL.PENDING }); },
+      'unapproved set': (log) => { log.candidateSets[`${agency}\u0000${CAT}`].approval = APPROVAL.PENDING; },
+      'open permit': (log) => {
+        log.robotsChecks = [{ id: 'r-0001', origin: 'https://w.govt.nz', fetchedAt: '2026-09-25T08:00:00Z', httpStatus: 200, disposition: 'rules', body: '' }];
+        issueDiscoveryPermit(log, { agency, category: CAT, candidateSetVersion: 1, url: 'https://w.govt.nz/open', robotsCheckId: 'r-0001' });
+      },
+      clean: () => {},
+    };
+    for (const [name, mutate] of Object.entries(states)) {
+      const log = emptyLog();
+      log.attempts.push(capturedPage(agency));
+      settled(log, agency);
+      mutate(log);
+      const reported = corpusBlockers(log).length > 0;
+      let refused = false;
+      try { deriveDraft(log, opts); } catch { refused = true; }
+      assert.equal(reported, refused, `${name}: status says ${reported}, the gate says ${refused}`);
+    }
   });
 });

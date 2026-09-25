@@ -801,93 +801,16 @@ export function agenciesAwaitingExhaustion(log) {
 }
 
 export function deriveDraft(log, { frameSha256, drawOrderSha256, selectionLedgerFile = 'selection-ledger.csv', synthetic = false, frameAgencies = null }) {
-  const pending = log.attempts.filter((a) => a.approval === APPROVAL.PENDING);
-  if (pending.length) {
+  // selection-v1.0.17: one shared list, read by `status` too, so a gate and its report cannot
+  // disagree about the same log.
+  const blockers = corpusBlockers(log);
+  if (blockers.length) {
     throw new Error(
-      `${pending.length} attempt(s) still pending researcher approval; the corpus cannot be built until every inclusion and exclusion is approved`
+      `the corpus cannot be built while work is unfinished:\n` +
+        blockers.map((b) => `  ${b.summary}${b.items.length ? `: ${b.items.slice(0, 4).join('; ')}` : ''}`).join('\n')
     );
   }
 
-  // selection-v1.0.7. The draft was withheld only for pending ATTEMPTS. A pending or rejected
-  // candidate SET was invisible to it, so a corpus draft built cleanly while two corrections
-  // were mid-flight - which contradicts the protocol's own statement that the draft is
-  // withheld while anything is unresolved. The set is where the selection judgement sits, so a
-  // draft that ignores its state is a draft built from an unreviewed sample.
-  const unresolvedSets = Object.values(log.candidateSets ?? {}).filter(
-    (set) => set.approval !== APPROVAL.APPROVED
-  );
-  if (unresolvedSets.length) {
-    throw new Error(
-      `${unresolvedSets.length} candidate set(s) are not approved; the corpus cannot be built ` +
-        `until every active set is resolved: ${unresolvedSets
-          .map((s) => `${s.agency} / ${s.category} v${s.version} (${s.approval ?? 'pending'})`)
-          .join(', ')}`
-    );
-  }
-
-  // A rejected attempt that nothing supersedes is also unresolved. It was never checked,
-  // because only PENDING was looked for, so a rejection left to stand quietly dropped its
-  // candidate out of the corpus with no correction recorded anywhere.
-  const danglingRejections = log.attempts.filter(
-    (a) => a.status !== 'discovery' && a.approval === APPROVAL.REJECTED && !isSuperseded(log, a)
-  );
-  if (danglingRejections.length) {
-    throw new Error(
-      `${danglingRejections.length} rejected attempt(s) have not been superseded by a ` +
-        `correction: ${danglingRejections.map((a) => `${a.id} ${a.url}`).join(', ')}`
-    );
-  }
-
-  // selection-v1.0.12. Discovery that never reached a locked, approved set must not vanish.
-  const unresolved = unresolvedDiscoveryRounds(log);
-  if (unresolved.length) {
-    throw new Error(
-      `${unresolved.length} discovery round(s) are not resolved into a locked, approved set: ` +
-        unresolved.map((r) => `${r.agency} / ${r.category} v${r.version} (${r.records} records: ${r.reason})`).join('; ')
-    );
-  }
-  const ledgerProblems = checkPermitLedger(log);
-  if (ledgerProblems.length) {
-    throw new Error(`the permit ledger is inconsistent:\n  ${ledgerProblems.join('\n  ')}`);
-  }
-  const openPermits = openDiscoveryPermits(log);
-  if (openPermits.length) {
-    throw new Error(
-      `${openPermits.length} navigation permit(s) were issued and never consumed: ` +
-        `${openPermits.map((p) => `${p.id} ${p.url}`).join(', ')}. Either record the inspection ` +
-        'they authorised or the log does not account for a request that was permitted.'
-    );
-  }
-
-  // selection-v1.0.9. An agency that finished every category with nothing eligible must be
-  // RECORDED as exhausted before the corpus is built. Without this the draft was produced while
-  // an agency sat in limbo - searched, contributing no page, and absent from the denominator -
-  // and the sealed corpus would have described a sample without saying how many agencies were
-  // examined to obtain it.
-  const awaiting = agenciesAwaitingExhaustion(log);
-  if (awaiting.length) {
-    throw new Error(
-      `${awaiting.length} agency(ies) finished every category with no eligible form and are not ` +
-        `recorded as exhausted: ${awaiting.join(', ')}. Run \`exhaust\` for each before ` +
-        'building the corpus.'
-    );
-  }
-
-  // An approved set whose locked candidates have no outcome is a category still being worked.
-  // Building from it would freeze a sample whose own selection was unfinished.
-  for (const set of Object.values(log.candidateSets ?? {})) {
-    const decided = new Set(
-      log.attempts.filter((a) => a.agency === set.agency && a.status !== 'discovery').map((a) => a.url)
-    );
-    const unassessed = (set.locked ?? []).filter((u) => !decided.has(u));
-    if (unassessed.length) {
-      throw new Error(
-        `${set.agency} / ${set.category} has ${unassessed.length} locked candidate(s) with no ` +
-          `outcome: ${unassessed.join(', ')}. Every locked candidate must be captured or ` +
-          'excluded before the corpus is built.'
-      );
-    }
-  }
   const approved = log.attempts.filter((a) => a.status === 'captured' && a.approval === APPROVAL.APPROVED);
 
   // One page per agency. The protocol takes at most one form page from each, and nothing
@@ -1559,4 +1482,84 @@ export function checkPermitLedger(log, { only = null } = {}) {
     }
   }
   return problems;
+}
+
+/**
+ * Everything unfinished that withholds the corpus draft.
+ *
+ * selection-v1.0.17. `status` and `deriveDraft` each computed this list for themselves, and drifted
+ * apart twice. The second time, `status` reported "nothing outstanding; the corpus draft is not
+ * withheld" while `next` said four locked candidates were unassessed and the draft refused for
+ * exactly that reason - three commands describing three different states of one log.
+ *
+ * So there is one list, and both callers read it. `deriveDraft` refuses if it is non-empty;
+ * `status` prints it and counts it. A gate and its report cannot disagree if they are the same
+ * computation.
+ *
+ * Structural checks on an already-complete corpus - one page per agency, the forty-page bound,
+ * the draw-order prefix, frame membership - stay in `deriveDraft`. Those ask whether a finished
+ * sample is valid, not whether the work is finished.
+ */
+export function corpusBlockers(log) {
+  const blockers = [];
+  const add = (kind, summary, items = []) => blockers.push({ kind, summary, items });
+
+  const pending = log.attempts.filter((a) => a.approval === APPROVAL.PENDING);
+  if (pending.length) {
+    add('pending-attempts', `${pending.length} attempt(s) still pending researcher approval`,
+      pending.map((a) => `${a.id} ${a.url}`));
+  }
+
+  const unresolvedSets = Object.values(log.candidateSets ?? {}).filter(
+    (set) => set.approval !== APPROVAL.APPROVED
+  );
+  if (unresolvedSets.length) {
+    add('unapproved-sets', `${unresolvedSets.length} candidate set(s) are not approved`,
+      unresolvedSets.map((s) => `${s.agency} / ${s.category} v${s.version} (${s.approval ?? 'pending'})`));
+  }
+
+  const dangling = log.attempts.filter(
+    (a) => a.status !== 'discovery' && a.approval === APPROVAL.REJECTED && !isSuperseded(log, a)
+  );
+  if (dangling.length) {
+    add('unsuperseded-rejections', `${dangling.length} rejected attempt(s) have not been superseded by a correction`,
+      dangling.map((a) => `${a.id} ${a.url}`));
+  }
+
+  // The check `status` was missing entirely.
+  const unassessed = [];
+  for (const set of Object.values(log.candidateSets ?? {})) {
+    const decided = new Set(
+      log.attempts.filter((a) => a.agency === set.agency && a.status !== 'discovery').map((a) => a.url)
+    );
+    for (const url of (set.locked ?? []).filter((u) => !decided.has(u))) {
+      unassessed.push(`${set.agency} / ${set.category}: ${url}`);
+    }
+  }
+  if (unassessed.length) {
+    add('unassessed-candidates', `${unassessed.length} locked candidate(s) with no outcome`, unassessed);
+  }
+
+  const rounds = unresolvedDiscoveryRounds(log);
+  if (rounds.length) {
+    add('unresolved-rounds', `${rounds.length} discovery round(s) are not resolved into a locked, approved set`,
+      rounds.map((r) => `${r.agency} / ${r.category} v${r.version}: ${r.records} records, ${r.reason}`));
+  }
+
+  const open = openDiscoveryPermits(log);
+  if (open.length) {
+    add('open-permits', `${open.length} navigation permit(s) issued and never consumed`,
+      open.map((p) => `${p.id} ${p.url}`));
+  }
+
+  // The other check `status` was missing.
+  const ledger = checkPermitLedger(log);
+  if (ledger.length) add('permit-ledger', `the permit ledger is inconsistent: ${ledger.length} problem(s)`, ledger);
+
+  const awaiting = agenciesAwaitingExhaustion(log);
+  if (awaiting.length) {
+    add('awaiting-exhaustion', `${awaiting.length} agency(ies) awaiting an exhaustion record`, awaiting);
+  }
+
+  return blockers;
 }

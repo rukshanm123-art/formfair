@@ -446,11 +446,11 @@ describe('status separates attempt approvals from candidate-set approvals', () =
       async (dir) => {
         const r = await run(['status', '--out', dir]);
         assert.equal(r.status, 0, r.stderr);
-        assert.match(r.stdout, /pending candidate-set approvals 1/);
-        assert.match(r.stdout, /pending attempt approvals\s+0/);
+        // selection-v1.0.17: status reports the same blocker list the corpus gate reads.
+        assert.match(r.stdout, /1 candidate set\(s\) are not approved/);
         assert.match(r.stdout, new RegExp(`${CAT} v1`));
-        assert.match(r.stdout, /1 item\(s\) outstanding; the corpus draft is withheld/);
-        // The old single line must not be what reports this state.
+        assert.match(r.stdout, /kind\(s\) of unfinished work; the corpus draft is withheld/);
+        // The old single count must not be what reports this state.
         assert.doesNotMatch(r.stdout, /^pending approval 0$/m);
       }
     );
@@ -464,18 +464,20 @@ describe('status separates attempt approvals from candidate-set approvals', () =
       },
       async (dir) => {
         const r = await run(['status', '--out', dir]);
-        assert.match(r.stdout, /rejected candidate sets awaiting supersession 1/);
-        assert.match(r.stdout, /outstanding; the corpus draft is withheld/);
+        assert.match(r.stdout, /candidate set\(s\) are not approved/);
+        assert.match(r.stdout, /\(rejected\)/);
+        assert.match(r.stdout, /the corpus draft is withheld/);
       }
     );
   });
 
   test('an all-clear log says nothing is outstanding', async () => {
+    // selection-v1.0.17: a locked candidate with no outcome now blocks, because the corpus gate
+    // refuses it. An all-clear log therefore needs a settled category, not merely approved
+    // attempts - which is exactly the drift this change removed.
     await withLog(
-      (log) => { prepareSet(log, agency, CAT, ['https://w.govt.nz/a']); },
+      (log) => { prepareSet(log, agency, CAT, [], { declaration: 'none' }); },
       async (dir) => {
-        // The one locked candidate still needs an outcome, but no APPROVAL is outstanding -
-        // which is what this line is about.
         const log = JSON.parse(readFileSync(join(dir, 'capture-log.json'), 'utf8'));
         for (const a of log.attempts) a.approval = APPROVAL.APPROVED;
         writeFileSync(join(dir, 'capture-log.json'), `${JSON.stringify(log, null, 2)}\n`, 'utf8');

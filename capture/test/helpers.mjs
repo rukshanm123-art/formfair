@@ -36,9 +36,9 @@ export function addDiscovery(log, { agency, category, version = 1, url, method =
 /**
  * Discovery, candidates, lock, and optionally approval - the whole path to assessment.
  */
-export function prepareSet(log, agency, category, urls, { approve = true, version = 1 } = {}) {
-  addDiscovery(log, { agency, category, version });
-  recordCandidates(log, { agency, category, urls });
+export function prepareSet(log, agency, category, urls, { approve = true, version = 1, declaration = null } = {}) {
+  addDiscovery(log, { agency, category, version, outcome: urls.length ? 'candidates-found' : 'no-candidates' });
+  recordCandidates(log, { agency, category, urls, declaration });
   lockCandidateSet(log, { agency, category });
   if (approve) approveCandidateSet(log, { agency, category, approved: true });
   return log.candidateSets[`${agency}\u0000${category}`].locked;
