@@ -673,14 +673,14 @@ describe('robots policy follows RFC 9309 status semantics', () => {
 });
 
 /**
- * A `Disallow: /` file disallows its own path by the letter of the rules.
+ * RFC 9309 section 2.2.2: "The /robots.txt URI is implicitly allowed."
  *
- * Found by running a real round: minhealthnz.shinyapps.io publishes `Disallow: /`, and the
- * robots inspection recorded ITSELF as disallowed and not navigated - while carrying a note
- * describing the file's contents, which only reading it could supply. A self-contradictory
- * record, produced by honouring the rules against the file that states them.
+ * Found by running a real round: minhealthnz.shinyapps.io publishes `Disallow: /`, and the robots
+ * inspection recorded ITSELF as disallowed and not navigated, while carrying a note describing
+ * the file's contents that only reading it could supply. The rule never reached that URI; the
+ * code was applying it where the RFC does not.
  */
-describe('robots.txt is exempt from the rules it carries', () => {
+describe('robots.txt is implicitly allowed', () => {
   test('a Disallow: / policy still permits its own path', () => {
     const policy = { disposition: 'rules', httpStatus: 200, body: 'User-agent: *\nDisallow: /\n' };
     assert.equal(evaluatePolicy(policy, '/robots.txt').allowed, true);

@@ -25,6 +25,15 @@ export function buildPacket(log, { agency, category }) {
       a.candidateSetVersion === set.version
   );
 
+  // selection-v1.0.13: superseded records are shown but not counted as evidence, and are kept
+  // out of FOR ATTENTION. Counting them made the packet report twenty-seven inspections for a
+  // twenty-six record round, and raised an anomaly against a record the same packet declares is
+  // not evidence.
+  const supersededIds = new Set(
+    records.filter((r) => log.attempts.some((o) => o.supersedesDiscoveryId === r.id)).map((r) => r.id)
+  );
+  const active = records.filter((r) => !supersededIds.has(r.id));
+
   const websites = [...new Set(records.map((r) => r.website))].sort();
   const byWebsite = websites.map((w) => ({
     website: w,
@@ -43,6 +52,7 @@ export function buildPacket(log, { agency, category }) {
 
   // Anything a reviewer should look at twice, most decision-relevant first.
   const anomalies = [];
+  // Built from active records: a withdrawn finding is not something to attend to.
 
   // A candidate on a host whose robots.txt was recorded as disallowing something is the
   // single most decision-relevant fact in the packet, and it was buried among the
@@ -66,7 +76,7 @@ export function buildPacket(log, { agency, category }) {
       );
     }
   }
-  for (const r of records) {
+  for (const r of active) {
     if (r.outcome === 'disallowed') anomalies.push(`${r.method ?? r.discoveryKind} disallowed: ${r.url}${r.note ? ` - ${r.note}` : ''}`);
     if (r.outcome === 'unavailable') anomalies.push(`${r.discoveryKind} unavailable: ${r.url}${r.note ? ` - ${r.note}` : ''}`);
   }
@@ -92,7 +102,8 @@ export function buildPacket(log, { agency, category }) {
     approval: set.approval, lockedAt: set.lockedAt,
     terms: SEARCH_TERMS[category] ?? [],
     websites: byWebsite,
-    inspections: records.length,
+    inspections: active.length,
+    supersededRecords: supersededIds.size,
     candidates: set.locked,
     droppedBeyondBound: set.droppedBeyondBound ?? [],
     anomalies,
@@ -108,7 +119,10 @@ export function renderPacket(p) {
   out.push(`category          ${p.category} (round ${p.version})`);
   out.push(`locked at         ${p.lockedAt}`);
   out.push(`search terms      ${p.terms.join(', ')}`);
-  out.push(`inspections       ${p.inspections} across ${p.websites.length} website(s)`);
+  out.push(
+    `inspections       ${p.inspections} active across ${p.websites.length} website(s)` +
+      (p.supersededRecords ? `, ${p.supersededRecords} superseded record(s) shown but not evidence` : '')
+  );
   out.push('');
   for (const w of p.websites) {
     out.push(`  ${w.website}`);

@@ -29,6 +29,7 @@ import {
   agenciesAwaitingExhaustion, findRobotsCheck, recordRobotsCheck,
   issueDiscoveryPermit, consumeDiscoveryPermit, findOpenPermit,
   unresolvedDiscoveryRounds, openDiscoveryPermits, robotsCheckIsFresh, isDiscoverySuperseded,
+  reopenCandidateSet,
 } from './run.mjs';
 import { fetchRobotsPolicy, evaluatePolicy, DISPOSITION } from './robots-policy.mjs';
 import {
@@ -69,6 +70,9 @@ const USAGE = `usage:
                           (--add <url>[,<url>...] | --none)
                           (--none records a round that found nothing, which is lockable)
   cli-capture.mjs lock    --out <dir> --agency <name> --category <c>
+  cli-capture.mjs reopen-set --out <dir> --agency <name> --category <c> --reason "<why>"
+                          (reopens a locked but UNAPPROVED set so a correction can be bound;
+                           the previous lock is preserved in lockHistory)
   cli-capture.mjs approve-set --out <dir> --agency <name> --category <c>
                           [--reject] [--note "<why>"]
   cli-capture.mjs supersede-set --out <dir> --agency <name> --category <c>
@@ -661,8 +665,28 @@ async function doPreflightDiscovery() {
   console.log(`reason: ${verdict.reason}`);
 }
 
+/**
+ * Reopens a locked but unapproved set so a discovery correction can be bound into it.
+ *
+ * The previous lock is preserved in `lockHistory` with the reason for reopening, so the fact that
+ * the set was once locked differently is part of the record rather than overwritten.
+ */
+function doReopenSet() {
+  const dir = require_('out');
+  const logPath = logPathFor(dir);
+  const log = readLog(logPath);
+  const set = reopenCandidateSet(log, {
+    agency: require_('agency'), category: require_('category'), reason: require_('reason'),
+  });
+  writeLog(logPath, log);
+  const previous = set.lockHistory.at(-1);
+  console.log(`reopened ${set.agency} / ${set.category} v${set.version}`);
+  console.log(`previous lock: ${previous.lockedAt}, ${previous.discoveryRecordIds.length} bound record(s)`);
+  console.log(`reason: ${previous.reason}`);
+}
+
 const commands = { packet: doPacket, candidates: doCandidates, lock: doLock, 'approve-set': doApproveSet,
-  'supersede-set': doSupersedeSet, publish: doPublish, next: doNext, capture: doCapture, exclude: doExclude, discovery: doDiscovery, budget: doBudget, approve: doApprove, status: doStatus, build: doBuild, exhaust: doExhaust, 'preflight-discovery': doPreflightDiscovery };
+  'supersede-set': doSupersedeSet, publish: doPublish, next: doNext, capture: doCapture, exclude: doExclude, discovery: doDiscovery, budget: doBudget, approve: doApprove, status: doStatus, build: doBuild, exhaust: doExhaust, 'preflight-discovery': doPreflightDiscovery, 'reopen-set': doReopenSet };
 if (!commands[command]) die(USAGE);
 try {
   await commands[command]();

@@ -1071,16 +1071,24 @@ export { sha256, recordExamination };
  * fresh request each time. Those requests were real traffic that no record described.
  */
 export function findRobotsCheck(log, origin) {
-  return (log.robotsChecks ?? []).find((c) => c.origin === origin) ?? null;
+  // The most recent check for that origin. History is append-only, so this reads forwards.
+  const all = (log.robotsChecks ?? []).filter((c) => c.origin === origin);
+  return all.length ? all[all.length - 1] : null;
 }
 
+/**
+ * Appends a robots check. Never replaces one.
+ *
+ * selection-v1.0.13. A refresh used to overwrite the previous policy while keeping its id, so a
+ * permit issued yesterday would afterwards appear to have been authorised by today's policy
+ * rather than the one actually observed when the request was made. The evidence for a past
+ * decision has to be the evidence that existed at the time, which means keeping it.
+ */
 export function recordRobotsCheck(log, policy) {
   (log.robotsChecks ??= []);
-  const existing = log.robotsChecks.findIndex((c) => c.origin === policy.origin);
   const record = { ...policy, id: `r-${String(log.robotsChecks.length + 1).padStart(4, '0')}` };
-  if (existing === -1) log.robotsChecks.push(record);
-  else log.robotsChecks[existing] = { ...record, id: log.robotsChecks[existing].id };
-  return findRobotsCheck(log, policy.origin);
+  log.robotsChecks.push(record);
+  return record;
 }
 
 /**
@@ -1224,4 +1232,42 @@ export function unresolvedDiscoveryRounds(log) {
 /** Permits issued and never consumed: a navigation authorised and never accounted for. */
 export function openDiscoveryPermits(log) {
   return (log.discoveryPermits ?? []).filter((p) => p.consumedAt === null);
+}
+
+/**
+ * Reopens a locked set that has not been approved, so a correction can still be bound.
+ *
+ * selection-v1.0.13. A discovery correction appended after locking left the binding pointing at
+ * the superseded record while its replacement sat outside the set entirely - the set would
+ * evidence a finding that had been withdrawn. Locking is meant to stop a set GROWING, not to
+ * freeze a mistake in place, and an unapproved set has not yet been relied on by anyone.
+ *
+ * An approved set is not reopenable: that judgement has been made, and correcting it means
+ * rejecting and superseding the set, which the protocol already provides.
+ */
+export function reopenCandidateSet(log, { agency, category, reason }) {
+  const set = log.candidateSets?.[setKey(agency, category)];
+  if (!set) throw new Error(`no candidate set for ${agency} / ${category}`);
+  if (!set.lockedAt) throw new Error(`${agency} / ${category} is not locked`);
+  if (set.approval === APPROVAL.APPROVED) {
+    throw new Error(
+      `${agency} / ${category} is approved and cannot be reopened. Reject and supersede it instead: ` +
+        'an approved set has been relied on, and changing it silently would rewrite a decision.'
+    );
+  }
+  if (typeof reason !== 'string' || reason.trim() === '') {
+    throw new Error('reopening a locked set requires a reason, which is recorded');
+  }
+
+  (set.lockHistory ??= []).push({
+    lockedAt: set.lockedAt,
+    ordered: set.ordered ?? [],
+    locked: set.locked ?? [],
+    discoveryRecordIds: set.discoveryRecordIds ?? [],
+    discoveryMethods: set.discoveryMethods ?? [],
+    reopenedAt: new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'),
+    reason,
+  });
+  set.lockedAt = null;
+  return set;
 }

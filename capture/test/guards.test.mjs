@@ -18,6 +18,7 @@ import {
   categorySettled, deriveDraft, APPROVAL, approveCandidateSet,
   exhaustAgency, EXHAUSTION_REASON, publishProvenance,
   unresolvedDiscoveryRounds, issueDiscoveryPermit, isDiscoverySuperseded, supersedeCandidateSet,
+  reopenCandidateSet, recordRobotsCheck, findRobotsCheck, robotsCheckIsFresh,
 } from '../run.mjs';
 import { prepareSet, addDiscovery } from './helpers.mjs';
 import {
@@ -712,5 +713,110 @@ describe('a discovery record is corrected in place', () => {
     assert.ok(!set.discoveryRecordIds.includes(wrong.id), 'the superseded record does not');
     // And the withdrawn candidates-found finding no longer contradicts the nil declaration.
     assert.deepEqual(set.locked, []);
+  });
+});
+
+/**
+ * Correcting a record after its set is locked, and keeping robots history.
+ *
+ * selection-v1.0.13. Two holes that would have opened later.
+ *
+ * A correction appended after locking left the binding pointing at the superseded record while
+ * its replacement sat outside the set, so the set would evidence a finding that had been
+ * withdrawn. And a robots refresh overwrote the previous policy while keeping its id, so after
+ * twenty-four hours a permit issued under the old policy would appear to have been authorised by
+ * the new one.
+ */
+describe('a locked but unapproved set can be reopened, audibly', () => {
+  const CAT = 'account-registration';
+  const agency = 'TPK';
+
+  function lockedRound(log) {
+    addDiscovery(log, { agency, category: CAT, url: 'https://w.govt.nz/robots.txt', method: 'robots', outcome: 'disallowed' });
+    recordCandidates(log, { agency, category: CAT, urls: [], declaration: 'none' });
+    return lockCandidateSet(log, { agency, category: CAT });
+  }
+
+  test('reopening preserves the previous lock and its reason', () => {
+    const log = emptyLog();
+    const set = lockedRound(log);
+    const firstLock = set.lockedAt;
+    const firstBinding = [...set.discoveryRecordIds];
+
+    reopenCandidateSet(log, { agency, category: CAT, reason: 'a discovery record was corrected' });
+    assert.equal(set.lockedAt, null);
+    assert.equal(set.lockHistory.length, 1);
+    assert.equal(set.lockHistory[0].lockedAt, firstLock);
+    assert.deepEqual(set.lockHistory[0].discoveryRecordIds, firstBinding);
+    assert.equal(set.lockHistory[0].reason, 'a discovery record was corrected');
+    assert.ok(set.lockHistory[0].reopenedAt);
+  });
+
+  test('reopening requires a reason', () => {
+    const log = emptyLog();
+    lockedRound(log);
+    assert.throws(() => reopenCandidateSet(log, { agency, category: CAT, reason: '  ' }), /requires a reason/);
+  });
+
+  test('an approved set cannot be reopened', () => {
+    const log = emptyLog();
+    lockedRound(log);
+    approveCandidateSet(log, { agency, category: CAT, approved: true });
+    assert.throws(
+      () => reopenCandidateSet(log, { agency, category: CAT, reason: 'x' }),
+      /approved and cannot be reopened/
+    );
+  });
+
+  test('THE HOLE: re-locking binds the correction, not the record it replaced', () => {
+    const log = emptyLog();
+    const set = lockedRound(log);
+    const original = log.attempts.find((a) => a.status === 'discovery');
+    assert.ok(set.discoveryRecordIds.includes(original.id), 'bound before the correction');
+
+    reopenCandidateSet(log, { agency, category: CAT, reason: 'the outcome was wrong' });
+    addDiscovery(log, {
+      agency, category: CAT, url: 'https://w.govt.nz/robots.txt', method: 'robots',
+      outcome: 'no-candidates', supersedes: original.id,
+    });
+    const fix = log.attempts.at(-1);
+    lockCandidateSet(log, { agency, category: CAT });
+
+    assert.ok(set.discoveryRecordIds.includes(fix.id), 'the correction is bound');
+    assert.ok(!set.discoveryRecordIds.includes(original.id), 'the superseded record is not');
+    assert.ok(log.attempts.find((a) => a.id === original.id), 'and is still preserved');
+  });
+});
+
+describe('robots policy history is append-only', () => {
+  const policy = (origin, at, status) => ({
+    origin, url: `${origin}/robots.txt`, fetchedAt: at, httpStatus: status,
+    disposition: status === 200 ? 'rules' : 'allow-all', sha256: 'x'.repeat(64), bytes: 10, body: '',
+  });
+
+  test('THE HOLE: a refresh appends rather than overwriting, and keeps a distinct id', () => {
+    const log = emptyLog();
+    const first = recordRobotsCheck(log, policy('https://a.govt.nz', '2026-09-24T00:00:00Z', 200));
+    const second = recordRobotsCheck(log, policy('https://a.govt.nz', '2026-09-25T00:00:00Z', 404));
+
+    assert.notEqual(first.id, second.id, 'the refreshed policy must not inherit the old id');
+    assert.equal(log.robotsChecks.length, 2, 'the earlier policy is retained');
+    // A permit issued under the first policy still points at the policy actually observed then.
+    assert.equal(log.robotsChecks.find((c) => c.id === first.id).httpStatus, 200);
+  });
+
+  test('reads return the most recent policy for that origin', () => {
+    const log = emptyLog();
+    recordRobotsCheck(log, policy('https://a.govt.nz', '2026-09-24T00:00:00Z', 200));
+    recordRobotsCheck(log, policy('https://a.govt.nz', '2026-09-25T00:00:00Z', 404));
+    recordRobotsCheck(log, policy('https://b.govt.nz', '2026-09-25T00:00:00Z', 200));
+    assert.equal(findRobotsCheck(log, 'https://a.govt.nz').httpStatus, 404);
+    assert.equal(findRobotsCheck(log, 'https://b.govt.nz').httpStatus, 200);
+  });
+
+  test('a policy older than 24 hours is not fresh', () => {
+    const now = Date.parse('2026-09-25T12:00:00Z');
+    assert.equal(robotsCheckIsFresh({ fetchedAt: '2026-09-25T11:00:00Z' }, now), true);
+    assert.equal(robotsCheckIsFresh({ fetchedAt: '2026-09-24T11:00:00Z' }, now), false);
   });
 });

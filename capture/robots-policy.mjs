@@ -77,12 +77,10 @@ export async function fetchRobotsPolicy(origin, { fetchImpl = fetch, timeoutMs =
  * stay possible, or an origin whose server failed once could never be re-checked.
  */
 export function evaluatePolicy(policy, pathWithQuery, userAgent = 'chromium') {
-  // The policy file is always retrievable, under every disposition. A site that publishes
-  // `Disallow: /` disallows its own robots.txt by the letter of the rules, and honouring that
-  // literally makes the policy unreadable - and made a robots inspection record itself as "not
-  // navigated" while carrying a note describing the file's contents, which only reading it could
-  // supply. RFC 9309 has the crawler fetch this path to learn the rules; it is not governed by
-  // them.
+  // RFC 9309 section 2.2.2: "The /robots.txt URI is implicitly allowed." It is not that a
+  // `Disallow: /` file forbids its own policy file and we choose to override that - the rule
+  // never reaches it. Treating it as governed made a robots inspection record ITSELF as not
+  // navigated, while carrying a note describing contents only reading it could supply.
   if (pathWithQuery === '/robots.txt') {
     return { allowed: true, reason: 'the policy file itself is always retrievable', crawlDelay: null };
   }

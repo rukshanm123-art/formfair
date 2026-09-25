@@ -1532,11 +1532,12 @@ inspections with one wrong record does not need twenty-five re-observations, and
 would mean re-requesting pages already retrieved under permits — traffic with no evidential
 purpose.
 
-**`/robots.txt` is exempt from the rules it carries.** Found by running a real round:
-`minhealthnz.shinyapps.io` publishes `Disallow: /`, which by the letter of the rules disallows its
-own policy file, so the robots inspection recorded *itself* as disallowed and not navigated while
-carrying a note describing the file's contents — which only reading it could supply. A
-self-contradictory record produced by honouring the rules against the file that states them.
+**`/robots.txt` is implicitly allowed.** RFC 9309 section 2.2.2 says so directly: "The
+/robots.txt URI is implicitly allowed." Found by running a real round:
+`minhealthnz.shinyapps.io` publishes `Disallow: /`, and the robots inspection recorded *itself* as
+disallowed and not navigated, while carrying a note describing the file's contents that only
+reading it could supply. The rule never reached that URI — the code was applying it where the RFC
+does not, which is a different and smaller claim than the one first written here.
 
 Eleven tests, including both live bypasses reproduced end to end. The capture package has 191
 tests.
@@ -1549,3 +1550,54 @@ itself: it read the navigation time *before* running the preflight, and since ti
 truncated to the second, that value could land a second earlier than the permit it was supposed to
 follow. Both were the fixture being wrong about the order of events, not the rule being too
 strict.
+
+## Amendment 16: correcting the correction
+
+**Dated 25 September 2026.** `selection-v1.0.13`. Moves no earlier tag. No full round is repeated.
+
+### The correction was wrong about which field was wrong
+
+`d-0222` recorded the Shiny host's robots inspection as `disallowed` with
+`navigationPerformed: false`. Only the second of those was false. The inspection genuinely
+established `Disallow: /`, so `disallowed` was the right substantive finding; what could not be
+true was the claim that nothing had been fetched, since RFC 9309 section 2.2.2 makes `/robots.txt`
+implicitly allowed and it had been retrievable all along.
+
+`d-0224` corrected the wrong field. It recorded `no-candidates`, which made the *active* evidence
+say a host that forbids every path is unrestricted, while its own note said the opposite. The
+round then bound a record whose outcome contradicted its note — a worse state than the one being
+repaired, and one produced by fixing a self-contradiction without checking which half was sound.
+
+`d-0225` records `disallowed`, after a real permitted request to `/robots.txt`. `d-0222` and
+`d-0224` are both preserved, both superseded, and neither is bound.
+
+### Three durable fixes
+
+**A locked but unapproved set can be reopened, audibly.** A correction appended after locking left
+the binding pointing at the superseded record while its replacement sat outside the set — so the
+set would evidence a finding that had been withdrawn. `reopen-set` requires a reason and preserves
+the previous lock, its binding and its methods in `lockHistory`. An **approved** set cannot be
+reopened: that judgement has been relied on, and changing it means rejecting and superseding,
+which the protocol already provides.
+
+**The approval packet counts active evidence.** It reported twenty-seven inspections for a
+twenty-six record round, and raised an anomaly against a record the same packet declared was not
+evidence. It now reads `26 active across 10 website(s), 2 superseded record(s) shown but not
+evidence`, and builds `FOR ATTENTION` from active records only. Superseded records are still
+displayed, marked with what replaced them.
+
+**Robots policy history is append-only.** A refresh overwrote the previous policy while keeping
+its id, so after the twenty-four hour expiry a permit issued under the old policy would appear to
+have been authorised by the new one. Each check is now its own record with its own id, reads
+return the most recent, and the evidence for a past decision remains the evidence that existed
+when it was made.
+
+### A wording correction
+
+Amendment 15 said a `Disallow: /` file "by the letter of the rules disallows its own policy file".
+That overstates it. RFC 9309 section 2.2.2 states that the `/robots.txt` URI is implicitly allowed,
+so the rule never reaches it; the code was applying a restriction the specification does not make,
+which is a smaller and more precise claim than deciding to override a real one.
+
+Seven further tests, including both future holes reproduced directly. The capture package has 198
+tests.
