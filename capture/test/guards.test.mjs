@@ -913,9 +913,14 @@ describe('a permit is named by the record it authorises', () => {
     const p = issueDiscoveryPermit(log, { ...base, url: forUrl });
     addDiscovery(log, { agency, category: CAT, url: forUrl });
     const r = log.attempts.at(-1);
+    // selection-v1.0.18: robots fetched <= issued <= navigated <= consumed. `issueDiscoveryPermit`
+    // stamps real time, so the fixture pins the whole chain to one instant rather than mixing a
+    // live clock with fixed past timestamps - which the lifecycle check now rightly refuses.
+    const when = '2026-09-25T08:00:00Z';
     r.permitId = p.id;
-    r.navigatedAt = r.navigatedAt ?? '2026-09-25T08:00:00Z';
-    p.consumedAt = '2026-09-25T08:00:00Z';
+    r.navigatedAt = when;
+    p.issuedAt = when;
+    p.consumedAt = when;
     return r;
   }
 
@@ -1036,6 +1041,8 @@ describe('the permit ledger describes traffic that happened', () => {
       disposition: 'rules', body: '',
     }];
     const permit = issueDiscoveryPermit(log, { ...scope, url: urlFor, robotsCheckId: 'r-0001' });
+    // Pinned so the chain robots <= issued <= navigated <= consumed holds; the issuer stamps now.
+    permit.issuedAt = at;
     appendAttempt(log, {
       examinedAt: navigatedAt, agency, website: 'https://w.govt.nz/', url: urlFor,
       status: 'discovery', discoveryKind: 'navigation', outcome: 'no-candidates', category: CAT,
@@ -1223,9 +1230,13 @@ describe('a permit and its inspection are one to one', () => {
     }];
     return log;
   }
-  const issue = (log, url) => issueDiscoveryPermit(log, {
-    agency: 'TPK', category: CAT, candidateSetVersion: 1, url, robotsCheckId: 'r-0001',
-  });
+  const issue = (log, url) => {
+    const p = issueDiscoveryPermit(log, {
+      agency: 'TPK', category: CAT, candidateSetVersion: 1, url, robotsCheckId: 'r-0001',
+    });
+    p.issuedAt = at; // pinned: the issuer stamps real time, the fixture's records are fixed
+    return p;
+  };
   const record = (log, url, permitId, when = at) => {
     appendAttempt(log, {
       examinedAt: when, agency: 'TPK', website: 'https://w.govt.nz/', url,
@@ -1419,5 +1430,137 @@ describe('status and the corpus gate cannot disagree', () => {
       try { deriveDraft(log, opts); } catch { refused = true; }
       assert.equal(reported, refused, `${name}: status says ${reported}, the gate says ${refused}`);
     }
+  });
+});
+
+/**
+ * The permit lifecycle: a state machine and a clock.
+ *
+ * selection-v1.0.18. The ledger checked structure and pairing but never the sequence of events,
+ * so five impossible histories passed cleanly: a record saying no navigation occurred, a
+ * navigation predating its own permit, a robots check fetched *after* the permit it supposedly
+ * justified, a robots check older than a day, and a navigation an hour past issuance. The closure
+ * state machine also accepted unknown dispositions and closures with no reason or id when written
+ * directly into the log.
+ *
+ * Each makes the ledger assert a sequence that cannot have happened. The order is not decoration:
+ * `robots fetched <= permit issued <= navigation <= consumed` is the entire claim that a request
+ * was authorised before it was made.
+ */
+describe('the permit lifecycle is ordered and complete', () => {
+  const CAT = 'account-registration';
+  const T = (h, m = 0) => `2026-09-25T${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:00Z`;
+
+  /** A consistent ledger, which each test then breaks in one way. */
+  function ledger({ permit = {}, record = {}, robots = {} } = {}) {
+    const log = emptyLog();
+    log.robotsChecks = [{
+      id: 'r-0001', origin: 'https://w.govt.nz', fetchedAt: T(8), httpStatus: 200,
+      disposition: 'rules', body: '', ...robots,
+    }];
+    log.discoveryPermits = [{
+      id: 'p-0001', agency: 'TPK', category: CAT, candidateSetVersion: 1,
+      url: 'https://w.govt.nz/a', robotsCheckId: 'r-0001',
+      issuedAt: T(9), consumedAt: T(9, 5), ...permit,
+    }];
+    appendAttempt(log, {
+      examinedAt: T(9, 1), agency: 'TPK', website: 'https://w.govt.nz/', url: 'https://w.govt.nz/a',
+      status: 'discovery', discoveryKind: 'navigation', outcome: 'no-candidates', category: CAT,
+      candidateSetVersion: 1, navigatedAt: T(9, 1), approval: 'approved', permitId: 'p-0001',
+      ...record,
+    });
+    return log;
+  }
+  const problems = (log) => checkPermitLedger(log);
+
+  test('a consistent lifecycle passes', () => {
+    assert.deepEqual(problems(ledger()), []);
+  });
+
+  test('THE GAP: a record stating no navigation cannot have consumed a permit', () => {
+    const log = ledger({ record: { navigationPerformed: false, navigatedAt: undefined, checkedAt: T(9, 1) } });
+    assert.ok(problems(log).some((p) => /records navigationPerformed: false/.test(p)));
+  });
+
+  test('THE GAP: a navigation cannot predate its permit', () => {
+    const log = ledger({ record: { navigatedAt: T(8, 30), examinedAt: T(8, 30) } });
+    assert.ok(problems(log).some((p) => /cannot authorise a request already made/.test(p)));
+  });
+
+  test('THE GAP: a robots check cannot be fetched after the permit it justifies', () => {
+    const log = ledger({ robots: { fetchedAt: T(10) } });
+    assert.ok(problems(log).some((p) => /rests on a policy read before it, not after/.test(p)));
+  });
+
+  test('THE GAP: a robots check older than 24 hours cannot justify a permit', () => {
+    const log = ledger({ robots: { fetchedAt: '2026-09-23T08:00:00Z' } });
+    assert.ok(problems(log).some((p) => /more than 24 hours/.test(p)));
+  });
+
+  test('THE GAP: a navigation more than an hour after issuance is refused', () => {
+    const log = ledger({ record: { navigatedAt: T(11), examinedAt: T(11) }, permit: { consumedAt: T(11, 1) } });
+    assert.ok(problems(log).some((p) => /the permit had expired/.test(p)));
+  });
+
+  test('a permit consumed before its navigation is refused', () => {
+    const log = ledger({ permit: { consumedAt: T(9) }, record: { navigatedAt: T(9, 2), examinedAt: T(9, 2) } });
+    assert.ok(problems(log).some((p) => /before .* navigated at/.test(p)));
+  });
+
+  test('a non-discovery attempt naming a permit is refused', () => {
+    const log = ledger();
+    log.attempts[0].status = 'excluded';
+    log.attempts[0].exclusionReason = 'x';
+    log.attempts[0].eligibility = Object.fromEntries(ELIGIBILITY_CRITERIA.map((c) => [c, null]));
+    assert.ok(problems(log).some((p) => /excluded attempt, not a discovery record/.test(p)));
+  });
+
+  test('THE GAP: an unknown disposition written directly is refused', () => {
+    const log = ledger();
+    log.discoveryPermits.push({
+      id: 'p-0002', agency: 'TPK', category: CAT, candidateSetVersion: 1, url: 'https://w.govt.nz/b',
+      robotsCheckId: 'r-0001', issuedAt: T(9), consumedAt: null,
+      closedAt: T(9, 9), disposition: 'whatever', closureReason: 'x', closureId: 'x-0001',
+    });
+    assert.ok(problems(log).some((p) => /which is not unused or duplicate-request/.test(p)));
+  });
+
+  test('THE GAP: a closure with no reason or id is refused', () => {
+    const log = ledger();
+    log.discoveryPermits.push({
+      id: 'p-0003', agency: 'TPK', category: CAT, candidateSetVersion: 1, url: 'https://w.govt.nz/c',
+      robotsCheckId: 'r-0001', issuedAt: T(9), consumedAt: null,
+      closedAt: T(9, 9), disposition: 'unused',
+    });
+    const found = problems(log);
+    assert.ok(found.some((p) => /closed without a closure id/.test(p)));
+    assert.ok(found.some((p) => /closed without a reason/.test(p)));
+  });
+
+  test('a disposition without a closure, or closure fields without a closure, are refused', () => {
+    const log = ledger();
+    log.discoveryPermits[0].disposition = 'unused';
+    assert.ok(problems(log).some((p) => /carries disposition unused but is not closed/.test(p)));
+
+    const log2 = ledger();
+    log2.discoveryPermits[0].closureId = 'x-0001';
+    assert.ok(problems(log2).some((p) => /is not closed but carries closure fields/.test(p)));
+  });
+
+  test('closure validates the whole ledger, not just the permit being closed', () => {
+    // `{ only }` skipped every general check, so a closure could be written into a ledger that
+    // was already inconsistent.
+    const log = ledger({ record: { navigatedAt: T(8, 30), examinedAt: T(8, 30) } });
+    log.discoveryPermits.push({
+      id: 'p-0002', agency: 'TPK', category: CAT, candidateSetVersion: 1, url: 'https://w.govt.nz/b',
+      robotsCheckId: 'r-0001', issuedAt: T(9), consumedAt: null,
+    });
+    assert.throws(
+      () => closeDiscoveryPermit(log, { permitId: 'p-0002', disposition: 'unused', reason: 'not visited' }),
+      /cannot authorise a request already made/
+    );
+    // And the attempted closure left no trace.
+    const p2 = log.discoveryPermits.find((p) => p.id === 'p-0002');
+    assert.equal(p2.closedAt, undefined);
   });
 });

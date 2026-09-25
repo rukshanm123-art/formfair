@@ -1253,7 +1253,9 @@ export function closeDiscoveryPermit(log, { permitId, disposition, reason, accou
 
   // Validated after assignment so the ledger is checked in the state it would be left in, and
   // rolled back entirely if it does not hold.
-  const problems = checkPermitLedger(log, { only: permit.id });
+  // Full validation, not scoped to this permit: `{ only }` skipped every general check, so a
+  // closure could be written into a ledger that was already inconsistent.
+  const problems = checkPermitLedger(log);
   if (problems.length) {
     for (const key of ['closedAt', 'disposition', 'closureReason', 'accountedBy', 'closureId']) {
       delete permit[key];
@@ -1343,11 +1345,12 @@ export function reopenCandidateSet(log, { agency, category, reason }) {
  * called from the closure itself, from `deriveDraft` and from `publishProvenance`: a rule enforced
  * where a value is written but not where it is trusted is the defect this scan keeps rediscovering.
  */
-export function checkPermitLedger(log, { only = null } = {}) {
+export function checkPermitLedger(log) {
   const problems = [];
   const allPermits = log.discoveryPermits ?? [];
-  const permits = allPermits.filter((p) => (only ? p.id === only : true));
+  const permits = allPermits;
   const byId = new Map(log.attempts.map((a) => [a.id, a]));
+  const ms = (v) => { const t = Date.parse(v ?? ''); return Number.isNaN(t) ? null : t; };
 
   // selection-v1.0.16. The consumption side of the ledger, which the closure checks never
   // reached. Validating only closures left three inconsistent states passing cleanly: a record
@@ -1357,7 +1360,7 @@ export function checkPermitLedger(log, { only = null } = {}) {
   //
   // Records predating the permit model carry no `permitId` and are exempt: the invariants apply
   // to permits and to records that participate in the model.
-  if (!only) {
+  {
     const seenPermitIds = new Set();
     const seenClosureIds = new Set();
     for (const permit of allPermits) {
@@ -1415,6 +1418,95 @@ export function checkPermitLedger(log, { only = null } = {}) {
         );
       }
     }
+    // selection-v1.0.18. The permit lifecycle: a state machine and a clock.
+    //
+    // Five states passed cleanly before this: a record saying no navigation occurred, a
+    // navigation predating its own permit, a robots check fetched after the permit it
+    // supposedly justified, a robots check older than a day, and a navigation an hour past
+    // issuance. Each makes the ledger assert a sequence of events that cannot have happened.
+    for (const permit of allPermits) {
+      const where = permit.id;
+      const closed = Boolean(permit.closedAt);
+      if (permit.disposition && !closed) {
+        problems.push(`${where} carries disposition ${permit.disposition} but is not closed`);
+      }
+      if (closed) {
+        if (!Object.values(PERMIT_DISPOSITIONS).includes(permit.disposition)) {
+          problems.push(
+            `${where} is closed with disposition ${JSON.stringify(permit.disposition)}, which is not ` +
+              Object.values(PERMIT_DISPOSITIONS).join(' or ')
+          );
+        }
+        if (typeof permit.closureId !== 'string' || permit.closureId === '') {
+          problems.push(`${where} is closed without a closure id`);
+        }
+        if (typeof permit.closureReason !== 'string' || permit.closureReason.trim() === '') {
+          problems.push(`${where} is closed without a reason`);
+        }
+      } else if (permit.closureId || permit.closureReason) {
+        problems.push(`${where} is not closed but carries closure fields`);
+      }
+
+      const issued = ms(permit.issuedAt);
+      if (issued === null) problems.push(`${where} has no valid issuedAt`);
+
+      const check = (log.robotsChecks ?? []).find((c) => c.id === permit.robotsCheckId);
+      const fetched = check ? ms(check.fetchedAt) : null;
+      if (issued !== null && fetched !== null) {
+        if (fetched > issued) {
+          problems.push(
+            `${where} was issued at ${permit.issuedAt} but its robots check was fetched later, at ` +
+              `${check.fetchedAt}. A permit rests on a policy read before it, not after.`
+          );
+        } else if (issued - fetched > ROBOTS_MAX_AGE_MS) {
+          problems.push(
+            `${where} rests on a robots check fetched at ${check.fetchedAt}, more than 24 hours ` +
+              'before it was issued; RFC 9309 section 2.4 does not support relying on it that long'
+          );
+        }
+      }
+
+      const consumed = ms(permit.consumedAt);
+      const record = (citations.get(permit.id) ?? [])[0];
+      const navigated = record ? ms(record.navigatedAt) : null;
+      if (record) {
+        if (record.status !== 'discovery') {
+          problems.push(`${where} is named by ${record.id}, a ${record.status} attempt, not a discovery record`);
+        }
+        if (record.navigationPerformed === false) {
+          problems.push(
+            `${where} is named by ${record.id}, which records navigationPerformed: false. A permit ` +
+              'authorises a request; a record stating none occurred cannot be what consumed it.'
+          );
+        }
+        if (navigated === null) {
+          problems.push(`${where} is named by ${record.id}, which carries no navigation timestamp`);
+        }
+      }
+      if (issued !== null && navigated !== null) {
+        if (navigated < issued) {
+          problems.push(
+            `${where} was issued at ${permit.issuedAt} but ${record.id} navigated earlier, at ` +
+              `${record.navigatedAt}. A permit cannot authorise a request already made.`
+          );
+        } else if (navigated - issued > PERMIT_TTL_MS) {
+          problems.push(
+            `${where} was issued at ${permit.issuedAt} and ${record.id} navigated at ` +
+              `${record.navigatedAt}, more than an hour later; the permit had expired`
+          );
+        }
+      }
+      if (navigated !== null && consumed !== null && consumed < navigated) {
+        problems.push(
+          `${where} was consumed at ${permit.consumedAt}, before ${record.id} navigated at ` +
+            `${record.navigatedAt}`
+        );
+      }
+      if (issued !== null && consumed !== null && consumed < issued) {
+        problems.push(`${where} was consumed at ${permit.consumedAt}, before it was issued`);
+      }
+    }
+
     for (const permit of allPermits) {
       if (!permit.consumedAt) continue;
       const cited = citations.get(permit.id) ?? [];

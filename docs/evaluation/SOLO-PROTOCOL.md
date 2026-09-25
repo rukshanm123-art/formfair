@@ -1784,3 +1784,44 @@ The capture package has 227 tests. Four earlier tests asserted the previous word
 weaker notion of "all clear"; they were updated to the unified message, and one fixture now
 declares a nil set rather than leaving a locked candidate unassessed — which under the corrected
 rule is outstanding work, exactly as the gate always said.
+
+## Amendment 21: the permit lifecycle is ordered and complete
+
+**Dated 25 September 2026.** `selection-v1.0.18`. Moves no earlier tag. Nothing is redone.
+
+The ledger checked structure and pairing but never the *sequence*, so five impossible histories
+passed with zero problems:
+
+- a record stating `navigationPerformed: false` counted as having consumed a permit;
+- a navigation dated before the permit that authorised it;
+- a robots check fetched **after** the permit it supposedly justified;
+- a robots check more than 24 hours older than the permit resting on it;
+- a navigation more than an hour after issuance, past the permit's own expiry.
+
+The closure state machine also accepted an unknown disposition, and a closure with neither reason
+nor id, when written directly into the log.
+
+The order is the entire claim. `robots fetched ≤ permit issued ≤ navigation ≤ consumed` is what
+"the request was authorised before it was made" means; without it the ledger records the right
+objects in an impossible arrangement, which is exactly the shape a fabricated log takes.
+
+Now enforced: discovery status and real navigation for any record naming a permit; the full
+temporal chain; the 24-hour robots limit and the one-hour permit limit; the four valid permit
+states — open, consumed, closed-unused, closed-duplicate-request — with a closure required to
+carry a known disposition, an id and a reason, and a disposition or closure field refused on a
+permit that is not closed.
+
+**`checkPermitLedger` no longer takes `{ only }`.** That option skipped every general check, so a
+closure was validated against its own permit while the ledger around it went unexamined — which
+is how a closure could be written into an already-inconsistent ledger. Closure now validates the
+whole ledger and rolls back if it does not hold.
+
+Twelve tests, five of them the reproduced histories. The capture package has 239 tests.
+
+### The live ledger
+
+Passes unchanged: **0 problems**, with only the two expected corpus blockers — the pending
+Ministry set and its four unassessed candidates. Three earlier fixtures mixed a live clock with
+fixed past timestamps, since `issueDiscoveryPermit` stamps the present; they now pin the whole
+chain to one instant. That was the fixtures being impossible in precisely the way the new rule
+describes, and they were corrected rather than the rule loosened.
