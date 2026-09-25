@@ -21,6 +21,7 @@ import {
 } from '../run.mjs';
 import { parseDrawOrder } from '../selection.mjs';
 import { prepareSet, addDiscovery } from './helpers.mjs';
+import { dispositionForStatus, evaluatePolicy } from '../robots-policy.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const cli = join(here, '..', 'cli-capture.mjs');
@@ -485,29 +486,36 @@ describe('status separates attempt approvals from candidate-set approvals', () =
   });
 });
 
+
 /**
- * robots.txt is enforced for discovery, not only for capture.
+ * The robots check happens before the request, not when the record is written.
  *
- * selection-v1.0.10. The politeness policy states robots.txt is honoured for the whole scan, but
- * the check lived only in `capture`. Discovery browsing was the operator's responsibility, and on
- * the third agency that failed: www.health.govt.nz disallows `/search?`, and two internal-search
- * URLs were fetched and recorded anyway.
+ * selection-v1.0.11, from three defects in v1.0.10.
  *
- * A policy enforced in one command and trusted in another is not enforced. Recording that a path
- * is forbidden remains allowed - the `disallowed` outcome exists for exactly that, and it is a
- * finding about the agency. What is refused is recording a substantive finding drawn from a path
- * robots forbids, because such a record asserts the page was fetched.
+ * The check ran at record time, after the browsing had happened. It could refuse the record but
+ * not the request, so it documented a breach rather than preventing one. A permit is now issued
+ * before navigation and consumed by the record.
+ *
+ * The "NOT NAVIGATED" records still carried `navigatedAt` and were counted in the five-second
+ * pacing, so the raw data asserted a navigation the note denied.
+ *
+ * And every response that was not 2xx was treated as permission. RFC 9309 distinguishes them: a
+ * 4xx means unavailable and access is permitted (2.3.1.3), a 5xx or network failure means
+ * unreachable and complete disallow is assumed (2.3.1.4). The previous test asserted that a
+ * refused connection permits, which is exactly backwards.
  */
-describe('discovery honours robots.txt', () => {
+describe('discovery requires a permit issued before navigation', () => {
   const CAT = 'account-registration';
   let server;
   let origin;
+  let hits;
 
   before(async () => {
     server = createServer((req, res) => {
+      hits.push(req.url);
       if (req.url === '/robots.txt') {
         res.writeHead(200, { 'content-type': 'text/plain' });
-        res.end('User-agent: *\nDisallow: /search?\nDisallow: /private/\n');
+        res.end('User-agent: *\nDisallow: /search?\n');
         return;
       }
       res.writeHead(200, { 'content-type': 'text/html' });
@@ -516,62 +524,146 @@ describe('discovery honours robots.txt', () => {
     await new Promise((r) => server.listen(0, '127.0.0.1', r));
     origin = `http://127.0.0.1:${server.address().port}`;
   });
+  after(() => { server?.closeAllConnections?.(); server?.close(); });
 
-  after(() => {
-    server?.closeAllConnections?.();
-    server?.close();
-  });
+  const preflight = (dir, url, method = 'internal-search') =>
+    run(['preflight-discovery', '--out', dir, '--agency', agency, '--website', `${origin}/`,
+      '--url', url, '--category', CAT, '--set-version', '1', '--method', method]);
 
   const record = (dir, url, outcome, method = 'internal-search') =>
-    run([
-      'discovery', '--out', dir, '--agency', agency, '--website', `${origin}/`, '--url', url,
+    run(['discovery', '--out', dir, '--agency', agency, '--website', `${origin}/`, '--url', url,
       '--method', method, '--outcome', outcome, '--category', CAT,
-      '--set-version', '1', '--navigated-at', '2026-09-25T05:00:00Z',
-    ]);
+      '--set-version', '1', '--navigated-at', '2026-09-25T05:00:00Z']);
 
-  test('a no-candidates outcome on a disallowed path is refused', async () => {
+  test('THE FIX: a disallowed target receives zero requests', async () => {
     await withLog(() => {}, async (dir) => {
-      const r = await record(dir, `${origin}/search?query=register`, 'no-candidates');
-      assert.equal(r.status, 1);
-      assert.match(r.stderr, /robots\.txt disallows/);
-      assert.match(r.stderr, /Disallow: \/search\?/);
-      assert.match(r.stderr, /--outcome disallowed/);
-      const log = JSON.parse(readFileSync(join(dir, 'capture-log.json'), 'utf8'));
-      assert.equal(log.attempts.length, 0, 'nothing may be recorded on the way out');
-    });
-  });
-
-  test('a disallowed outcome on a disallowed path is recorded, being a finding', async () => {
-    await withLog(() => {}, async (dir) => {
-      const r = await record(dir, `${origin}/search?query=register`, 'disallowed');
+      hits = [];
+      const r = await preflight(dir, `${origin}/search?query=register`);
       assert.equal(r.status, 0, r.stderr);
+      // robots.txt only. The target path was never requested.
+      assert.deepEqual(hits, ['/robots.txt'], `unexpected requests: ${JSON.stringify(hits)}`);
+
       const log = JSON.parse(readFileSync(join(dir, 'capture-log.json'), 'utf8'));
-      assert.equal(log.attempts.length, 1);
-      assert.equal(log.attempts[0].outcome, 'disallowed');
+      const a = log.attempts[0];
+      assert.equal(a.outcome, 'disallowed');
+      assert.equal(a.navigationPerformed, false);
+      assert.ok(a.checkedAt);
+      assert.equal(a.navigatedAt, undefined, 'a record that navigated nothing must carry no navigatedAt');
+      assert.equal((log.discoveryPermits ?? []).length, 0, 'a forbidden URL gets no permit');
     });
   });
 
-  test('an allowed path records any outcome as before', async () => {
+  test('a record with no permit is refused', async () => {
     await withLog(() => {}, async (dir) => {
       const r = await record(dir, `${origin}/contact`, 'no-candidates', 'navigation');
-      assert.equal(r.status, 0, r.stderr);
+      assert.equal(r.status, 1);
+      assert.match(r.stderr, /no open navigation permit/);
+      assert.match(r.stderr, /before navigating/);
       const log = JSON.parse(readFileSync(join(dir, 'capture-log.json'), 'utf8'));
-      assert.equal(log.attempts[0].outcome, 'no-candidates');
+      assert.equal(log.attempts.length, 0);
     });
   });
 
-  test('robots.txt itself is always fetchable and recordable', async () => {
+  test('a permit is single-use', async () => {
     await withLog(() => {}, async (dir) => {
-      const r = await record(dir, `${origin}/robots.txt`, 'no-candidates', 'robots');
-      assert.equal(r.status, 0, r.stderr);
+      assert.equal((await preflight(dir, `${origin}/contact`, 'navigation')).status, 0);
+      assert.equal((await record(dir, `${origin}/contact`, 'no-candidates', 'navigation')).status, 0);
+      // A second record for the same URL must not ride the spent permit.
+      const again = await run(['discovery', '--out', dir, '--agency', agency, '--website', `${origin}/`,
+        '--url', `${origin}/contact`, '--method', 'navigation', '--outcome', 'no-candidates',
+        '--category', CAT, '--set-version', '1', '--navigated-at', '2026-09-25T05:02:00Z']);
+      assert.equal(again.status, 1);
+      assert.match(again.stderr, /no open navigation permit/);
     });
   });
 
-  test('a host that serves no robots.txt is treated as permitting, which is standard', async () => {
+  test('a permit is specific to its URL and its round', async () => {
     await withLog(() => {}, async (dir) => {
-      // 403 or 404 on robots.txt means absent, not forbidding - the behaviour Tatai relies on.
-      const r = await record(dir, 'https://127.0.0.1:1/anything', 'unavailable', 'navigation');
+      assert.equal((await preflight(dir, `${origin}/contact`, 'navigation')).status, 0);
+
+      // Different URL, same round.
+      const otherUrl = await record(dir, `${origin}/other`, 'no-candidates', 'navigation');
+      assert.equal(otherUrl.status, 1, 'a permit for one page must not authorise another');
+
+      // Same URL, different round.
+      const otherRound = await run(['discovery', '--out', dir, '--agency', agency, '--website', `${origin}/`,
+        '--url', `${origin}/contact`, '--method', 'navigation', '--outcome', 'no-candidates',
+        '--category', CAT, '--set-version', '2', '--navigated-at', '2026-09-25T05:02:00Z']);
+      assert.equal(otherRound.status, 1, 'a permit for one round must not authorise another');
+    });
+  });
+
+  test('the robots policy is fetched once and reused across CLI calls', async () => {
+    await withLog(() => {}, async (dir) => {
+      hits = [];
+      await preflight(dir, `${origin}/a`, 'navigation');
+      await preflight(dir, `${origin}/b`, 'navigation');
+      await preflight(dir, `${origin}/c`, 'navigation');
+      const robotsRequests = hits.filter((u) => u === '/robots.txt').length;
+      // Three one-shot invocations, one robots request: the per-process cache died with each
+      // process and produced traffic no record described.
+      assert.equal(robotsRequests, 1, `robots.txt requested ${robotsRequests} times`);
+      const log = JSON.parse(readFileSync(join(dir, 'capture-log.json'), 'utf8'));
+      assert.equal(log.robotsChecks.length, 1);
+      assert.equal(log.robotsChecks[0].disposition, 'rules');
+    });
+  });
+
+  test('a not-navigated record does not contribute to navigation pacing', async () => {
+    await withLog(() => {}, async (dir) => {
+      // The disallowed record carries no navigation time, so a navigation recorded immediately
+      // afterwards is not measured against it.
+      assert.equal((await preflight(dir, `${origin}/search?query=x`)).status, 0);
+      assert.equal((await preflight(dir, `${origin}/contact`, 'navigation')).status, 0);
+      const r = await record(dir, `${origin}/contact`, 'no-candidates', 'navigation');
       assert.equal(r.status, 0, r.stderr);
     });
+  });
+});
+
+/**
+ * RFC 9309 distinguishes an unavailable robots.txt from an unreachable one.
+ */
+describe('robots policy follows RFC 9309 status semantics', () => {
+  test('4xx is unavailable: access is permitted', () => {
+    for (const status of [401, 403, 404, 410]) {
+      assert.equal(dispositionForStatus(status), 'allow-all', `HTTP ${status}`);
+      const v = evaluatePolicy({ disposition: 'allow-all', httpStatus: status }, '/anything');
+      assert.equal(v.allowed, true);
+    }
+  });
+
+  test('5xx is unreachable: complete disallow is assumed', () => {
+    for (const status of [500, 502, 503]) {
+      assert.equal(dispositionForStatus(status), 'disallow-all', `HTTP ${status}`);
+      const v = evaluatePolicy({ disposition: 'disallow-all', httpStatus: status }, '/anything');
+      assert.equal(v.allowed, false);
+      assert.match(v.reason, /2\.3\.1\.4/);
+    }
+  });
+
+  test('a network failure is unreachable, not permissive', () => {
+    // The previous test asserted the opposite, and was wrong.
+    assert.equal(dispositionForStatus(null), 'disallow-all');
+    const v = evaluatePolicy({ disposition: 'disallow-all', httpStatus: null }, '/anything');
+    assert.equal(v.allowed, false);
+    assert.match(v.reason, /could not be reached/);
+  });
+
+  test('robots.txt itself stays retrievable even under complete disallow', () => {
+    // Otherwise an origin whose server failed once could never be re-checked.
+    const v = evaluatePolicy({ disposition: 'disallow-all', httpStatus: 503 }, '/robots.txt');
+    assert.equal(v.allowed, true);
+  });
+
+  test('2xx means the file governs, and its rules are applied', () => {
+    assert.equal(dispositionForStatus(200), 'rules');
+    const policy = { disposition: 'rules', httpStatus: 200, body: 'User-agent: *\nDisallow: /search?\n' };
+    assert.equal(evaluatePolicy(policy, '/search?q=1').allowed, false);
+    assert.equal(evaluatePolicy(policy, '/contact').allowed, true);
+  });
+
+  test('Tatai\'s 403 permits, which is why it is recorded as unavailable rather than forbidden', () => {
+    assert.equal(dispositionForStatus(403), 'allow-all');
   });
 });

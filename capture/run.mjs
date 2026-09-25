@@ -45,6 +45,10 @@ const isoUtcish = (v) => typeof v === 'string' && !Number.isNaN(Date.parse(v)) &
 /** The most recent recorded top-level navigation, whatever produced it. */
 function lastNavigation(log) {
   const times = log.attempts
+    // selection-v1.0.11: a record that states no request was made must not contribute a
+    // navigation time. The two `NOT NAVIGATED` search records carried `navigatedAt` and were
+    // counted in the five-second pacing, so the raw data asserted a navigation the note denied.
+    .filter((a) => a.navigationPerformed !== false)
     .map((a) => a.navigatedAt ?? a.capturedAt ?? null)
     .filter(Boolean)
     .map((t) => Date.parse(t))
@@ -101,7 +105,16 @@ function checkAttempt(attempt) {
     // Discovery browsing is not performed by the capture harness, so its pacing cannot be
     // enforced by the pacer. It is recorded instead, and checked against the previous
     // navigation, so a run that went too fast is visible rather than merely promised.
-    if (!isoUtcish(attempt.navigatedAt)) {
+    if (attempt.navigationPerformed === false) {
+      // Nothing was requested, so there is no navigation time to record. It must say when the
+      // policy was checked instead, and must not carry a navigation timestamp at all.
+      if (attempt.navigatedAt !== undefined) {
+        problems.push('a record that performed no navigation must not carry navigatedAt');
+      }
+      if (!isoUtcish(attempt.checkedAt)) {
+        problems.push('a record that performed no navigation needs checkedAt as a UTC timestamp');
+      }
+    } else if (!isoUtcish(attempt.navigatedAt)) {
       problems.push('a discovery record needs navigatedAt as a UTC timestamp');
     }
   }
@@ -1002,3 +1015,66 @@ export function writeDerived({ log, dir, frameSha256, drawOrderSha256, synthetic
 }
 
 export { sha256, recordExamination };
+
+/**
+ * The recorded robots policy for an origin, or null.
+ *
+ * Persisted in the log so that repeated one-shot CLI calls reuse one check instead of issuing a
+ * fresh request each time. Those requests were real traffic that no record described.
+ */
+export function findRobotsCheck(log, origin) {
+  return (log.robotsChecks ?? []).find((c) => c.origin === origin) ?? null;
+}
+
+export function recordRobotsCheck(log, policy) {
+  (log.robotsChecks ??= []);
+  const existing = log.robotsChecks.findIndex((c) => c.origin === policy.origin);
+  const record = { ...policy, id: `r-${String(log.robotsChecks.length + 1).padStart(4, '0')}` };
+  if (existing === -1) log.robotsChecks.push(record);
+  else log.robotsChecks[existing] = { ...record, id: log.robotsChecks[existing].id };
+  return findRobotsCheck(log, policy.origin);
+}
+
+/**
+ * A single-use permission to navigate one URL, for one round.
+ *
+ * The robots check used to happen when the record was written, which is after the browsing. It
+ * could refuse the record but not the request, so it documented a breach rather than preventing
+ * one. A permit is issued before navigation and consumed by the record, which makes the check a
+ * precondition of the traffic instead of a comment on it.
+ *
+ * Scoped to agency, category, round and URL, and usable once: a permit for one page cannot
+ * authorise another, and re-recording requires re-checking.
+ */
+export function issueDiscoveryPermit(log, { agency, category, candidateSetVersion, url, robotsCheckId, reason }) {
+  (log.discoveryPermits ??= []);
+  const permit = {
+    id: `p-${String(log.discoveryPermits.length + 1).padStart(4, '0')}`,
+    agency, category, candidateSetVersion, url, robotsCheckId,
+    reason: reason ?? null,
+    issuedAt: new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'),
+    consumedAt: null,
+  };
+  log.discoveryPermits.push(permit);
+  return permit;
+}
+
+export function findOpenPermit(log, { agency, category, candidateSetVersion, url }) {
+  return (log.discoveryPermits ?? []).find(
+    (p) => p.consumedAt === null && p.agency === agency && p.category === category &&
+      p.candidateSetVersion === candidateSetVersion && p.url === url
+  ) ?? null;
+}
+
+export function consumeDiscoveryPermit(log, { agency, category, candidateSetVersion, url }) {
+  const permit = findOpenPermit(log, { agency, category, candidateSetVersion, url });
+  if (!permit) {
+    throw new Error(
+      `no open navigation permit for ${url} (${agency} / ${category} round ${candidateSetVersion}). ` +
+        'Run `preflight-discovery` for this URL before navigating to it: the robots check must ' +
+        'happen before the request, not when the record is written.'
+    );
+  }
+  permit.consumedAt = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
+  return permit;
+}

@@ -26,8 +26,10 @@ import {
   readLog, writeLog, appendAttempt, writeDerived, ELIGIBILITY_CRITERIA, APPROVAL,
   recordCandidates, lockCandidateSet, categorySettled, approveCandidateSet,
   supersedeCandidateSet, publishProvenance, exhaustAgency, EXHAUSTION_REASON,
-  agenciesAwaitingExhaustion,
+  agenciesAwaitingExhaustion, findRobotsCheck, recordRobotsCheck,
+  issueDiscoveryPermit, consumeDiscoveryPermit, findOpenPermit,
 } from './run.mjs';
+import { fetchRobotsPolicy, evaluatePolicy, DISPOSITION } from './robots-policy.mjs';
 import {
   DISCOVERY_KINDS, DISCOVERY_METHODS, DISCOVERY_OUTCOMES, remainingBudget, canonicalise,
   SEARCH_TERMS, parseDrawOrder, nextWork, isSuperseded, MAX_QUALIFIED_AGENCIES,
@@ -52,6 +54,10 @@ const USAGE = `usage:
                           --reason "<why it was not captured>" --category <c>
                           [--fails <eligibility criterion>]
                           [--supersedes-attempt-id <c-NNNN>]
+  cli-capture.mjs preflight-discovery --out <dir> --agency <name> --website <url> --url <url>
+                          --category <c> --set-version <n> [--method <m>] [--recheck-robots]
+                          (checks robots BEFORE navigating: issues a single-use permit, or
+                           records the disallowed outcome without any request to the target)
   cli-capture.mjs discovery --out <dir> --agency <name> --website <url> --url <url>
                           --method <${DISCOVERY_METHODS.join('|')}>
                           --outcome <${DISCOVERY_OUTCOMES.join('|')}>
@@ -375,29 +381,16 @@ async function doDiscovery() {
   const log = readLog(logPath);
   const url = require_('url');
 
-  // selection-v1.0.10. robots.txt is enforced for DISCOVERY, not only for capture.
-  //
-  // The politeness policy said robots.txt was honoured for the whole scan, but the check lived
-  // only in `capture`. Discovery browsing was the operator's own responsibility, and on the third
-  // agency that failed: www.health.govt.nz disallows `/search?`, and two internal-search URLs
-  // were fetched and recorded anyway. A policy enforced in one command and trusted in another is
-  // not enforced.
-  //
-  // Recording that a path is forbidden is still allowed - that is a finding about the agency, and
-  // the `disallowed` outcome exists for it. What is refused is recording a SUBSTANTIVE finding
-  // obtained from a path robots forbids.
-  const parsedUrl = validateUrl(url);
-  const robotsGroups = await robotsFor(parsedUrl.origin);
-  const verdict = isAllowed(robotsGroups, parsedUrl.pathname + parsedUrl.search, 'chromium');
-  if (!verdict.allowed && outcome !== 'disallowed') {
-    die(
-      `robots.txt disallows ${url} (${verdict.reason}).\n` +
-        `Record it with --outcome disallowed, which is a finding about the agency. A ${outcome} ` +
-        'outcome would mean the page was fetched, and the politeness policy does not permit that.'
-    );
-  }
+  // selection-v1.0.11. The permit is consumed here; the robots check happened BEFORE the
+  // navigation, in `preflight-discovery`. Checking at record time could refuse the record but not
+  // the request, so it documented a breach instead of preventing one.
+  validateUrl(url);
+  const permit = consumeDiscoveryPermit(log, {
+    agency: require_('agency'), category, candidateSetVersion: setVersion, url,
+  });
 
   appendAttempt(log, {
+    permitId: permit.id,
     examinedAt: now(), agency: require_('agency'), website: require_('website'),
     url, status: 'discovery', discoveryKind: kind,
     outcome, category, candidateSetVersion: setVersion,
@@ -574,8 +567,71 @@ function doExhaust() {
   }
 }
 
+/**
+ * Checks the robots policy BEFORE anything is navigated.
+ *
+ * For a permitted URL it writes a single-use permit that `discovery` will consume. For a forbidden
+ * one it writes the `disallowed` record itself, marked `navigationPerformed: false` with a
+ * `checkedAt` rather than a `navigatedAt`, and no request is ever made to the target.
+ *
+ * The policy is fetched once per origin and kept in the log, so running this repeatedly does not
+ * generate a stream of unrecorded robots requests.
+ */
+async function doPreflightDiscovery() {
+  const dir = require_('out');
+  const agency = require_('agency');
+  const website = require_('website');
+  const url = require_('url');
+  const category = require_('category');
+  const setVersion = Number(require_('set-version'));
+  const method = flag('method') ?? 'navigation';
+  if (!DISCOVERY_METHODS.includes(method)) die(`--method must be one of ${DISCOVERY_METHODS.join(', ')}`);
+  if (!CATEGORIES.includes(category)) die(`--category must be one of ${CATEGORIES.join(', ')}`);
+  if (!Number.isInteger(setVersion) || setVersion < 1) die('--set-version must be a positive integer');
+
+  const parsed = validateUrl(url);
+  const logPath = logPathFor(dir);
+  const log = readLog(logPath);
+
+  let check = has('recheck-robots') ? null : findRobotsCheck(log, parsed.origin);
+  let fetched = false;
+  if (!check) {
+    check = recordRobotsCheck(log, await fetchRobotsPolicy(parsed.origin));
+    fetched = true;
+  }
+
+  const verdict = evaluatePolicy(check, parsed.pathname + parsed.search, 'chromium');
+  if (verdict.allowed) {
+    const permit = issueDiscoveryPermit(log, {
+      agency, category, candidateSetVersion: setVersion, url,
+      robotsCheckId: check.id, reason: verdict.reason ?? null,
+    });
+    writeLog(logPath, log);
+    console.log(`permit ${permit.id}: ${url}`);
+    console.log(`robots: ${check.disposition} (HTTP ${check.httpStatus ?? 'unreachable'})${fetched ? ' [fetched]' : ' [reused]'}`);
+    if (verdict.crawlDelay) console.log(`crawl-delay: ${verdict.crawlDelay}s`);
+    return;
+  }
+
+  // Forbidden: record it directly and make no request to the target.
+  appendAttempt(log, {
+    examinedAt: now(), agency, website, url,
+    status: 'discovery', discoveryKind: method, outcome: 'disallowed',
+    category, candidateSetVersion: setVersion,
+    navigationPerformed: false,
+    checkedAt: now(),
+    robotsCheckId: check.id,
+    note: flag('note') ?? `NOT NAVIGATED. ${verdict.reason}`,
+    approval: APPROVAL.APPROVED,
+  });
+  writeLog(logPath, log);
+  writeDerived({ log, dir, frameSha256: flag('frame-sha256'), drawOrderSha256: flag('draw-order-sha256'), synthetic: has('synthetic') });
+  console.log(`disallowed, recorded without navigating: ${url}`);
+  console.log(`reason: ${verdict.reason}`);
+}
+
 const commands = { packet: doPacket, candidates: doCandidates, lock: doLock, 'approve-set': doApproveSet,
-  'supersede-set': doSupersedeSet, publish: doPublish, next: doNext, capture: doCapture, exclude: doExclude, discovery: doDiscovery, budget: doBudget, approve: doApprove, status: doStatus, build: doBuild, exhaust: doExhaust };
+  'supersede-set': doSupersedeSet, publish: doPublish, next: doNext, capture: doCapture, exclude: doExclude, discovery: doDiscovery, budget: doBudget, approve: doApprove, status: doStatus, build: doBuild, exhaust: doExhaust, 'preflight-discovery': doPreflightDiscovery };
 if (!commands[command]) die(USAGE);
 try {
   await commands[command]();

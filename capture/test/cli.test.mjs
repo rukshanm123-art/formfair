@@ -119,8 +119,16 @@ let discoveryTick = 0;
 const lockSet = async (dir, agency, category, urls) => {
   // A set must be supported by the discovery round that produced it.
   const at = new Date(Date.UTC(2026, 8, 24, 0, discoveryTick++ * 2)).toISOString().replace(/\.\d{3}Z$/, 'Z');
+  const discoveryUrl = `${origin}/discovery/${category}/${discoveryTick}`;
+  // selection-v1.0.11: the robots check happens BEFORE the navigation, so a discovery record
+  // needs a permit issued by preflight. The synthetic server serves no robots.txt, which is a
+  // 404 - unavailable, therefore permitted - so a permit is issued.
+  const permit = await run(['preflight-discovery', '--out', dir, '--agency', agency,
+    '--website', origin, '--url', discoveryUrl, '--category', category,
+    '--set-version', '1', '--method', 'navigation']);
+  assert.equal(permit.status, 0, permit.stderr);
   const disc = await run(['discovery', '--out', dir, '--agency', agency, '--website', origin,
-    '--url', `${origin}/discovery/${category}/${discoveryTick}`, '--method', 'navigation',
+    '--url', discoveryUrl, '--method', 'navigation',
     '--outcome', 'candidates-found', '--category', category, '--set-version', '1',
     '--navigated-at', at]);
   assert.equal(disc.status, 0, disc.stderr);
