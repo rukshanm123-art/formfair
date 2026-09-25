@@ -1564,3 +1564,112 @@ describe('the permit lifecycle is ordered and complete', () => {
     assert.equal(p2.closedAt, undefined);
   });
 });
+
+/**
+ * Presence is not validity.
+ *
+ * selection-v1.0.19. The state machine asked whether fields were there, not whether they parsed,
+ * were ordered, or were permitted in that state. So six fabricated states passed with zero
+ * problems: an open permit carrying `accountedBy`, a closure stamped `"not-a-date"`, a closure
+ * dated before its own issuance, an unparseable robots `fetchedAt`, a robots check exactly 24
+ * hours old (which `robotsCheckIsFresh` already treated as expired), and `consumedAt` set to a
+ * string that is not a time.
+ *
+ * A field nobody can parse is not weaker evidence than a missing one. It is a claim that cannot
+ * be checked, which is worse, because it satisfies every test that only asks whether something
+ * is written down.
+ */
+describe('permit fields are valid, ordered and permitted in their state', () => {
+  const CAT = 'account-registration';
+  const T = (h, m = 0) => `2026-09-25T${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:00Z`;
+
+  function ledger({ permit = {}, robots = {}, extra = null } = {}) {
+    const log = emptyLog();
+    log.robotsChecks = [{
+      id: 'r-0001', origin: 'https://w.govt.nz', fetchedAt: T(8), httpStatus: 200,
+      disposition: 'rules', body: '', ...robots,
+    }];
+    log.discoveryPermits = [{
+      id: 'p-0001', agency: 'TPK', category: CAT, candidateSetVersion: 1,
+      url: 'https://w.govt.nz/a', robotsCheckId: 'r-0001', issuedAt: T(9), consumedAt: T(9, 5),
+      ...permit,
+    }];
+    appendAttempt(log, {
+      examinedAt: T(9, 1), agency: 'TPK', website: 'https://w.govt.nz/', url: 'https://w.govt.nz/a',
+      status: 'discovery', discoveryKind: 'navigation', outcome: 'no-candidates', category: CAT,
+      candidateSetVersion: 1, navigatedAt: T(9, 1), approval: 'approved', permitId: 'p-0001',
+    });
+    if (extra) log.discoveryPermits.push(extra);
+    return log;
+  }
+  const openPermit = (over) => ({
+    id: 'p-0002', agency: 'TPK', category: CAT, candidateSetVersion: 1,
+    url: 'https://w.govt.nz/b', robotsCheckId: 'r-0001', issuedAt: T(9), consumedAt: null, ...over,
+  });
+  const problems = (log) => checkPermitLedger(log);
+
+  test('THE GAP: an open permit may not carry accountedBy', () => {
+    const log = ledger({ extra: openPermit({ accountedBy: 'd-0001' }) });
+    assert.ok(problems(log).some((p) => /is open but names d-0001/.test(p)));
+  });
+
+  test('THE GAP: an unparseable closedAt is refused', () => {
+    const log = ledger({ extra: openPermit({
+      closedAt: 'not-a-date', disposition: 'unused', closureId: 'x-0001', closureReason: 'r',
+    }) });
+    assert.ok(problems(log).some((p) => /closedAt "not-a-date", which is not a UTC timestamp/.test(p)));
+  });
+
+  test('THE GAP: a closure dated before its own issuance is refused', () => {
+    const log = ledger({ extra: openPermit({
+      closedAt: T(7), disposition: 'unused', closureId: 'x-0001', closureReason: 'r',
+    }) });
+    assert.ok(problems(log).some((p) => /was closed at .*, before it was issued at/.test(p)));
+  });
+
+  test('THE GAP: an unparseable robots fetchedAt is refused', () => {
+    const log = ledger({ robots: { fetchedAt: 'whenever' } });
+    assert.ok(problems(log).some((p) => /fetchedAt "whenever", which is not a UTC timestamp/.test(p)));
+  });
+
+  test('THE GAP: a robots check exactly 24 hours old is expired', () => {
+    // robotsCheckIsFresh already treated this as expired; the ledger used a strict `>` and did
+    // not. The two now agree at the boundary.
+    const log = ledger({ robots: { fetchedAt: '2026-09-24T09:00:00Z' } });
+    assert.ok(problems(log).some((p) => /more than 24 hours/.test(p)));
+    assert.equal(robotsCheckIsFresh({ fetchedAt: '2026-09-24T09:00:00Z' }, Date.parse(T(9))), false);
+  });
+
+  test('THE GAP: an unparseable consumedAt is refused', () => {
+    const log = ledger({ permit: { consumedAt: 'not-a-date' } });
+    assert.ok(problems(log).some((p) => /consumedAt "not-a-date", which is not a UTC timestamp/.test(p)));
+  });
+
+  test('a closed duplicate-request naming no record is refused', () => {
+    const log = ledger({ extra: openPermit({
+      closedAt: T(9, 30), disposition: 'duplicate-request', closureId: 'x-0001', closureReason: 'r',
+    }) });
+    assert.ok(problems(log).some((p) => /closed duplicate-request but names no discovery record/.test(p)));
+  });
+
+  test('a permit with no issuedAt at all is refused', () => {
+    const log = ledger({ extra: openPermit({ issuedAt: undefined }) });
+    assert.ok(problems(log).some((p) => /has no issuedAt/.test(p)));
+  });
+
+  test('a robots check one second inside the window is accepted', () => {
+    // The boundary is closed on one side only: 24 hours exactly is expired, a second less is not.
+    const log = ledger({ robots: { fetchedAt: '2026-09-24T09:00:01Z' } });
+    assert.deepEqual(problems(log), []);
+  });
+
+  test('a valid open permit, and a valid closed one, both pass', () => {
+    const open = ledger({ extra: openPermit({}) });
+    assert.deepEqual(problems(open), []);
+
+    const closedOk = ledger({ extra: openPermit({
+      closedAt: T(9, 30), disposition: 'unused', closureId: 'x-0001', closureReason: 'not visited',
+    }) });
+    assert.deepEqual(problems(closedOk), []);
+  });
+});

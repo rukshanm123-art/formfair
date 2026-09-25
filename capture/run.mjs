@@ -1424,9 +1424,25 @@ export function checkPermitLedger(log) {
     // navigation predating its own permit, a robots check fetched after the permit it
     // supposedly justified, a robots check older than a day, and a navigation an hour past
     // issuance. Each makes the ledger assert a sequence of events that cannot have happened.
+    // selection-v1.0.19. Presence is not validity. The state machine asked whether fields were
+    // there, not whether they parsed, were ordered, or were permitted in that state - so an open
+    // permit could carry `accountedBy`, a closure could be stamped `"not-a-date"` or dated before
+    // its own issuance, and a robots check could carry an unparseable time. A field nobody can
+    // read is not weaker evidence than a missing one; it is a claim that cannot be checked.
+    const stamp = (value, label, at) => {
+      if (value === undefined || value === null) return null;
+      if (!isoUtcish(value)) {
+        problems.push(`${at} has ${label} ${JSON.stringify(value)}, which is not a UTC timestamp`);
+        return null;
+      }
+      return ms(value);
+    };
+
     for (const permit of allPermits) {
       const where = permit.id;
-      const closed = Boolean(permit.closedAt);
+      const closed = permit.closedAt !== undefined && permit.closedAt !== null;
+      const consumed = permit.consumedAt !== undefined && permit.consumedAt !== null;
+
       if (permit.disposition && !closed) {
         problems.push(`${where} carries disposition ${permit.disposition} but is not closed`);
       }
@@ -1443,22 +1459,39 @@ export function checkPermitLedger(log) {
         if (typeof permit.closureReason !== 'string' || permit.closureReason.trim() === '') {
           problems.push(`${where} is closed without a reason`);
         }
+        if (permit.disposition === PERMIT_DISPOSITIONS.DUPLICATE_REQUEST && !permit.accountedBy) {
+          problems.push(`${where} is closed duplicate-request but names no discovery record`);
+        }
       } else if (permit.closureId || permit.closureReason) {
         problems.push(`${where} is not closed but carries closure fields`);
       }
 
-      const issued = ms(permit.issuedAt);
-      if (issued === null) problems.push(`${where} has no valid issuedAt`);
+      // An open permit is open: nothing about consumption or closure may be attached to it.
+      if (!closed && !consumed && permit.accountedBy) {
+        problems.push(`${where} is open but names ${permit.accountedBy}; an open permit accounts for nothing`);
+      }
+
+      const issued = stamp(permit.issuedAt, 'issuedAt', where);
+      if (permit.issuedAt === undefined || permit.issuedAt === null) {
+        problems.push(`${where} has no issuedAt`);
+      }
+      const closedAt = stamp(permit.closedAt, 'closedAt', where);
+      if (issued !== null && closedAt !== null && closedAt < issued) {
+        problems.push(`${where} was closed at ${permit.closedAt}, before it was issued at ${permit.issuedAt}`);
+      }
 
       const check = (log.robotsChecks ?? []).find((c) => c.id === permit.robotsCheckId);
-      const fetched = check ? ms(check.fetchedAt) : null;
+      const fetched = check ? stamp(check.fetchedAt, `robots check ${check.id} fetchedAt`, where) : null;
+      if (check && (check.fetchedAt === undefined || check.fetchedAt === null)) {
+        problems.push(`${where} names robots check ${check.id}, which has no fetchedAt`);
+      }
       if (issued !== null && fetched !== null) {
         if (fetched > issued) {
           problems.push(
             `${where} was issued at ${permit.issuedAt} but its robots check was fetched later, at ` +
               `${check.fetchedAt}. A permit rests on a policy read before it, not after.`
           );
-        } else if (issued - fetched > ROBOTS_MAX_AGE_MS) {
+        } else if (issued - fetched >= ROBOTS_MAX_AGE_MS) {
           problems.push(
             `${where} rests on a robots check fetched at ${check.fetchedAt}, more than 24 hours ` +
               'before it was issued; RFC 9309 section 2.4 does not support relying on it that long'
@@ -1466,7 +1499,7 @@ export function checkPermitLedger(log) {
         }
       }
 
-      const consumed = ms(permit.consumedAt);
+      const consumedAt = stamp(permit.consumedAt, 'consumedAt', where);
       const record = (citations.get(permit.id) ?? [])[0];
       const navigated = record ? ms(record.navigatedAt) : null;
       if (record) {
@@ -1496,13 +1529,13 @@ export function checkPermitLedger(log) {
           );
         }
       }
-      if (navigated !== null && consumed !== null && consumed < navigated) {
+      if (navigated !== null && consumedAt !== null && consumedAt < navigated) {
         problems.push(
           `${where} was consumed at ${permit.consumedAt}, before ${record.id} navigated at ` +
             `${record.navigatedAt}`
         );
       }
-      if (issued !== null && consumed !== null && consumed < issued) {
+      if (issued !== null && consumedAt !== null && consumedAt < issued) {
         problems.push(`${where} was consumed at ${permit.consumedAt}, before it was issued`);
       }
     }

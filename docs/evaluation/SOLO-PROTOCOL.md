@@ -1825,3 +1825,39 @@ Ministry set and its four unassessed candidates. Three earlier fixtures mixed a 
 fixed past timestamps, since `issueDiscoveryPermit` stamps the present; they now pin the whole
 chain to one instant. That was the fixtures being impossible in precisely the way the new rule
 describes, and they were corrected rather than the rule loosened.
+
+## Amendment 22: presence is not validity
+
+**Dated 25 September 2026.** `selection-v1.0.19`. Moves no earlier tag. Nothing is redone.
+
+The state machine asked whether fields were *there*, not whether they parsed, were ordered, or
+were permitted in that state. Six fabricated permits passed with zero problems:
+
+- an open permit carrying `accountedBy`;
+- a closure stamped `closedAt: "not-a-date"`;
+- a closure dated before its own issuance;
+- an unparseable robots `fetchedAt`;
+- a robots check exactly 24 hours old, which `robotsCheckIsFresh` already treated as expired
+  while the ledger's strict `>` did not;
+- `consumedAt` set to a string that is not a time.
+
+A field nobody can parse is not weaker evidence than a missing one. It is worse: a missing field
+fails an existence check, whereas an unparseable one satisfies every test that asks only whether
+something was written down. Four of these six are of that kind, and the checks added in
+Amendments 18 through 21 all read as "is it present" rather than "is it true".
+
+One rule now covers the lifecycle: every timestamp must be a valid UTC timestamp; an open permit
+carries no consumption or closure field, `accountedBy` included; a consumed permit needs a valid
+`consumedAt`; a closed permit needs a valid `closedAt` not earlier than its `issuedAt`; a
+closed-unused permit names no record and a closed-duplicate-request permit must name one; and
+robots freshness expires at `age >= ROBOTS_MAX_AGE_MS`, matching `robotsCheckIsFresh` exactly
+rather than approximately.
+
+That last one is worth stating plainly: two functions disagreed about the same boundary by one
+instant, and the disagreement was invisible because nothing compared them. A test now asserts
+both at 24 hours exactly and at one second inside the window.
+
+Ten tests, six being the reproduced states. The capture package has 249 tests.
+
+The live ledger passes unchanged — 51 permits, **0 problems** — with only the pending Ministry set
+and its four unassessed candidates outstanding.
