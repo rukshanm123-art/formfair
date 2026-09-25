@@ -898,15 +898,45 @@ the page directs kaitono to contact a regional office, which supplies the templa
 completed proposal is returned by email or post. A search for `application form` across the
 site returns no document link of any kind.
 
-So this agency's nil result is substantively correct and there is no document candidate to
-record and exclude — but the round-1 evidence for it was wrong, and round 2 replaces it with an
-accurate account that names the correction explicitly. The distinction now visible in the log
-is exactly the one the first error destroyed: the second agency publishes an application form
-that is ineligible, and Te Puni Kōkiri publishes none.
+**That finding was itself incomplete, and the conclusion drawn from it was wrong.** Round 2
+concluded that this agency publishes no application form at all and therefore has no document
+candidate to record and exclude. That conclusion rested on inspecting one of its four frame
+websites. `www.tupu.nz` does publish downloadable application forms, and round 3 records them:
 
-The selected Te Puni Kōkiri page is unaffected. Its capture came from enquiry or contact, and
-the category priority order is satisfied because service application yielded no *eligible*
-form in either version.
+- `MLC Form 1 General Application` and `MLC Document A1 Request for waiver`, both PDFs hosted
+  on `www.tupu.nz` itself;
+- `MLC Form 36`, `MLC Form 37` and `MLC Document B1`, PDFs on `maorilandcourt.govt.nz` that
+  tupu links directly — admitted by criterion two precisely because a directly linked
+  third-party form is in scope.
+
+All five return HTTP 200 with content type `application/pdf`, confirmed by request rather than
+inferred from the extension, and `maorilandcourt.govt.nz/robots.txt` disallows only `/admin/`,
+`/Security/`, `/installerTest/`, `/interactive/` and the two search paths, so `/assets/` is
+permitted. Two further DOCX files on the same tupu page — a newspaper advertisement template
+and a trustee CV template — are *not* application forms and are recorded as inspected and not
+taken, rather than filtered out in silence.
+
+The round-1 note for tupu had called all eleven of its application-related pages "guidance
+rather than forms". That was wrong in the same way the Māori Development Fund note was wrong,
+and for the same reason: a document that *is* the application was read as material *about* an
+application.
+
+So the corrected finding is not that one agency publishes an ineligible form and the other
+publishes none. **Both publish application forms, and every one of them is a document rather
+than a web form.** That is a stronger and more interesting result than either version of the
+error allowed, and it is now visible in the log rather than collapsed into a nil.
+
+The selected Te Puni Kōkiri page is still unaffected. Its capture came from enquiry or contact,
+and the category priority order is satisfied because service application yields no *eligible*
+form in any version: five candidates, each expected to be excluded under criterion five, with
+the exclusions recorded as outcomes rather than assumed here.
+
+The set is at the per-category bound of five, so nothing was dropped beyond it. Two of the five
+— Document B1, a trustee's consent, and Document A1, a request for waiver — are supporting
+documents within an application bundle rather than application forms in the narrowest sense.
+They are recorded as candidates deliberately: each is a form a natural person completes and
+signs, the judgement is arguable either way, and the place to record an arguable judgement is
+the candidate set and its outcome, not a discovery note that quietly omits them.
 
 ### The limitation this does not support
 
