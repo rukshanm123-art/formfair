@@ -426,3 +426,60 @@ describe('exclude records the criterion that failed', () => {
     });
   });
 });
+
+/**
+ * `status` must not report nothing outstanding while something is.
+ *
+ * capture-v1.0.4. It counted pending ATTEMPTS only, so it printed `pending approval 0` at the
+ * exact moment a locked candidate set was waiting for approval - the same attempts-versus-sets
+ * confusion that let the corpus draft build while two corrections were mid-flight. An operator
+ * reading that line would conclude the scan was clear.
+ */
+describe('status separates attempt approvals from candidate-set approvals', () => {
+  const CAT = 'account-registration';
+
+  test('a pending set is reported, and not folded into the attempt count', async () => {
+    await withLog(
+      (log) => { prepareSet(log, agency, CAT, ['https://w.govt.nz/a'], { approve: false }); },
+      async (dir) => {
+        const r = await run(['status', '--out', dir]);
+        assert.equal(r.status, 0, r.stderr);
+        assert.match(r.stdout, /pending candidate-set approvals 1/);
+        assert.match(r.stdout, /pending attempt approvals\s+0/);
+        assert.match(r.stdout, new RegExp(`${CAT} v1`));
+        assert.match(r.stdout, /1 item\(s\) outstanding; the corpus draft is withheld/);
+        // The old single line must not be what reports this state.
+        assert.doesNotMatch(r.stdout, /^pending approval 0$/m);
+      }
+    );
+  });
+
+  test('a rejected set awaiting supersession is reported', async () => {
+    await withLog(
+      (log) => {
+        prepareSet(log, agency, CAT, ['https://w.govt.nz/a'], { approve: false });
+        log.candidateSets[`${agency}\u0000${CAT}`].approval = APPROVAL.REJECTED;
+      },
+      async (dir) => {
+        const r = await run(['status', '--out', dir]);
+        assert.match(r.stdout, /rejected candidate sets awaiting supersession 1/);
+        assert.match(r.stdout, /outstanding; the corpus draft is withheld/);
+      }
+    );
+  });
+
+  test('an all-clear log says nothing is outstanding', async () => {
+    await withLog(
+      (log) => { prepareSet(log, agency, CAT, ['https://w.govt.nz/a']); },
+      async (dir) => {
+        // The one locked candidate still needs an outcome, but no APPROVAL is outstanding -
+        // which is what this line is about.
+        const log = JSON.parse(readFileSync(join(dir, 'capture-log.json'), 'utf8'));
+        for (const a of log.attempts) a.approval = APPROVAL.APPROVED;
+        writeFileSync(join(dir, 'capture-log.json'), `${JSON.stringify(log, null, 2)}\n`, 'utf8');
+        const r = await run(['status', '--out', dir]);
+        assert.match(r.stdout, /nothing outstanding; the corpus draft is not withheld/);
+      }
+    );
+  });
+});

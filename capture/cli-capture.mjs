@@ -29,7 +29,7 @@ import {
 } from './run.mjs';
 import {
   DISCOVERY_KINDS, DISCOVERY_METHODS, DISCOVERY_OUTCOMES, remainingBudget, canonicalise,
-  SEARCH_TERMS, parseDrawOrder, nextWork,
+  SEARCH_TERMS, parseDrawOrder, nextWork, isSuperseded, MAX_QUALIFIED_AGENCIES,
 } from './selection.mjs';
 import { readFileSync as readFile } from 'node:fs';
 import { buildPacket, renderPacket } from './packet.mjs';
@@ -296,13 +296,44 @@ function doApprove() {
 function doStatus() {
   const log = readLog(logPathFor(require_('out')));
   const by = (p) => log.attempts.filter(p).length;
+  const sets = Object.values(log.candidateSets ?? {});
+
   console.log(`attempts        ${log.attempts.length}`);
   console.log(`  captured      ${by((a) => a.status === 'captured')}`);
   console.log(`  excluded      ${by((a) => a.status === 'excluded')}`);
   console.log(`  failed        ${by((a) => a.status === 'failed')}`);
-  console.log(`pending approval ${by((a) => a.approval === APPROVAL.PENDING)}`);
+
+  // capture-v1.0.4. Attempts and candidate SETS are approved separately, and reporting one
+  // number for "pending approval" printed `0` while a locked set was waiting - which reads as
+  // nothing outstanding at the exact moment something is. It is the same attempts-versus-sets
+  // confusion that let the corpus draft build while two corrections were mid-flight.
+  const pendingAttempts = by((a) => a.approval === APPROVAL.PENDING);
+  const danglingRejections = log.attempts.filter(
+    (a) => a.status !== 'discovery' && a.approval === APPROVAL.REJECTED && !isSuperseded(log, a)
+  ).length;
+  const pendingSets = sets.filter((s) => s.approval === APPROVAL.PENDING);
+  const rejectedSets = sets.filter((s) => s.approval === APPROVAL.REJECTED);
+
+  console.log(`pending attempt approvals      ${pendingAttempts}`);
+  console.log(`pending candidate-set approvals ${pendingSets.length}`);
+  for (const s of pendingSets) console.log(`  - ${s.agency} / ${s.category} v${s.version}`);
+  if (rejectedSets.length) {
+    console.log(`rejected candidate sets awaiting supersession ${rejectedSets.length}`);
+    for (const s of rejectedSets) console.log(`  - ${s.agency} / ${s.category} v${s.version}`);
+  }
+  if (danglingRejections) {
+    console.log(`rejected attempts not yet superseded ${danglingRejections}`);
+  }
+
   const approvedCaptures = by((a) => a.status === 'captured' && a.approval === APPROVAL.APPROVED);
-  console.log(`approved captures ${approvedCaptures} of a target of 40`);
+  console.log(`approved captures ${approvedCaptures} of a target of ${MAX_QUALIFIED_AGENCIES}`);
+
+  const blocking = pendingAttempts + pendingSets.length + rejectedSets.length + danglingRejections;
+  console.log(
+    blocking === 0
+      ? 'nothing outstanding; the corpus draft is not withheld'
+      : `${blocking} item(s) outstanding; the corpus draft is withheld until each is resolved`
+  );
 }
 
 function doBuild() {

@@ -24,6 +24,10 @@ export function addDiscovery(log, { agency, category, version = 1, url, method =
     url: url ?? `https://w.govt.nz/discovery/${encodeURIComponent(agency)}/${category}/v${version}/${tick}`,
     status: 'discovery', discoveryKind: method, outcome, category,
     candidateSetVersion: version, navigatedAt: at,
+    // Matches the CLI, which records discovery as approved: a page inspected to find links is
+    // not a judgement to approve. The helper left it pending, so fixtures diverged from the
+    // production path and every test had to work around a state no real log contains.
+    approval: 'approved',
   });
   return log.attempts.at(-1);
 }

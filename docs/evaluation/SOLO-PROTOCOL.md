@@ -996,3 +996,77 @@ outstanding, and that a draft *does* build once every set is approved and every 
 assessed. One earlier test was corrected rather than the rule relaxed: it had used a dangling
 rejected attempt as a device to reach the category-ordering guard, which the new refusal now
 intercepts, so it supersedes the rejection to get there. The capture package has 146 tests.
+
+## Amendment 8: structured exclusions, and the order in which they were recorded
+
+**Dated 25 September 2026.** `capture-v1.0.4`. Moves no earlier tag.
+
+### Why an exclusion now names its criterion
+
+The first document candidates in the scan — nine PDF and DOCX application forms across the
+first two agencies — all fail for the same reason: they are not HTML. Recorded only as a
+sentence in `exclusionReason`, that would make *"how many candidates failed criterion five"* a
+question the log cannot answer, although the scan's document-versus-web-form finding rests on
+exactly that count. `capturePage` already recorded `publiclyReachableWithoutSigningIn: false`
+structurally when it detected a blocking control; an exclusion had no equivalent.
+
+`exclude --fails <criterion>` sets the named criterion to `false` and leaves the other four
+`null`, because an exclusion establishes one thing and not five. The criterion is validated
+against the frozen list, and the flag is optional: a robots exclusion turns on no eligibility
+criterion at all. `exclude` also now accepts `--supersedes-attempt-id`, so a rejected exclusion
+is corrected the same way a rejected capture is.
+
+### The order of events, stated plainly
+
+The tooling change and the data it produced are recorded here in sequence, because the change
+landed between two tags and the data was written in the gap:
+
+1. `selection-v1.0.7` was tagged at `4b399ca`.
+2. `d5503bd` corrected the Te Puni Kōkiri finding in this document.
+3. `803dd29` added `exclude --fails` with three tests, and was pushed. CI passed on all eight
+   jobs, including the dependency audit, and the capture package passed 149 of 149.
+4. **The nine structured criterion-five exclusions (`c-0125`–`c-0133`) were recorded using
+   committed, CI-green `803dd29`, before any tag pointed at it.** They were then approved.
+5. This amendment and the `status` correction below were written, and the result tagged
+   `capture-v1.0.4`.
+
+Step 4 is the one worth being explicit about. The code that produced those nine records was
+committed, pushed and tested at the time it ran, and the commit is reachable from
+`capture-v1.0.4` — but no tag existed when the records were written. Nothing needs redoing on
+that account, and the sequence is written down rather than left to be inferred from
+timestamps.
+
+### `status` reported nothing outstanding while something was
+
+`status` counted pending *attempts* only, so it printed `pending approval 0` at the exact moment
+a locked candidate set was waiting for approval. That is the same attempts-versus-sets confusion
+that let the corpus draft build while two corrections were in flight, and an operator reading
+that line would have concluded the scan was clear.
+
+It now reports pending attempt approvals and pending candidate-set approvals separately, names
+each pending set, lists rejected sets awaiting supersession and rejected attempts not yet
+superseded, and closes with whether the corpus draft is withheld. Three tests.
+
+A test-fixture divergence was fixed in the same change: the CLI records a discovery record as
+approved — a page inspected to find links is not a judgement to approve — but the shared test
+helper left it pending, so fixtures carried a state no real log contains and individual tests
+worked around it. The helper now matches the CLI. The capture package has 152 tests.
+
+### One interpretation, held consistently for the rest of the scan
+
+Criterion two was misread once already, and the reasoning is fixed here so it is not
+re-derived per agency:
+
+- **External ownership alone never excludes a form.** A form on another organisation's host is
+  eligible if it is reached from a website listed for the agency.
+- **A directly linked or embedded third-party form, relevant to the category, is in scope**, and
+  both the agency URL and the final form host are recorded.
+- **A link to a home page or a directory index is not a direct link to a form**, and discovery
+  does not crawl outward from one.
+
+The third point is what excludes the 32 crisis-support organisations linked from the second
+agency's contact page: every link targets an organisation home page or a help-finder index, so
+there is no directly linked form to admit. That reason is sufficient on its own. The note on
+that record also observes that those are other organisations' support channels rather than the
+agency's own enquiry channel; **that observation is not an exclusion rule and must not be used
+as one.** Where the two could diverge, the direct-link test governs.
