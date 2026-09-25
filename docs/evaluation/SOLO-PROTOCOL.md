@@ -249,6 +249,26 @@ two runs of the same page incomparable. No code path types text or clicks a subm
 control, and a test asserts from the captured markup itself that no submit, input or
 keydown event occurred during capture.
 
+> **Deviation, 25 September 2026.** This clause was breached during the third agency's first
+> discovery round, and the breach is recorded here beside the rule rather than only in an
+> amendment. `www.health.govt.nz/robots.txt` disallows `/search?`, and four internal-search URLs
+> on that host were fetched: `?query=register` and `?query=sign%20up`, which were recorded, and an
+> earlier `?keywords=` pair fetched during a wrong-parameter attempt and never recorded. Six
+> requests were made across those four URLs, in the browser and again by the recording script.
+>
+> The cause was structural, not a lapse of attention: `robots.txt` was enforced only inside the
+> `capture` command, while discovery browsing relied on the operator to remember. A policy
+> enforced in one command and trusted in another is not enforced. From `selection-v1.0.10` the
+> `discovery` command fetches and checks `robots.txt` itself and refuses to record any outcome
+> other than `disallowed` for a forbidden path, because a substantive outcome asserts the page was
+> retrieved.
+>
+> Round 1 is preserved in full, rejected, with its reason and its observed results intact — those
+> two search result counts are excluded from round 2's evidence, and round 2 records internal
+> search on that host as `disallowed`, not performed. They cannot be unseen, and this note is the
+> disclosure rather than a claim that they were discarded. The Ministry search endpoints are not
+> accessed again.
+
 **Politeness policy**, which this protocol did not previously state and which is now part
 of the artefact: one capture at a time; at least five seconds between top-level
 navigations; `robots.txt` honoured, with a disallowed path recorded as excluded and never
@@ -1353,3 +1373,68 @@ tests inherited the assumption from the code. Where a gate cannot be exercised e
 official seal cannot be, before the corpus exists — that inheritance goes unchallenged, so the
 compensating discipline is to test the parts that *can* run against real layouts and real
 artefacts, not against fixtures shaped to agree.
+
+## Amendment 13: robots.txt was enforced in one command and trusted in another
+
+**Dated 25 September 2026.** `selection-v1.0.10`. Moves no earlier tag. A deviation note is also
+recorded beside the politeness clause itself, so a reader of the rule sees the breach without
+having to reach this amendment.
+
+### What happened
+
+The third agency, the Ministry of Health, has thirteen frame websites. Its main site's
+`robots.txt` disallows `/search?`. During the first discovery round four internal-search URLs on
+that host were fetched anyway — `?query=register` and `?query=sign%20up`, both recorded, and an
+earlier `?keywords=register` and `?keywords=sign+up` pair fetched while establishing which
+parameter the search actually used, and never recorded at all. Six requests across four forbidden
+URLs.
+
+The review that caught it identified two; auditing every URL touched for that agency against the
+project's own `isAllowed` found four. The unrecorded pair is the part worth dwelling on: they left
+no trace in the log, so nothing but that audit would have surfaced them.
+
+A separate defect in the same round: Tātai's `robots.txt` and its sitemap were both inspected, and
+only the robots inspection was recorded. Two inspections, one record, which understates what was
+examined.
+
+### Why it happened
+
+`robots.txt` was checked inside `doCapture` and nowhere else. Discovery browsing happens outside
+the capture harness — that is already acknowledged in Amendment 3, which added recorded pacing for
+exactly that reason — but the robots half of the same problem was left to the operator to
+remember. It held for two agencies and failed on the third, on the first site large enough to
+disallow its own search endpoint.
+
+This is the same shape as the defects in the sealer: a rule stated once and enforced in one place,
+with every other path trusted to comply.
+
+### The change
+
+**`discovery` fetches and checks `robots.txt` itself.** A path robots forbids may still be
+recorded — `disallowed` is an outcome precisely because a forbidden method is a finding about the
+agency — but any other outcome is refused, because `no-candidates` or `unavailable` asserts that
+the page was retrieved. The refusal names the matching rule and tells the operator which outcome
+to use.
+
+An unreachable `robots.txt` is treated as absent, which is the standard reading and the behaviour
+Tātai depends on: that host returns 403 to a plain request for both its robots file and its
+sitemap.
+
+Five tests: a substantive outcome on a disallowed path is refused with nothing written; a
+`disallowed` outcome on the same path is recorded; an allowed path is unaffected; `robots.txt`
+itself is always fetchable; and a host serving no robots file permits. The capture package has 171
+tests.
+
+### The record as it stands
+
+Round 1 is preserved, rejected, with its reason naming all four disallowed URLs and the structural
+cause. Round 2 covers the same thirteen frame websites through ten hosts in twenty-six
+inspections, records internal search on `www.health.govt.nz` as `disallowed` and **not navigated**,
+and records Tātai's robots file and sitemap as two separate `unavailable` inspections. The nil
+conclusion is unchanged, and was never in doubt: the main site's only account registration path is
+robots-disallowed, the Citizen Space hub has no such path at all, and the four Shiny dashboards
+share a host that disallows everything.
+
+The two search result counts observed in round 1 are excluded from round 2's evidence. They are
+not claimed to be forgotten. The distinction matters because the nil finding does not rest on
+them: it rests on the disallowed registration path and on inspections that were permitted.

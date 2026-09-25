@@ -362,7 +362,7 @@ function doBuild() {
   console.log(r.draftHeld ? `draft held: ${r.draftHeld}` : `draft:  ${r.draftPath}`);
 }
 
-function doDiscovery() {
+async function doDiscovery() {
   const dir = require_('out');
   const kind = flag('method') ?? require_('kind');
   if (!DISCOVERY_METHODS.includes(kind)) die(`--method must be one of ${DISCOVERY_METHODS.join(', ')}`);
@@ -373,9 +373,33 @@ function doDiscovery() {
   if (!Number.isInteger(setVersion) || setVersion < 1) die('--set-version must be a positive integer');
   const logPath = logPathFor(dir);
   const log = readLog(logPath);
+  const url = require_('url');
+
+  // selection-v1.0.10. robots.txt is enforced for DISCOVERY, not only for capture.
+  //
+  // The politeness policy said robots.txt was honoured for the whole scan, but the check lived
+  // only in `capture`. Discovery browsing was the operator's own responsibility, and on the third
+  // agency that failed: www.health.govt.nz disallows `/search?`, and two internal-search URLs
+  // were fetched and recorded anyway. A policy enforced in one command and trusted in another is
+  // not enforced.
+  //
+  // Recording that a path is forbidden is still allowed - that is a finding about the agency, and
+  // the `disallowed` outcome exists for it. What is refused is recording a SUBSTANTIVE finding
+  // obtained from a path robots forbids.
+  const parsedUrl = validateUrl(url);
+  const robotsGroups = await robotsFor(parsedUrl.origin);
+  const verdict = isAllowed(robotsGroups, parsedUrl.pathname + parsedUrl.search, 'chromium');
+  if (!verdict.allowed && outcome !== 'disallowed') {
+    die(
+      `robots.txt disallows ${url} (${verdict.reason}).\n` +
+        `Record it with --outcome disallowed, which is a finding about the agency. A ${outcome} ` +
+        'outcome would mean the page was fetched, and the politeness policy does not permit that.'
+    );
+  }
+
   appendAttempt(log, {
     examinedAt: now(), agency: require_('agency'), website: require_('website'),
-    url: require_('url'), status: 'discovery', discoveryKind: kind,
+    url, status: 'discovery', discoveryKind: kind,
     outcome, category, candidateSetVersion: setVersion,
     // Discovery browsing happens outside the capture harness, so its navigation time is
     // recorded and checked against the previous one rather than paced by the pacer.

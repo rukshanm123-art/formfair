@@ -7,9 +7,10 @@
  * command used to decide what to do next must not crash while deciding.
  */
 
-import { test, describe } from 'node:test';
+import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import { createServer } from 'node:http';
 import { mkdtempSync, rmSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -481,5 +482,96 @@ describe('status separates attempt approvals from candidate-set approvals', () =
         assert.match(r.stdout, /nothing outstanding; the corpus draft is not withheld/);
       }
     );
+  });
+});
+
+/**
+ * robots.txt is enforced for discovery, not only for capture.
+ *
+ * selection-v1.0.10. The politeness policy states robots.txt is honoured for the whole scan, but
+ * the check lived only in `capture`. Discovery browsing was the operator's responsibility, and on
+ * the third agency that failed: www.health.govt.nz disallows `/search?`, and two internal-search
+ * URLs were fetched and recorded anyway.
+ *
+ * A policy enforced in one command and trusted in another is not enforced. Recording that a path
+ * is forbidden remains allowed - the `disallowed` outcome exists for exactly that, and it is a
+ * finding about the agency. What is refused is recording a substantive finding drawn from a path
+ * robots forbids, because such a record asserts the page was fetched.
+ */
+describe('discovery honours robots.txt', () => {
+  const CAT = 'account-registration';
+  let server;
+  let origin;
+
+  before(async () => {
+    server = createServer((req, res) => {
+      if (req.url === '/robots.txt') {
+        res.writeHead(200, { 'content-type': 'text/plain' });
+        res.end('User-agent: *\nDisallow: /search?\nDisallow: /private/\n');
+        return;
+      }
+      res.writeHead(200, { 'content-type': 'text/html' });
+      res.end('<html><body>ok</body></html>');
+    });
+    await new Promise((r) => server.listen(0, '127.0.0.1', r));
+    origin = `http://127.0.0.1:${server.address().port}`;
+  });
+
+  after(() => {
+    server?.closeAllConnections?.();
+    server?.close();
+  });
+
+  const record = (dir, url, outcome, method = 'internal-search') =>
+    run([
+      'discovery', '--out', dir, '--agency', agency, '--website', `${origin}/`, '--url', url,
+      '--method', method, '--outcome', outcome, '--category', CAT,
+      '--set-version', '1', '--navigated-at', '2026-09-25T05:00:00Z',
+    ]);
+
+  test('a no-candidates outcome on a disallowed path is refused', async () => {
+    await withLog(() => {}, async (dir) => {
+      const r = await record(dir, `${origin}/search?query=register`, 'no-candidates');
+      assert.equal(r.status, 1);
+      assert.match(r.stderr, /robots\.txt disallows/);
+      assert.match(r.stderr, /Disallow: \/search\?/);
+      assert.match(r.stderr, /--outcome disallowed/);
+      const log = JSON.parse(readFileSync(join(dir, 'capture-log.json'), 'utf8'));
+      assert.equal(log.attempts.length, 0, 'nothing may be recorded on the way out');
+    });
+  });
+
+  test('a disallowed outcome on a disallowed path is recorded, being a finding', async () => {
+    await withLog(() => {}, async (dir) => {
+      const r = await record(dir, `${origin}/search?query=register`, 'disallowed');
+      assert.equal(r.status, 0, r.stderr);
+      const log = JSON.parse(readFileSync(join(dir, 'capture-log.json'), 'utf8'));
+      assert.equal(log.attempts.length, 1);
+      assert.equal(log.attempts[0].outcome, 'disallowed');
+    });
+  });
+
+  test('an allowed path records any outcome as before', async () => {
+    await withLog(() => {}, async (dir) => {
+      const r = await record(dir, `${origin}/contact`, 'no-candidates', 'navigation');
+      assert.equal(r.status, 0, r.stderr);
+      const log = JSON.parse(readFileSync(join(dir, 'capture-log.json'), 'utf8'));
+      assert.equal(log.attempts[0].outcome, 'no-candidates');
+    });
+  });
+
+  test('robots.txt itself is always fetchable and recordable', async () => {
+    await withLog(() => {}, async (dir) => {
+      const r = await record(dir, `${origin}/robots.txt`, 'no-candidates', 'robots');
+      assert.equal(r.status, 0, r.stderr);
+    });
+  });
+
+  test('a host that serves no robots.txt is treated as permitting, which is standard', async () => {
+    await withLog(() => {}, async (dir) => {
+      // 403 or 404 on robots.txt means absent, not forbidding - the behaviour Tatai relies on.
+      const r = await record(dir, 'https://127.0.0.1:1/anything', 'unavailable', 'navigation');
+      assert.equal(r.status, 0, r.stderr);
+    });
   });
 });
