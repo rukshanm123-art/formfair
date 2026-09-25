@@ -846,6 +846,10 @@ export function deriveDraft(log, { frameSha256, drawOrderSha256, selectionLedger
         unresolved.map((r) => `${r.agency} / ${r.category} v${r.version} (${r.records} records: ${r.reason})`).join('; ')
     );
   }
+  const ledgerProblems = checkPermitLedger(log);
+  if (ledgerProblems.length) {
+    throw new Error(`the permit ledger is inconsistent:\n  ${ledgerProblems.join('\n  ')}`);
+  }
   const openPermits = openDiscoveryPermits(log);
   if (openPermits.length) {
     throw new Error(
@@ -983,6 +987,12 @@ export function deriveDraft(log, { frameSha256, drawOrderSha256, selectionLedger
  * a captured page.
  */
 export function publishProvenance(log, { to }) {
+  const ledgerProblems = checkPermitLedger(log);
+  if (ledgerProblems.length) {
+    throw new Error(
+      `the permit ledger is inconsistent and must not be published:\n  ${ledgerProblems.join('\n  ')}`
+    );
+  }
   const dir = resolve(to);
   mkdirSync(dir, { recursive: true });
   const ledgerPath = join(dir, 'selection-ledger.csv');
@@ -1314,11 +1324,19 @@ export function closeDiscoveryPermit(log, { permitId, disposition, reason, accou
     throw new Error('an unused closure names no discovery record: nothing was requested under it');
   }
 
-  permit.closedAt = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
-  permit.disposition = disposition;
-  permit.closureReason = reason;
-  permit.accountedBy = accountedBy;
-  permit.closureId = `x-${String((log.discoveryPermits ?? []).filter((p) => p.closedAt).length).padStart(4, '0')}`;
+  const closedAt = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
+  const closureId = `x-${String((log.discoveryPermits ?? []).filter((p) => p.closedAt).length + 1).padStart(4, '0')}`;
+  Object.assign(permit, { closedAt, disposition, closureReason: reason, accountedBy, closureId });
+
+  // Validated after assignment so the ledger is checked in the state it would be left in, and
+  // rolled back entirely if it does not hold.
+  const problems = checkPermitLedger(log, { only: permit.id });
+  if (problems.length) {
+    for (const key of ['closedAt', 'disposition', 'closureReason', 'accountedBy', 'closureId']) {
+      delete permit[key];
+    }
+    throw new Error(`the closure would leave the permit ledger inconsistent:\n  ${problems.join('\n  ')}`);
+  }
   return permit;
 }
 
@@ -1381,4 +1399,85 @@ export function reopenCandidateSet(log, { agency, category, reason }) {
   });
   set.lockedAt = null;
   return set;
+}
+
+/**
+ * The permit ledger must describe traffic that actually happened.
+ *
+ * selection-v1.0.15. `closeDiscoveryPermit` checked that the named record existed and matched the
+ * permit's agency, category, round and URL — and nothing else. A record carrying
+ * `navigationPerformed: false` was therefore accepted as evidence that a request had been made,
+ * and the audit then reported an authorised network request whose own named evidence said no
+ * navigation occurred. The corpus gate checked only for OPEN permits, so the fabricated state
+ * escaped the final gate too.
+ *
+ * The rule the checks were missing: a `duplicate-request` closure asserts that a second request
+ * was made and that an existing inspection accounts for it. That inspection must therefore be a
+ * real navigation, recorded under its own consumed permit, and that permit must be a different
+ * one covering the same scope — otherwise the closure is not a duplicate of anything.
+ *
+ * Returns problems rather than throwing, so every caller can report all of them at once, and is
+ * called from the closure itself, from `deriveDraft` and from `publishProvenance`: a rule enforced
+ * where a value is written but not where it is trusted is the defect this scan keeps rediscovering.
+ */
+export function checkPermitLedger(log, { only = null } = {}) {
+  const problems = [];
+  const permits = (log.discoveryPermits ?? []).filter((p) => (only ? p.id === only : true));
+  const byId = new Map(log.attempts.map((a) => [a.id, a]));
+
+  for (const permit of permits) {
+    if (permit.consumedAt && permit.closedAt) {
+      problems.push(`${permit.id} is both consumed and closed`);
+    }
+    if (permit.disposition === PERMIT_DISPOSITIONS.UNUSED && permit.accountedBy) {
+      problems.push(`${permit.id} is closed unused but names ${permit.accountedBy}`);
+    }
+    if (permit.disposition !== PERMIT_DISPOSITIONS.DUPLICATE_REQUEST) continue;
+
+    const where = `${permit.id} (duplicate-request)`;
+    const record = byId.get(permit.accountedBy);
+    if (!record) {
+      problems.push(`${where} names ${permit.accountedBy}, which is not in the log`);
+      continue;
+    }
+    if (record.status !== 'discovery') {
+      problems.push(`${where} names ${record.id}, a ${record.status} attempt`);
+      continue;
+    }
+    // The evidence must be a navigation. A record that states no request was made cannot
+    // account for a request having been made.
+    if (record.navigationPerformed === false) {
+      problems.push(
+        `${where} names ${record.id}, which records navigationPerformed: false. A closure ` +
+          'asserting a duplicate request cannot be evidenced by a record stating no request occurred.'
+      );
+    }
+    if (!record.navigatedAt) {
+      problems.push(`${where} names ${record.id}, which carries no navigation timestamp`);
+    }
+    // And that navigation must itself have been authorised, by a different consumed permit.
+    const evidencePermit = (log.discoveryPermits ?? []).find((p) => p.id === record.permitId);
+    if (!record.permitId) {
+      problems.push(`${where} names ${record.id}, which names no permit of its own`);
+    } else if (!evidencePermit) {
+      problems.push(`${where} names ${record.id}, whose permit ${record.permitId} does not exist`);
+    } else {
+      if (!evidencePermit.consumedAt) {
+        problems.push(`${where} names ${record.id}, whose permit ${evidencePermit.id} was never consumed`);
+      }
+      if (evidencePermit.id === permit.id) {
+        problems.push(`${where} names a record authorised by this same permit, so it duplicates nothing`);
+      }
+      for (const [field, label] of [['agency', 'agency'], ['category', 'category'],
+        ['candidateSetVersion', 'round'], ['url', 'url']]) {
+        if (evidencePermit[field] !== permit[field]) {
+          problems.push(
+            `${where} names a record whose permit covers a different ${label}: ` +
+              `${JSON.stringify(evidencePermit[field])} against ${JSON.stringify(permit[field])}`
+          );
+        }
+      }
+    }
+  }
+  return problems;
 }

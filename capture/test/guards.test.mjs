@@ -20,6 +20,7 @@ import {
   unresolvedDiscoveryRounds, issueDiscoveryPermit, isDiscoverySuperseded, supersedeCandidateSet,
   reopenCandidateSet, recordRobotsCheck, findRobotsCheck, robotsCheckIsFresh,
   consumeDiscoveryPermit, closeDiscoveryPermit, permitAudit, openDiscoveryPermits,
+  checkPermitLedger,
 } from '../run.mjs';
 import { prepareSet, addDiscovery } from './helpers.mjs';
 import {
@@ -898,10 +899,21 @@ describe('a permit is named by the record it authorises', () => {
     );
   });
 
+  /** An inspection recorded under its own consumed permit: what evidence has to look like. */
+  function evidencedInspection(log, forUrl = url) {
+    const p = issueDiscoveryPermit(log, { ...base, url: forUrl });
+    addDiscovery(log, { agency, category: CAT, url: forUrl });
+    const r = log.attempts.at(-1);
+    r.permitId = p.id;
+    r.navigatedAt = r.navigatedAt ?? '2026-09-25T08:00:00Z';
+    p.consumedAt = '2026-09-25T08:00:00Z';
+    return r;
+  }
+
   test('a closed permit no longer blocks, and records its account', () => {
     const log = emptyLog();
+    const record = evidencedInspection(log);
     const permit = issueDiscoveryPermit(log, base);
-    const record = addDiscovery(log, { agency, category: CAT, url });
     assert.equal(openDiscoveryPermits(log).length, 1);
 
     const closed = closeDiscoveryPermit(log, {
@@ -918,8 +930,8 @@ describe('a permit is named by the record it authorises', () => {
 
   test('a consumed or already-closed permit cannot be closed', () => {
     const log = emptyLog();
+    const record = evidencedInspection(log);
     const permit = issueDiscoveryPermit(log, base);
-    const record = addDiscovery(log, { agency, category: CAT, url });
     closeDiscoveryPermit(log, {
       permitId: permit.id, disposition: 'duplicate-request', reason: 'x', accountedBy: record.id,
     });
@@ -938,10 +950,7 @@ describe('a permit is named by the record it authorises', () => {
 
   test('the traffic audit counts a duplicate request as traffic, not as an inspection', () => {
     const log = emptyLog();
-    const used = issueDiscoveryPermit(log, base);
-    const record = addDiscovery(log, { agency, category: CAT, url });
-    consumeDiscoveryPermit(log, { ...base, permitId: used.id });
-
+    const record = evidencedInspection(log);
     const dup = issueDiscoveryPermit(log, base);
     closeDiscoveryPermit(log, {
       permitId: dup.id, disposition: 'duplicate-request', reason: 'second request, same inspection',
@@ -982,5 +991,193 @@ describe('a permit is named by the record it authorises', () => {
     closeDiscoveryPermit(log, { permitId: permit.id, disposition: 'unused', reason: 'not visited' });
     const draft = deriveDraft(log, opts);
     assert.equal(draft.pages.length, 1);
+  });
+});
+
+/**
+ * A duplicate-request closure must be evidenced by a real, authorised navigation.
+ *
+ * selection-v1.0.15, reproduced as an attack. `closeDiscoveryPermit` checked that the named
+ * record existed and matched the permit's agency, category, round and URL, and nothing else. A
+ * record carrying `navigationPerformed: false` was accepted as evidence that a request HAD been
+ * made, and the audit then reported an authorised network request whose own named evidence said
+ * no navigation occurred. The corpus gate checked only for open permits, so the fabricated state
+ * escaped the final gate as well.
+ *
+ * A duplicate-request closure asserts two things: a second request was made, and an existing
+ * inspection accounts for it. So the evidence has to be a real navigation, recorded under its own
+ * consumed permit, and that permit must be a different one covering the same scope - otherwise it
+ * duplicates nothing.
+ */
+describe('the permit ledger describes traffic that happened', () => {
+  const CAT = 'account-registration';
+  const agency = 'TPK';
+  const url = 'https://w.govt.nz/page';
+  const scope = { agency, category: CAT, candidateSetVersion: 1, url };
+  const at = '2026-09-25T08:00:00Z';
+
+  /** A properly evidenced inspection: navigated, under its own consumed permit. */
+  function realInspection(log, { navigatedAt = at, urlFor = url } = {}) {
+    const permit = issueDiscoveryPermit(log, { ...scope, url: urlFor, robotsCheckId: 'r-0001' });
+    appendAttempt(log, {
+      examinedAt: navigatedAt, agency, website: 'https://w.govt.nz/', url: urlFor,
+      status: 'discovery', discoveryKind: 'navigation', outcome: 'no-candidates', category: CAT,
+      candidateSetVersion: 1, navigatedAt, approval: 'approved', permitId: permit.id,
+    });
+    const record = log.attempts.at(-1);
+    permit.consumedAt = navigatedAt;
+    return { permit, record };
+  }
+
+  /** A record that states no request was made. */
+  function notNavigated(log, urlFor = url) {
+    appendAttempt(log, {
+      examinedAt: at, agency, website: 'https://w.govt.nz/', url: urlFor,
+      status: 'discovery', discoveryKind: 'internal-search', outcome: 'disallowed', category: CAT,
+      candidateSetVersion: 1, navigationPerformed: false, checkedAt: at, approval: 'approved',
+    });
+    return log.attempts.at(-1);
+  }
+
+  test('THE ATTACK: a not-navigated record cannot evidence a duplicate request', () => {
+    const log = emptyLog();
+    const record = notNavigated(log);
+    const permit = issueDiscoveryPermit(log, { ...scope, robotsCheckId: 'r-0001' });
+    assert.throws(
+      () => closeDiscoveryPermit(log, {
+        permitId: permit.id, disposition: 'duplicate-request', reason: 'fabricated',
+        accountedBy: record.id,
+      }),
+      /records navigationPerformed: false/
+    );
+    // And the permit is left untouched, not half-closed.
+    assert.equal(permit.closedAt, undefined);
+    assert.equal(permit.disposition, undefined);
+    assert.equal(openDiscoveryPermits(log).length, 1);
+  });
+
+  test('evidence that names no permit of its own is refused', () => {
+    const log = emptyLog();
+    appendAttempt(log, {
+      examinedAt: at, agency, website: 'https://w.govt.nz/', url,
+      status: 'discovery', discoveryKind: 'navigation', outcome: 'no-candidates', category: CAT,
+      candidateSetVersion: 1, navigatedAt: at, approval: 'approved',
+    });
+    const record = log.attempts.at(-1);
+    const permit = issueDiscoveryPermit(log, { ...scope, robotsCheckId: 'r-0001' });
+    assert.throws(
+      () => closeDiscoveryPermit(log, {
+        permitId: permit.id, disposition: 'duplicate-request', reason: 'x', accountedBy: record.id,
+      }),
+      /names no permit of its own/
+    );
+  });
+
+  test('evidence whose permit was never consumed is refused', () => {
+    const log = emptyLog();
+    const { permit: evidencePermit, record } = realInspection(log);
+    const permit = issueDiscoveryPermit(log, { ...scope, robotsCheckId: 'r-0001' });
+    // Un-consumed only now: doing it earlier reopens the first permit, and the duplicate-permit
+    // guard then refuses the second - which is that guard working, not this rule.
+    evidencePermit.consumedAt = null;
+    assert.throws(
+      () => closeDiscoveryPermit(log, {
+        permitId: permit.id, disposition: 'duplicate-request', reason: 'x', accountedBy: record.id,
+      }),
+      /was never consumed/
+    );
+  });
+
+  test('evidence from a different scope is refused', () => {
+    const log = emptyLog();
+    const { record } = realInspection(log, { urlFor: 'https://w.govt.nz/elsewhere' });
+    const permit = issueDiscoveryPermit(log, { ...scope, robotsCheckId: 'r-0001' });
+    assert.throws(
+      () => closeDiscoveryPermit(log, {
+        permitId: permit.id, disposition: 'duplicate-request', reason: 'x', accountedBy: record.id,
+      }),
+      /but permit .* is/
+    );
+  });
+
+  test('a properly evidenced duplicate request closes', () => {
+    const log = emptyLog();
+    const { permit: evidencePermit, record } = realInspection(log);
+    const permit = issueDiscoveryPermit(log, { ...scope, robotsCheckId: 'r-0001' });
+    const closed = closeDiscoveryPermit(log, {
+      permitId: permit.id, disposition: 'duplicate-request',
+      reason: 'two permits and two requests; only one judgement recorded',
+      accountedBy: record.id,
+    });
+    assert.equal(closed.disposition, 'duplicate-request');
+    assert.notEqual(record.permitId, permit.id, 'the evidence is authorised by a different permit');
+    assert.ok(evidencePermit.consumedAt);
+    assert.deepEqual(checkPermitLedger(log), []);
+  });
+
+  test('THE GATE: a fabricated closure is refused by the corpus draft too', () => {
+    // Written directly into the log, as a hand-edited file would be: the closure API is not the
+    // only way a ledger reaches the gate.
+    const log = emptyLog();
+    const agencyName = drawOrder[0].agency;
+    log.attempts.push({
+      agency: agencyName, category: 'enquiry-or-contact', status: 'captured', approval: APPROVAL.APPROVED,
+      url: 'https://w.govt.nz/1', finalUrl: 'https://w.govt.nz/1', pageId: 'page-1', file: '1.html',
+      htmlSha256: 'x', inclusionEvidence: 'has a name field', capturedAt: '2026-09-24T00:00:00Z',
+      browser: 'Chromium 1', automationTool: 'playwright 1',
+      viewport: { width: 1280, height: 800 }, locale: 'en-NZ', redirects: [],
+    });
+    appendAttempt(log, {
+      examinedAt: at, agency: agencyName, website: 'https://w.govt.nz/', url,
+      status: 'discovery', discoveryKind: 'internal-search', outcome: 'disallowed',
+      category: 'enquiry-or-contact', candidateSetVersion: 1, navigationPerformed: false,
+      checkedAt: at, approval: 'approved',
+    });
+    const record = log.attempts.at(-1);
+    // Resolve the round, so the ledger check is what this test exercises rather than the
+    // unresolved-round check that would otherwise fire first.
+    recordCandidates(log, { agency: agencyName, category: 'enquiry-or-contact', urls: [], declaration: 'none' });
+    lockCandidateSet(log, { agency: agencyName, category: 'enquiry-or-contact' });
+    approveCandidateSet(log, { agency: agencyName, category: 'enquiry-or-contact', approved: true });
+
+    log.discoveryPermits = [{
+      id: 'p-0001', agency: agencyName, category: 'enquiry-or-contact', candidateSetVersion: 1, url,
+      robotsCheckId: 'r-0001', issuedAt: at, consumedAt: null,
+      closedAt: at, disposition: 'duplicate-request', closureReason: 'fabricated',
+      accountedBy: record.id, closureId: 'x-0001',
+    }];
+    assert.equal(openDiscoveryPermits(log).length, 0, 'it is not an OPEN permit, so that gate misses it');
+    assert.throws(
+      () => deriveDraft(log, { frameSha256: 'a'.repeat(64), drawOrderSha256: 'b'.repeat(64) }),
+      /permit ledger is inconsistent/
+    );
+  });
+
+  test('THE GATE: provenance refuses to publish an inconsistent ledger', () => {
+    const log = emptyLog();
+    const record = notNavigated(log);
+    log.discoveryPermits = [{
+      id: 'p-0001', agency, category: CAT, candidateSetVersion: 1, url,
+      robotsCheckId: 'r-0001', issuedAt: at, consumedAt: null,
+      closedAt: at, disposition: 'duplicate-request', closureReason: 'fabricated',
+      accountedBy: record.id, closureId: 'x-0001',
+    }];
+    const dir = mkdtempSync(join(tmpdir(), 'formfair-ledger-'));
+    try {
+      assert.throws(() => publishProvenance(log, { to: dir }), /must not be published/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('an unused closure that names a record is refused by the validator too', () => {
+    const log = emptyLog();
+    const { record } = realInspection(log);
+    log.discoveryPermits.push({
+      id: 'p-9001', agency, category: CAT, candidateSetVersion: 1, url,
+      robotsCheckId: 'r-0001', issuedAt: at, consumedAt: null,
+      closedAt: at, disposition: 'unused', closureReason: 'x', accountedBy: record.id,
+    });
+    assert.ok(checkPermitLedger(log).some((p) => /closed unused but names/.test(p)));
   });
 });

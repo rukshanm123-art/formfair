@@ -1636,9 +1636,11 @@ nothing was requested under it.
 
 Open permits still withhold the corpus draft. Consumed and properly closed permits do not.
 
-**The traffic audit is published.** Provenance now carries permits issued, consumed, closed
-unused, closed duplicate-request, and every closure's id, timestamp, reason and associated
-discovery record. A `duplicate-request` permit **is** counted as a network request, because one
+**The traffic audit is publishable.** The provenance writer now assembles permits issued,
+consumed, closed unused, closed duplicate-request, and every closure's id, timestamp, reason and
+associated discovery record. The committed `provenance.json` is stale — it predates the permit
+model entirely — so the audit is *publishable*, not yet published, and will be regenerated and
+committed at the next provenance checkpoint. A `duplicate-request` permit **is** counted as a network request, because one
 was made; it is counted as no additional inspection, candidate, page or evaluation observation,
 because it produced none.
 
@@ -1658,3 +1660,56 @@ Amendment 8 states that a home page or directory index is not a direct link to a
 discovery does not crawl outward from one. That exclusion turns on link depth, not on third-party
 ownership — external ownership alone never excludes a form — and the round's `no-candidates`
 record for that page is correct and is not superseded.
+
+## Amendment 18: the permit ledger must describe traffic that happened
+
+**Dated 25 September 2026.** `selection-v1.0.15`. Moves no earlier tag. No round, closure or
+approval is redone.
+
+### The fabrication
+
+`closeDiscoveryPermit` verified that the named discovery record existed and matched the permit's
+agency, category, round and URL — and nothing further. So a record carrying
+`navigationPerformed: false` was accepted as evidence that a request *had* been made, and the
+audit then reported an authorised network request whose own named evidence said no navigation
+occurred:
+
+```
+ATTACK SUCCEEDS: closed as duplicate-request; audit says networkRequestsAuthorised = 1
+  ...while its named evidence says no navigation occurred.
+```
+
+The corpus gate checked only for **open** permits, so a closed-but-fabricated one escaped the
+final gate as well.
+
+### What a duplicate-request closure actually asserts
+
+Two things: that a second request was made, and that an existing inspection accounts for it. The
+evidence must therefore be a real navigation — not a record stating none occurred — recorded under
+its **own consumed permit**, and that permit must be a *different* one covering the same agency,
+category, round and URL. A closure evidenced by the very permit being closed duplicates nothing.
+
+`checkPermitLedger` expresses this once and is called from three places: the closure itself, so a
+bad closure cannot be written; `deriveDraft`, so one already in the log cannot be sealed; and
+`publishProvenance`, so an inconsistent ledger cannot be published. A rule enforced where a value
+is written but not where it is trusted is the defect this scan has rediscovered repeatedly, and
+the three call sites are the answer to it rather than a precaution.
+
+A failed closure leaves the permit untouched rather than half-written: the validator runs against
+the state the closure *would* leave, and the fields are rolled back if it does not hold.
+
+Eight tests, including the fabrication reproduced end to end and both gates refusing a ledger
+written directly into the log — because the closure API is not the only way a ledger reaches the
+gate. The capture package has 215 tests.
+
+### The existing closures
+
+`p-0031`, `p-0035` and `p-0039` were re-checked under the stronger rule and pass:
+
+| permit | accounted by | evidence permit | consumed | navigated | distinct |
+| --- | --- | --- | --- | --- | --- |
+| `p-0031` | `d-0231` | `p-0028` | yes | yes | yes |
+| `p-0035` | `d-0235` | `p-0026` | yes | yes | yes |
+| `p-0039` | `d-0239` | `p-0027` | yes | yes | yes |
+
+`checkPermitLedger` reports no problems against the live log. Nothing is redone.
