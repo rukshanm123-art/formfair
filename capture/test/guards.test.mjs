@@ -19,6 +19,7 @@ import {
   exhaustAgency, EXHAUSTION_REASON, publishProvenance,
   unresolvedDiscoveryRounds, issueDiscoveryPermit, isDiscoverySuperseded, supersedeCandidateSet,
   reopenCandidateSet, recordRobotsCheck, findRobotsCheck, robotsCheckIsFresh,
+  consumeDiscoveryPermit, closeDiscoveryPermit, permitAudit, openDiscoveryPermits,
 } from '../run.mjs';
 import { prepareSet, addDiscovery } from './helpers.mjs';
 import {
@@ -818,5 +819,168 @@ describe('robots policy history is append-only', () => {
     const now = Date.parse('2026-09-25T12:00:00Z');
     assert.equal(robotsCheckIsFresh({ fetchedAt: '2026-09-25T11:00:00Z' }, now), true);
     assert.equal(robotsCheckIsFresh({ fetchedAt: '2026-09-24T11:00:00Z' }, now), false);
+  });
+});
+
+/**
+ * Permits are named, not guessed, and closed with an account of what happened.
+ *
+ * selection-v1.0.14. Two permits were issued for the same page - once to inspect it, once by the
+ * recording script - and since consumption took the oldest match, the second stayed open. Two
+ * requests really were made, so the surplus permits were not spurious; what was lost was any way
+ * to say which request each one covered, and there was no way to close the remainder at all, so
+ * the corpus draft was permanently blocked.
+ *
+ * "Released" would have been the wrong word for these. No navigation is one disposition; a
+ * navigation that duplicated an inspection already recorded is a different one, and it has to
+ * name the record that accounts for the traffic.
+ */
+describe('a permit is named by the record it authorises', () => {
+  const CAT = 'account-registration';
+  const agency = 'TPK';
+  const url = 'https://w.govt.nz/page';
+  const base = { agency, category: CAT, candidateSetVersion: 1, url, robotsCheckId: 'r-0001' };
+
+  test('a second open permit for the same url and round is refused', () => {
+    const log = emptyLog();
+    const first = issueDiscoveryPermit(log, base);
+    assert.throws(
+      () => issueDiscoveryPermit(log, base),
+      new RegExp(`permit ${first.id} is already open`)
+    );
+    assert.equal(log.discoveryPermits.length, 1);
+  });
+
+  test('a record must name its permit', () => {
+    const log = emptyLog();
+    issueDiscoveryPermit(log, base);
+    assert.throws(
+      () => consumeDiscoveryPermit(log, { ...base, navigatedAt: null }),
+      /must name the permit that authorised its navigation/
+    );
+  });
+
+  test('a named permit that belongs to another page is refused', () => {
+    const log = emptyLog();
+    const other = issueDiscoveryPermit(log, { ...base, url: 'https://w.govt.nz/elsewhere' });
+    assert.throws(
+      () => consumeDiscoveryPermit(log, { ...base, permitId: other.id }),
+      new RegExp(`permit ${other.id} is for`)
+    );
+  });
+
+  test('closing as duplicate-request must name a matching discovery record', () => {
+    const log = emptyLog();
+    const permit = issueDiscoveryPermit(log, base);
+    assert.throws(
+      () => closeDiscoveryPermit(log, { permitId: permit.id, disposition: 'duplicate-request', reason: 'x' }),
+      /must name the discovery record that accounts for the traffic/
+    );
+
+    const foreign = addDiscovery(log, { agency, category: CAT, url: 'https://w.govt.nz/other' });
+    assert.throws(
+      () => closeDiscoveryPermit(log, {
+        permitId: permit.id, disposition: 'duplicate-request', reason: 'x', accountedBy: foreign.id,
+      }),
+      /is url .*but permit .* is/
+    );
+  });
+
+  test('an unused closure names no record, because nothing was requested', () => {
+    const log = emptyLog();
+    const permit = issueDiscoveryPermit(log, base);
+    const record = addDiscovery(log, { agency, category: CAT, url });
+    assert.throws(
+      () => closeDiscoveryPermit(log, {
+        permitId: permit.id, disposition: 'unused', reason: 'changed plan', accountedBy: record.id,
+      }),
+      /an unused closure names no discovery record/
+    );
+  });
+
+  test('a closed permit no longer blocks, and records its account', () => {
+    const log = emptyLog();
+    const permit = issueDiscoveryPermit(log, base);
+    const record = addDiscovery(log, { agency, category: CAT, url });
+    assert.equal(openDiscoveryPermits(log).length, 1);
+
+    const closed = closeDiscoveryPermit(log, {
+      permitId: permit.id, disposition: 'duplicate-request',
+      reason: 'two permits and two requests; the oldest-permit rule made the pairing ambiguous',
+      accountedBy: record.id,
+    });
+    assert.equal(openDiscoveryPermits(log).length, 0);
+    assert.equal(closed.disposition, 'duplicate-request');
+    assert.equal(closed.accountedBy, record.id);
+    assert.ok(closed.closureId);
+    assert.ok(closed.closedAt);
+  });
+
+  test('a consumed or already-closed permit cannot be closed', () => {
+    const log = emptyLog();
+    const permit = issueDiscoveryPermit(log, base);
+    const record = addDiscovery(log, { agency, category: CAT, url });
+    closeDiscoveryPermit(log, {
+      permitId: permit.id, disposition: 'duplicate-request', reason: 'x', accountedBy: record.id,
+    });
+    assert.throws(
+      () => closeDiscoveryPermit(log, { permitId: permit.id, disposition: 'unused', reason: 'y' }),
+      /was already closed/
+    );
+
+    const second = issueDiscoveryPermit(log, { ...base, url: 'https://w.govt.nz/two' });
+    consumeDiscoveryPermit(log, { ...base, url: 'https://w.govt.nz/two', permitId: second.id });
+    assert.throws(
+      () => closeDiscoveryPermit(log, { permitId: second.id, disposition: 'unused', reason: 'y' }),
+      /was consumed at .* and cannot be closed/
+    );
+  });
+
+  test('the traffic audit counts a duplicate request as traffic, not as an inspection', () => {
+    const log = emptyLog();
+    const used = issueDiscoveryPermit(log, base);
+    const record = addDiscovery(log, { agency, category: CAT, url });
+    consumeDiscoveryPermit(log, { ...base, permitId: used.id });
+
+    const dup = issueDiscoveryPermit(log, base);
+    closeDiscoveryPermit(log, {
+      permitId: dup.id, disposition: 'duplicate-request', reason: 'second request, same inspection',
+      accountedBy: record.id,
+    });
+    const unused = issueDiscoveryPermit(log, { ...base, url: 'https://w.govt.nz/never' });
+    closeDiscoveryPermit(log, { permitId: unused.id, disposition: 'unused', reason: 'not visited' });
+
+    const audit = permitAudit(log);
+    assert.equal(audit.issued, 3);
+    assert.equal(audit.consumed, 1);
+    assert.equal(audit.closedDuplicateRequest, 1);
+    assert.equal(audit.closedUnused, 1);
+    assert.equal(audit.open, 0);
+    // Two requests were authorised and made; the unused permit produced none.
+    assert.equal(audit.networkRequestsAuthorised, 2);
+    assert.equal(audit.closures.length, 2);
+    assert.ok(audit.closures.every((c) => c.closureId && c.closedAt && c.reason));
+  });
+
+  test('a properly closed permit does not withhold the corpus draft', () => {
+    const log = emptyLog();
+    const agencyName = drawOrder[0].agency;
+    log.attempts.push({
+      agency: agencyName, category: 'enquiry-or-contact', status: 'captured', approval: APPROVAL.APPROVED,
+      url: 'https://w.govt.nz/1', finalUrl: 'https://w.govt.nz/1', pageId: 'page-1', file: '1.html',
+      htmlSha256: 'x', inclusionEvidence: 'has a name field', capturedAt: '2026-09-24T00:00:00Z',
+      browser: 'Chromium 1', automationTool: 'playwright 1',
+      viewport: { width: 1280, height: 800 }, locale: 'en-NZ', redirects: [],
+    });
+    const permit = issueDiscoveryPermit(log, {
+      agency: agencyName, category: CAT, candidateSetVersion: 1,
+      url: 'https://w.govt.nz/x', robotsCheckId: 'r-0001',
+    });
+    const opts = { frameSha256: 'a'.repeat(64), drawOrderSha256: 'b'.repeat(64) };
+    assert.throws(() => deriveDraft(log, opts), /issued and never consumed/);
+
+    closeDiscoveryPermit(log, { permitId: permit.id, disposition: 'unused', reason: 'not visited' });
+    const draft = deriveDraft(log, opts);
+    assert.equal(draft.pages.length, 1);
   });
 });

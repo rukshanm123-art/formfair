@@ -29,7 +29,7 @@ import {
   agenciesAwaitingExhaustion, findRobotsCheck, recordRobotsCheck,
   issueDiscoveryPermit, consumeDiscoveryPermit, findOpenPermit,
   unresolvedDiscoveryRounds, openDiscoveryPermits, robotsCheckIsFresh, isDiscoverySuperseded,
-  reopenCandidateSet,
+  reopenCandidateSet, closeDiscoveryPermit, permitAudit, PERMIT_DISPOSITIONS,
 } from './run.mjs';
 import { fetchRobotsPolicy, evaluatePolicy, DISPOSITION } from './robots-policy.mjs';
 import {
@@ -61,6 +61,7 @@ const USAGE = `usage:
                           (checks robots BEFORE navigating: issues a single-use permit, or
                            records the disallowed outcome without any request to the target)
   cli-capture.mjs discovery --out <dir> --agency <name> --website <url> --url <url>
+                          --permit-id <p-NNNN>
                           [--supersedes-discovery-id <d-NNNN>]
                           --method <${DISCOVERY_METHODS.join('|')}>
                           --outcome <${DISCOVERY_OUTCOMES.join('|')}>
@@ -82,6 +83,9 @@ const USAGE = `usage:
   cli-capture.mjs exhaust --out <dir> [--agency <name, checked against the draw order>]
                           (records the next agency as searched in full with no eligible form;
                            the agency is derived from the draw order, never supplied)
+  cli-capture.mjs close-permit --out <dir> --permit-id <p-NNNN> --reason "<why>"
+                          --disposition <unused|duplicate-request>
+                          [--accounted-by <d-NNNN>]   (required for duplicate-request)
   cli-capture.mjs next    --out <dir>
   cli-capture.mjs budget  --out <dir> --agency <name> [--category <c>]
   cli-capture.mjs approve --out <dir> (--id <c-NNNN> | --url <url>)
@@ -355,6 +359,14 @@ function doStatus() {
       console.log(`  - ${r.agency} / ${r.category} v${r.version}: ${r.records} records, ${r.reason}`);
     }
   }
+  const audit = permitAudit(log);
+  if (audit.issued) {
+    console.log(
+      `permits issued ${audit.issued}: ${audit.consumed} consumed, ` +
+        `${audit.closedDuplicateRequest} closed duplicate-request, ${audit.closedUnused} closed unused, ` +
+        `${audit.open} open`
+    );
+  }
   const permitsOpen = openDiscoveryPermits(log);
   if (permitsOpen.length) {
     console.log(`navigation permits issued and not consumed ${permitsOpen.length}`);
@@ -406,7 +418,7 @@ async function doDiscovery() {
   validateUrl(url);
   const permit = consumeDiscoveryPermit(log, {
     agency: require_('agency'), category, candidateSetVersion: setVersion, url,
-    navigatedAt: flag('navigated-at'),
+    navigatedAt: flag('navigated-at'), permitId: require_('permit-id'),
   });
 
   appendAttempt(log, {
@@ -627,6 +639,16 @@ async function doPreflightDiscovery() {
 
   // RFC 9309 section 2.4: cached robots content should generally not be used beyond 24 hours. A
   // permanently cached policy could authorise a path that has since become disallowed.
+  // Checked before any network request, including the robots fetch: a refusal must not itself
+  // generate traffic.
+  const alreadyOpen = findOpenPermit(log, { agency, category, candidateSetVersion: setVersion, url });
+  if (alreadyOpen) {
+    die(
+      `permit ${alreadyOpen.id} is already open for ${url}, issued at ${alreadyOpen.issuedAt}.\n` +
+        'Use it, or close it with `close-permit` before issuing another. No request was made.'
+    );
+  }
+
   const cached = findRobotsCheck(log, parsed.origin);
   let check = has('recheck-robots') || !robotsCheckIsFresh(cached) ? null : cached;
   let fetched = false;
@@ -685,8 +707,24 @@ function doReopenSet() {
   console.log(`reason: ${previous.reason}`);
 }
 
+/** Closes an open permit with an explicit account of what happened under it. */
+function doClosePermit() {
+  const dir = require_('out');
+  const logPath = logPathFor(dir);
+  const log = readLog(logPath);
+  const permit = closeDiscoveryPermit(log, {
+    permitId: require_('permit-id'),
+    disposition: require_('disposition'),
+    reason: require_('reason'),
+    accountedBy: flag('accounted-by'),
+  });
+  writeLog(logPath, log);
+  console.log(`closed ${permit.id} as ${permit.disposition} (${permit.closureId})`);
+  if (permit.accountedBy) console.log(`accounted by ${permit.accountedBy}`);
+}
+
 const commands = { packet: doPacket, candidates: doCandidates, lock: doLock, 'approve-set': doApproveSet,
-  'supersede-set': doSupersedeSet, publish: doPublish, next: doNext, capture: doCapture, exclude: doExclude, discovery: doDiscovery, budget: doBudget, approve: doApprove, status: doStatus, build: doBuild, exhaust: doExhaust, 'preflight-discovery': doPreflightDiscovery, 'reopen-set': doReopenSet };
+  'supersede-set': doSupersedeSet, publish: doPublish, next: doNext, capture: doCapture, exclude: doExclude, discovery: doDiscovery, budget: doBudget, approve: doApprove, status: doStatus, build: doBuild, exhaust: doExhaust, 'preflight-discovery': doPreflightDiscovery, 'reopen-set': doReopenSet, 'close-permit': doClosePermit };
 if (!commands[command]) die(USAGE);
 try {
   await commands[command]();

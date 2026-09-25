@@ -135,6 +135,9 @@ const lockSet = async (dir, agency, category, urls) => {
     '--website', origin, '--url', discoveryUrl, '--category', category,
     '--set-version', '1', '--method', 'navigation']);
   assert.equal(permit.status, 0, permit.stderr);
+  // selection-v1.0.14: the record names the permit that authorised it.
+  const permitId = permit.stdout.match(/permit (p-\d+):/)?.[1];
+  assert.ok(permitId, `no permit id in: ${permit.stdout}`);
   // Taken AFTER the permit exists. Timestamps are truncated to the second, so a value read
   // before the preflight can land a second earlier than the permit and be rejected as
   // retrospective - which is the check working, and the fixture getting the order wrong.
@@ -142,7 +145,7 @@ const lockSet = async (dir, agency, category, urls) => {
   const disc = await run(['discovery', '--out', dir, '--agency', agency, '--website', origin,
     '--url', discoveryUrl, '--method', 'navigation',
     '--outcome', 'candidates-found', '--category', category, '--set-version', '1',
-    '--navigated-at', at]);
+    '--navigated-at', at, '--permit-id', permitId]);
   assert.equal(disc.status, 0, disc.stderr);
   const add = await run(['candidates', '--out', dir, '--agency', agency, '--category', category, '--add', urls.join(',')]);
   assert.equal(add.status, 0, add.stderr);

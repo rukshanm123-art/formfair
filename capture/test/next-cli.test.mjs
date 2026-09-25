@@ -534,10 +534,20 @@ describe('discovery requires a permit issued before navigation', () => {
   let navTick = 0;
   const nextNav = () => new Date(Date.now() + (++navTick) * 6000).toISOString().replace(/\.\d{3}Z$/, 'Z');
 
-  const record = (dir, url, outcome, method = 'internal-search', at = null) =>
-    run(['discovery', '--out', dir, '--agency', agency, '--website', `${origin}/`, '--url', url,
+  const record = (dir, url, outcome, method = 'internal-search', opts = {}) => {
+    const args = ['discovery', '--out', dir, '--agency', agency, '--website', `${origin}/`, '--url', url,
       '--method', method, '--outcome', outcome, '--category', CAT,
-      '--set-version', '1', '--navigated-at', at ?? nextNav()]);
+      '--set-version', String(opts.version ?? 1), '--navigated-at', opts.at ?? nextNav()];
+    if (opts.permitId !== null) args.push('--permit-id', opts.permitId ?? lastPermitId);
+    return run(args);
+  };
+
+  let lastPermitId = null;
+  const preflightAnd = async (dir, url, method = 'navigation') => {
+    const r = await preflight(dir, url, method);
+    lastPermitId = r.stdout.match(/permit (p-\d+):/)?.[1] ?? null;
+    return r;
+  };
 
   test('THE FIX: a disallowed target receives zero requests', async () => {
     await withLog(() => {}, async (dir) => {
@@ -559,10 +569,9 @@ describe('discovery requires a permit issued before navigation', () => {
 
   test('a record with no permit is refused', async () => {
     await withLog(() => {}, async (dir) => {
-      const r = await record(dir, `${origin}/contact`, 'no-candidates', 'navigation');
+      const r = await record(dir, `${origin}/contact`, 'no-candidates', 'navigation', { permitId: 'p-9999' });
       assert.equal(r.status, 1);
-      assert.match(r.stderr, /no open navigation permit/);
-      assert.match(r.stderr, /before navigating/);
+      assert.match(r.stderr, /permit p-9999 does not exist/);
       const log = JSON.parse(readFileSync(join(dir, 'capture-log.json'), 'utf8'));
       assert.equal(log.attempts.length, 0);
     });
@@ -570,20 +579,21 @@ describe('discovery requires a permit issued before navigation', () => {
 
   test('a permit is single-use', async () => {
     await withLog(() => {}, async (dir) => {
-      assert.equal((await preflight(dir, `${origin}/contact`, 'navigation')).status, 0);
+      assert.equal((await preflightAnd(dir, `${origin}/contact`, 'navigation')).status, 0);
+      const spent = lastPermitId;
       assert.equal((await record(dir, `${origin}/contact`, 'no-candidates', 'navigation')).status, 0);
       // A second record for the same URL must not ride the spent permit.
       const again = await run(['discovery', '--out', dir, '--agency', agency, '--website', `${origin}/`,
         '--url', `${origin}/contact`, '--method', 'navigation', '--outcome', 'no-candidates',
-        '--category', CAT, '--set-version', '1', '--navigated-at', nextNav()]);
+        '--category', CAT, '--set-version', '1', '--navigated-at', nextNav(), '--permit-id', spent]);
       assert.equal(again.status, 1);
-      assert.match(again.stderr, /no open navigation permit/);
+      assert.match(again.stderr, /was already consumed/);
     });
   });
 
   test('a permit is specific to its URL and its round', async () => {
     await withLog(() => {}, async (dir) => {
-      assert.equal((await preflight(dir, `${origin}/contact`, 'navigation')).status, 0);
+      assert.equal((await preflightAnd(dir, `${origin}/contact`, 'navigation')).status, 0);
 
       // Different URL, same round.
       const otherUrl = await record(dir, `${origin}/other`, 'no-candidates', 'navigation');
@@ -592,7 +602,7 @@ describe('discovery requires a permit issued before navigation', () => {
       // Same URL, different round.
       const otherRound = await run(['discovery', '--out', dir, '--agency', agency, '--website', `${origin}/`,
         '--url', `${origin}/contact`, '--method', 'navigation', '--outcome', 'no-candidates',
-        '--category', CAT, '--set-version', '2', '--navigated-at', nextNav()]);
+        '--category', CAT, '--set-version', '2', '--navigated-at', nextNav(), '--permit-id', lastPermitId]);
       assert.equal(otherRound.status, 1, 'a permit for one round must not authorise another');
     });
   });
@@ -618,7 +628,7 @@ describe('discovery requires a permit issued before navigation', () => {
       // The disallowed record carries no navigation time, so a navigation recorded immediately
       // afterwards is not measured against it.
       assert.equal((await preflight(dir, `${origin}/search?query=x`)).status, 0);
-      assert.equal((await preflight(dir, `${origin}/contact`, 'navigation')).status, 0);
+      assert.equal((await preflightAnd(dir, `${origin}/contact`, 'navigation')).status, 0);
       const r = await record(dir, `${origin}/contact`, 'no-candidates', 'navigation');
       assert.equal(r.status, 0, r.stderr);
     });

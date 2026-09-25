@@ -1601,3 +1601,60 @@ which is a smaller and more precise claim than deciding to override a real one.
 
 Seven further tests, including both future holes reproduced directly. The capture package has 198
 tests.
+
+## Amendment 17: a permit names its request, and closing one accounts for it
+
+**Dated 25 September 2026.** `selection-v1.0.14`. Moves no earlier tag.
+
+### What went wrong
+
+Three permits were left open after a discovery round. They were not spurious: two permits had been
+issued for each of three URLs — once to inspect the page, once by the recording script — and two
+real requests were made. Consumption took the *oldest* matching permit, so the second stayed open,
+and there was no way to close it. The corpus draft was therefore permanently blocked by an
+accurate complaint.
+
+The word for the remainder is not "released". Calling it that would assert that no request
+occurred, which is the opposite of what happened.
+
+### The changes
+
+**One open permit per agency, category, round and URL.** A second is refused, and the refusal
+happens *before* any network request — including the robots fetch — so that declining to authorise
+traffic does not itself generate traffic.
+
+**A record names the permit that authorised it.** `discovery` requires `--permit-id` and consumes
+that exact permit. Taking whichever open permit matched left the pairing between a request and its
+authorisation implicit, and when two existed it was simply wrong.
+
+**`close-permit` closes an open permit with an explicit disposition.** `unused` means no
+navigation occurred. `duplicate-request` means a navigation occurred but duplicated an inspection
+already recorded, and it must name that record with `--accounted-by`, which is checked for the
+same agency, category, round and URL. A reason is required either way. A consumed or
+already-closed permit cannot be closed again, and an `unused` closure may not name a record —
+nothing was requested under it.
+
+Open permits still withhold the corpus draft. Consumed and properly closed permits do not.
+
+**The traffic audit is published.** Provenance now carries permits issued, consumed, closed
+unused, closed duplicate-request, and every closure's id, timestamp, reason and associated
+discovery record. A `duplicate-request` permit **is** counted as a network request, because one
+was made; it is counted as no additional inspection, candidate, page or evaluation observation,
+because it produced none.
+
+Nine tests. The capture package has 207 tests.
+
+### The three permits in this scan
+
+`p-0031`, `p-0035` and `p-0039` are closed as `duplicate-request`, accounted for by `d-0231`,
+`d-0235` and `d-0239` respectively. Their reason records that two permits and two requests
+occurred for each URL, and that the oldest-permit rule made the pairing between a request and its
+permit ambiguous — which is the defect this amendment removes.
+
+### A decision that stands
+
+HDEC applications are made through a third-party system whose **root** the agency links.
+Amendment 8 states that a home page or directory index is not a direct link to a form and that
+discovery does not crawl outward from one. That exclusion turns on link depth, not on third-party
+ownership — external ownership alone never excludes a form — and the round's `no-candidates`
+record for that page is correct and is not superseded.

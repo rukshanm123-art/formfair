@@ -1016,6 +1016,10 @@ export function publishProvenance(log, { to }) {
     exhaustedAgencies: (log.exhausted ?? []).map((e) =>
       typeof e === 'string' ? { agency: e, exhaustedAt: null, reason: EXHAUSTION_REASON } : e
     ),
+    // The traffic audit. A duplicate-request permit covered a real request and is counted as
+    // traffic; it produced no additional inspection, candidate, page or observation, and is
+    // counted nowhere else.
+    permits: permitAudit(log),
     discoveryByRound: discovery.reduce((acc, a) => {
       const key = `${a.agency ?? '?'} / ${a.category ?? 'unattributed'} v${a.candidateSetVersion ?? '?'}`;
       acc[key] = (acc[key] ?? 0) + 1;
@@ -1104,6 +1108,19 @@ export function recordRobotsCheck(log, policy) {
  */
 export function issueDiscoveryPermit(log, { agency, category, candidateSetVersion, url, robotsCheckId, reason }) {
   (log.discoveryPermits ??= []);
+
+  // selection-v1.0.14. One open permit per URL and round. Two permits were issued for the same
+  // page - once to inspect it, once by the recording script - and since consumption took the
+  // oldest match, the second stayed open. Two requests really were made, so the permits were not
+  // spurious; what was lost was any way to say which request each one covered.
+  const already = findOpenPermit(log, { agency, category, candidateSetVersion, url });
+  if (already) {
+    throw new Error(
+      `permit ${already.id} is already open for ${url} (${agency} / ${category} round ` +
+        `${candidateSetVersion}), issued at ${already.issuedAt}. Use it, or close it with ` +
+        '`close-permit` before issuing another.'
+    );
+  }
   const permit = {
     id: `p-${String(log.discoveryPermits.length + 1).padStart(4, '0')}`,
     agency, category, candidateSetVersion, url, robotsCheckId,
@@ -1117,18 +1134,30 @@ export function issueDiscoveryPermit(log, { agency, category, candidateSetVersio
 
 export function findOpenPermit(log, { agency, category, candidateSetVersion, url }) {
   return (log.discoveryPermits ?? []).find(
-    (p) => p.consumedAt === null && p.agency === agency && p.category === category &&
+    (p) => p.consumedAt === null && !p.closedAt && p.agency === agency && p.category === category &&
       p.candidateSetVersion === candidateSetVersion && p.url === url
   ) ?? null;
 }
 
-export function consumeDiscoveryPermit(log, { agency, category, candidateSetVersion, url, navigatedAt = null }) {
-  const permit = findOpenPermit(log, { agency, category, candidateSetVersion, url });
-  if (!permit) {
+export function consumeDiscoveryPermit(log, { agency, category, candidateSetVersion, url, navigatedAt = null, permitId = null }) {
+  // selection-v1.0.14: the record names its permit. Taking whichever open permit matched left
+  // the pairing between a request and its authorisation implicit, and when two existed it was
+  // simply wrong.
+  if (!permitId) {
     throw new Error(
-      `no open navigation permit for ${url} (${agency} / ${category} round ${candidateSetVersion}). ` +
-        'Run `preflight-discovery` for this URL before navigating to it: the robots check must ' +
-        'happen before the request, not when the record is written.'
+      `a discovery record must name the permit that authorised its navigation (--permit-id). ` +
+        `Run \`preflight-discovery\` for ${url} and use the permit it issues.`
+    );
+  }
+  const permit = (log.discoveryPermits ?? []).find((p) => p.id === permitId);
+  if (!permit) throw new Error(`permit ${permitId} does not exist`);
+  if (permit.consumedAt) throw new Error(`permit ${permitId} was already consumed at ${permit.consumedAt}`);
+  if (permit.closedAt) throw new Error(`permit ${permitId} was closed at ${permit.closedAt} as ${permit.disposition}`);
+  if (permit.agency !== agency || permit.category !== category ||
+      permit.candidateSetVersion !== candidateSetVersion || permit.url !== url) {
+    throw new Error(
+      `permit ${permitId} is for ${permit.agency} / ${permit.category} round ` +
+        `${permit.candidateSetVersion} ${permit.url}, not this record`
     );
   }
 
@@ -1231,7 +1260,89 @@ export function unresolvedDiscoveryRounds(log) {
 
 /** Permits issued and never consumed: a navigation authorised and never accounted for. */
 export function openDiscoveryPermits(log) {
-  return (log.discoveryPermits ?? []).filter((p) => p.consumedAt === null);
+  return (log.discoveryPermits ?? []).filter((p) => p.consumedAt === null && !p.closedAt);
+}
+
+export const PERMIT_DISPOSITIONS = Object.freeze({
+  /** No navigation occurred under this permit. */
+  UNUSED: 'unused',
+  /** A navigation occurred, but duplicated an inspection already recorded under another permit. */
+  DUPLICATE_REQUEST: 'duplicate-request',
+});
+
+/**
+ * Closes an open permit, with an explicit account of what happened under it.
+ *
+ * Deliberately not called "release": these permits were not unused. Two requests were made for
+ * each URL and only one discovery judgement recorded, so calling the remainder released would
+ * assert that no request occurred - the opposite of the truth. The two dispositions say which
+ * it was, and `duplicate-request` must name the inspection that accounts for the traffic.
+ */
+export function closeDiscoveryPermit(log, { permitId, disposition, reason, accountedBy = null }) {
+  const permit = (log.discoveryPermits ?? []).find((p) => p.id === permitId);
+  if (!permit) throw new Error(`permit ${permitId} does not exist`);
+  if (permit.consumedAt) {
+    throw new Error(`permit ${permitId} was consumed at ${permit.consumedAt} and cannot be closed`);
+  }
+  if (permit.closedAt) {
+    throw new Error(`permit ${permitId} was already closed at ${permit.closedAt} as ${permit.disposition}`);
+  }
+  if (!Object.values(PERMIT_DISPOSITIONS).includes(disposition)) {
+    throw new Error(`disposition must be one of ${Object.values(PERMIT_DISPOSITIONS).join(', ')}`);
+  }
+  if (typeof reason !== 'string' || reason.trim() === '') {
+    throw new Error('closing a permit requires a reason, which is recorded');
+  }
+
+  if (disposition === PERMIT_DISPOSITIONS.DUPLICATE_REQUEST) {
+    if (!accountedBy) {
+      throw new Error('a duplicate-request closure must name the discovery record that accounts for the traffic');
+    }
+    const record = log.attempts.find((a) => a.id === accountedBy);
+    if (!record) throw new Error(`discovery record ${accountedBy} does not exist`);
+    if (record.status !== 'discovery') throw new Error(`${accountedBy} is a ${record.status} attempt, not a discovery record`);
+    for (const [field, label] of [['agency', 'agency'], ['category', 'category'],
+      ['candidateSetVersion', 'round'], ['url', 'url']]) {
+      if (record[field] !== permit[field]) {
+        throw new Error(
+          `${accountedBy} is ${label} ${JSON.stringify(record[field])}, but permit ${permitId} is ` +
+            `${JSON.stringify(permit[field])}`
+        );
+      }
+    }
+  } else if (accountedBy) {
+    throw new Error('an unused closure names no discovery record: nothing was requested under it');
+  }
+
+  permit.closedAt = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
+  permit.disposition = disposition;
+  permit.closureReason = reason;
+  permit.accountedBy = accountedBy;
+  permit.closureId = `x-${String((log.discoveryPermits ?? []).filter((p) => p.closedAt).length).padStart(4, '0')}`;
+  return permit;
+}
+
+/** The traffic audit: what was authorised, what was used, and how the rest was accounted for. */
+export function permitAudit(log) {
+  const permits = log.discoveryPermits ?? [];
+  const closed = permits.filter((p) => p.closedAt);
+  return {
+    issued: permits.length,
+    consumed: permits.filter((p) => p.consumedAt).length,
+    closedUnused: closed.filter((p) => p.disposition === PERMIT_DISPOSITIONS.UNUSED).length,
+    closedDuplicateRequest: closed.filter((p) => p.disposition === PERMIT_DISPOSITIONS.DUPLICATE_REQUEST).length,
+    open: openDiscoveryPermits(log).length,
+    // A duplicate-request permit covered a real request, so it counts as traffic. It produced no
+    // additional inspection, candidate, page or observation, and is counted nowhere else.
+    networkRequestsAuthorised:
+      permits.filter((p) => p.consumedAt).length +
+      closed.filter((p) => p.disposition === PERMIT_DISPOSITIONS.DUPLICATE_REQUEST).length,
+    closures: closed.map((p) => ({
+      closureId: p.closureId, permitId: p.id, closedAt: p.closedAt,
+      disposition: p.disposition, reason: p.closureReason, accountedBy: p.accountedBy ?? null,
+      url: p.url, agency: p.agency, category: p.category, round: p.candidateSetVersion,
+    })),
+  };
 }
 
 /**
