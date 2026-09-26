@@ -54,7 +54,13 @@ describe('a discovery record identifies its round', () => {
   });
 
   test('an outcome distinguishes a method that was unavailable from one that found nothing', () => {
-    assert.deepEqual([...DISCOVERY_OUTCOMES], ['candidates-found', 'no-candidates', 'unavailable', 'disallowed']);
+    // selection-v1.0.21 added the last three. `no-candidates` says a page was read and held
+    // nothing; saying that of a page nobody could read would turn a failure of the method into a
+    // fact about the agency, and the denominator would count it as searched.
+    assert.deepEqual([...DISCOVERY_OUTCOMES], [
+      'candidates-found', 'no-candidates', 'unavailable', 'disallowed',
+      'robots-unestablished', 'retrieval-blocked', 'retrieval-inconclusive',
+    ]);
     const log = emptyLog();
     appendAttempt(log, discovery('https://w.govt.nz/s1', { outcome: 'unavailable', at: clock(), note: 'no search form' }));
     appendAttempt(log, discovery('https://w.govt.nz/s2', { outcome: 'no-candidates', at: clock() }));

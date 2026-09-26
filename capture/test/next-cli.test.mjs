@@ -21,7 +21,7 @@ import {
 } from '../run.mjs';
 import { parseDrawOrder } from '../selection.mjs';
 import { prepareSet, addDiscovery } from './helpers.mjs';
-import { dispositionForStatus, evaluatePolicy } from '../robots-policy.mjs';
+import { dispositionForStatus, evaluatePolicy, classifyResponse } from '../robots-policy.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const cli = join(here, '..', 'cli-capture.mjs');
@@ -673,7 +673,17 @@ describe('robots policy follows RFC 9309 status semantics', () => {
   });
 
   test('2xx means the file governs, and its rules are applied', () => {
-    assert.equal(dispositionForStatus(200), 'rules');
+    // selection-v1.0.21: a 2xx alone no longer yields `rules`. The status says a response arrived,
+    // not that it was a robots file - two NZSIS hosts answer with a 212-byte HTML challenge page
+    // and HTTP 200. `classifyResponse` decides the 2xx branch, from the representation.
+    assert.equal(dispositionForStatus(200), 'unestablished');
+    assert.equal(
+      classifyResponse({
+        status: 200, contentType: 'text/plain',
+        bytes: Buffer.from('User-agent: *\nDisallow: /search?\n'),
+      }).disposition,
+      'rules'
+    );
     const policy = { disposition: 'rules', httpStatus: 200, body: 'User-agent: *\nDisallow: /search?\n' };
     assert.equal(evaluatePolicy(policy, '/search?q=1').allowed, false);
     assert.equal(evaluatePolicy(policy, '/contact').allowed, true);

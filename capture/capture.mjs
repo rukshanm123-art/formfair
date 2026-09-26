@@ -259,6 +259,46 @@ export async function detectBlocking(page, httpStatus) {
   return { accessBarriers, submissionProtection, authenticationSignals };
 }
 
+/** A sign-in wall is a fact about the page; everything else may be bot management. */
+const isAuthBarrier = (barrier) => /sign-in wall/.test(barrier);
+
+/**
+ * Is the headed fallback warranted by this result?
+ *
+ * Only for an automation barrier. A sign-in wall is a finding about what the public can read, and
+ * opening a visible window would not change it.
+ */
+export function needsHeadedFallback(record) {
+  return (record?.accessBarriers ?? []).some((b) => !isAuthBarrier(b));
+}
+
+/**
+ * What to do with a capture result. One decision, from one record.
+ *
+ * capture-v1.0.7. This exists because the CLI made the decision in pieces, in an order that
+ * stopped being correct once the headed fallback was added: the sign-in branch ran BEFORE the
+ * fallback and was never revisited afterwards. A headed attempt that got past a challenge and
+ * revealed a sign-in wall then matched no branch at all - the sign-in test was behind it,
+ * `capture-blocked` tests for a non-auth barrier and none was left - and execution reached the
+ * adoption branch carrying a barrier, no file and no hash, where it died inside validation. The
+ * harness had established that page's ineligibility and could not write it down.
+ *
+ * As a function of the final record it cannot drift out of order, and the previously unreachable
+ * combination is a case in a table rather than a path nobody could run.
+ */
+export function captureDisposition(record) {
+  if (!record) return { kind: 'failed', authBarriers: [], automationBarriers: [] };
+  const barriers = record.accessBarriers ?? [];
+  const authBarriers = barriers.filter(isAuthBarrier);
+  const automationBarriers = barriers.filter((b) => !isAuthBarrier(b));
+  // A 429 outranks everything: the policy stops the run whatever else the page showed, and the
+  // markup already written for it must be dealt with before any other branch can adopt it.
+  if (record.httpStatus === 429) return { kind: 'rate-limited', authBarriers, automationBarriers };
+  if (authBarriers.length > 0) return { kind: 'excluded-sign-in', authBarriers, automationBarriers };
+  if (automationBarriers.length > 0) return { kind: 'capture-blocked', authBarriers, automationBarriers };
+  return { kind: 'adopt', authBarriers, automationBarriers };
+}
+
 /**
  * Captures one page.
  *

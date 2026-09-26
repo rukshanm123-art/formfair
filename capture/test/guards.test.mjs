@@ -23,9 +23,22 @@ import {
   consumeDiscoveryPermit, closeDiscoveryPermit, permitAudit, openDiscoveryPermits,
   checkPermitLedger,
   corpusBlockers,
-  checkCaptureFiles, writeDerived,
+  checkCaptureFiles, writeDerived, sha256,
 } from '../run.mjs';
 import { prepareSet, addDiscovery } from './helpers.mjs';
+
+/**
+ * A robots check fetched a few minutes ago, on the real clock.
+ *
+ * selection-v1.0.21. Every robots fixture here used to be dated `2026-09-25T08:00:00Z`, while the
+ * permits resting on them are stamped by `issueDiscoveryPermit` with the actual time. Once the
+ * calendar moved past 26 September those checks were more than twenty-four hours older than their
+ * own permits, the RFC 9309 section 2.4 rule refused them, and five tests started failing at HEAD
+ * with no code change at all. A fixture whose validity depends on the day it runs asserts nothing
+ * dependable.
+ */
+const recentIso = (minutesAgo = 10) =>
+  new Date(Date.now() - minutesAgo * 60 * 1000).toISOString().replace(/\.\d{3}Z$/, 'Z');
 import {
   parseDrawOrder, nextWork, CATEGORY_ORDER, MAX_CANDIDATES_PER_CATEGORY, MAX_QUALIFIED_AGENCIES, isSuperseded,
 } from '../selection.mjs';
@@ -602,7 +615,7 @@ describe('discovery without a resolved set blocks the corpus', () => {
     // A permit issued and never consumed means a request was authorised that nothing accounts for.
     const log = emptyLog();
     log.robotsChecks = [{
-      id: 'r-0001', origin: 'https://w.govt.nz', fetchedAt: '2026-09-25T08:00:00Z',
+      id: 'r-0001', origin: 'https://w.govt.nz', fetchedAt: recentIso(),
       httpStatus: 200, disposition: 'rules', body: '',
     }];
     log.attempts.push(capturedFor(agency));
@@ -907,9 +920,19 @@ describe('a permit is named by the record it authorises', () => {
   });
 
   /** An inspection recorded under its own consumed permit: what evidence has to look like. */
+  //
+  // selection-v1.0.21. Anchored to the REAL clock, a few minutes back, rather than to the literal
+  // 2026-09-25T08:00:00Z it used to pin. These four tests also issue a permit through
+  // `issueDiscoveryPermit`, which stamps the actual time, so once the calendar moved past
+  // 26 September the fixture's own robots check was more than twenty-four hours older than that
+  // permit and the lifecycle rule rightly refused it - RFC 9309 section 2.4. The tests were
+  // asserting behaviour that depended on the day they ran, and they began failing at HEAD
+  // without anything changing in the code.
+  const iso = (ms) => new Date(ms).toISOString().replace(/\.\d{3}Z$/, 'Z');
   function evidencedInspection(log, forUrl = url) {
+    const anchor = Date.now() - 10 * 60 * 1000;
     log.robotsChecks ??= [{
-      id: 'r-0001', origin: 'https://w.govt.nz', fetchedAt: '2026-09-25T08:00:00Z',
+      id: 'r-0001', origin: 'https://w.govt.nz', fetchedAt: iso(anchor),
       httpStatus: 200, disposition: 'rules', body: '',
     }];
     const p = issueDiscoveryPermit(log, { ...base, url: forUrl });
@@ -918,7 +941,7 @@ describe('a permit is named by the record it authorises', () => {
     // selection-v1.0.18: robots fetched <= issued <= navigated <= consumed. `issueDiscoveryPermit`
     // stamps real time, so the fixture pins the whole chain to one instant rather than mixing a
     // live clock with fixed past timestamps - which the lifecycle check now rightly refuses.
-    const when = '2026-09-25T08:00:00Z';
+    const when = iso(anchor + 60 * 1000);
     r.permitId = p.id;
     r.navigatedAt = when;
     p.issuedAt = when;
@@ -990,7 +1013,7 @@ describe('a permit is named by the record it authorises', () => {
   test('a properly closed permit does not withhold the corpus draft', () => {
     const log = emptyLog();
     log.robotsChecks = [{
-      id: 'r-0001', origin: 'https://w.govt.nz', fetchedAt: '2026-09-25T08:00:00Z',
+      id: 'r-0001', origin: 'https://w.govt.nz', fetchedAt: recentIso(),
       httpStatus: 200, disposition: 'rules', body: '',
     }];
     const agencyName = drawOrder[0].agency;
@@ -1034,7 +1057,7 @@ describe('the permit ledger describes traffic that happened', () => {
   const agency = 'TPK';
   const url = 'https://w.govt.nz/page';
   const scope = { agency, category: CAT, candidateSetVersion: 1, url };
-  const at = '2026-09-25T08:00:00Z';
+  const at = recentIso();
 
   /** A properly evidenced inspection: navigated, under its own consumed permit. */
   function realInspection(log, { navigatedAt = at, urlFor = url } = {}) {
@@ -1221,8 +1244,10 @@ describe('the permit ledger describes traffic that happened', () => {
  */
 describe('a permit and its inspection are one to one', () => {
   const CAT = 'account-registration';
-  const at = '2026-09-25T08:00:00Z';
-  const later = '2026-09-25T08:00:10Z';
+  const at = recentIso();
+  // Derived from `at`, not written out: as a literal it silently became EARLIER than `at` once
+  // the anchor moved to the real clock, and the pacing check then reported a negative gap.
+  const later = new Date(Date.parse(at) + 10_000).toISOString().replace(/\.\d{3}Z$/, 'Z');
 
   function ledger() {
     const log = emptyLog();
@@ -1399,13 +1424,13 @@ describe('status and the corpus gate cannot disagree', () => {
     log.attempts.push(capturedPage(agency));
     settled(log, agency);
     log.robotsChecks = [{
-      id: 'r-0001', origin: 'https://w.govt.nz', fetchedAt: '2026-09-25T08:00:00Z',
+      id: 'r-0001', origin: 'https://w.govt.nz', fetchedAt: recentIso(),
       httpStatus: 200, disposition: 'rules', body: '',
     }];
     const permit = issueDiscoveryPermit(log, {
       agency, category: CAT, candidateSetVersion: 1, url: 'https://w.govt.nz/x', robotsCheckId: 'r-0001',
     });
-    permit.consumedAt = '2026-09-25T08:00:00Z'; // consumed, but no record names it
+    permit.consumedAt = recentIso(5); // consumed, but no record names it
 
     assert.ok(corpusBlockers(log).some((b) => b.kind === 'permit-ledger'));
     assert.throws(() => deriveDraft(log, opts), /permit ledger problem|the corpus cannot be built/);
@@ -1417,7 +1442,7 @@ describe('status and the corpus gate cannot disagree', () => {
       'pending attempt': (log) => { log.attempts.push({ ...capturedPage(agency), pageId: 'p2', url: 'https://w.govt.nz/2', finalUrl: 'https://w.govt.nz/2', approval: APPROVAL.PENDING }); },
       'unapproved set': (log) => { log.candidateSets[`${agency}\u0000${CAT}`].approval = APPROVAL.PENDING; },
       'open permit': (log) => {
-        log.robotsChecks = [{ id: 'r-0001', origin: 'https://w.govt.nz', fetchedAt: '2026-09-25T08:00:00Z', httpStatus: 200, disposition: 'rules', body: '' }];
+        log.robotsChecks = [{ id: 'r-0001', origin: 'https://w.govt.nz', fetchedAt: recentIso(), httpStatus: 200, disposition: 'rules', body: '' }];
         issueDiscoveryPermit(log, { agency, category: CAT, candidateSetVersion: 1, url: 'https://w.govt.nz/open', robotsCheckId: 'r-0001' });
       },
       clean: () => {},
@@ -1825,10 +1850,12 @@ describe('only four permit states are valid', () => {
  * but an orphan in that directory looks like corpus material, and nothing detected it.
  */
 describe('the captures directory matches the log', () => {
-  const captured = (pageId, file) => ({
+  // capture-v1.0.7: the digest must be the real one. `htmlSha256: 'x'` was a placeholder that the
+  // gate had no reason to look at while it compared filenames only.
+  const captured = (pageId, file, html = null) => ({
     agency: 'TPK', category: 'enquiry-or-contact', status: 'captured', approval: APPROVAL.APPROVED,
     url: `https://w.govt.nz/${pageId}`, finalUrl: `https://w.govt.nz/${pageId}`,
-    pageId, file, htmlSha256: 'x', inclusionEvidence: 'has a name field',
+    pageId, file, htmlSha256: html === null ? 'x' : sha256(html), inclusionEvidence: 'has a name field',
     capturedAt: '2026-09-26T00:00:00Z', browser: 'Chromium 1', automationTool: 'playwright 1',
     viewport: { width: 1280, height: 800 }, locale: 'en-NZ', redirects: [],
   });
@@ -1885,9 +1912,28 @@ describe('the captures directory matches the log', () => {
   test('a matching directory and log pass', () => {
     inDir((dir) => {
       const log = emptyLog();
-      writeFileSync(join(dir, 'captures', 'real.html'), '<html></html>');
-      log.attempts.push(captured('real', 'real.html'));
+      const html = '<html></html>';
+      writeFileSync(join(dir, 'captures', 'real.html'), html);
+      log.attempts.push(captured('real', 'real.html', html));
       assert.deepEqual(checkCaptureFiles(log, join(dir, 'captures')), []);
+    });
+  });
+
+  test('a file whose bytes no longer match its logged digest is caught', () => {
+    // capture-v1.0.7. Name correspondence said a file with the right name existed and nothing
+    // about its contents, so a capture edited after approval would have been sealed under a hash
+    // it no longer had.
+    inDir((dir) => {
+      const log = emptyLog();
+      const html = '<html><input name="name"></html>';
+      writeFileSync(join(dir, 'captures', 'real.html'), html);
+      log.attempts.push(captured('real', 'real.html', html));
+      assert.deepEqual(checkCaptureFiles(log, join(dir, 'captures')), []);
+
+      writeFileSync(join(dir, 'captures', 'real.html'), `${html}<!-- tampered -->`);
+      const problems = checkCaptureFiles(log, join(dir, 'captures'));
+      assert.equal(problems.length, 1);
+      assert.match(problems[0], /is not the markup that was captured/);
     });
   });
 

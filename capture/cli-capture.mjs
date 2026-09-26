@@ -18,10 +18,12 @@
  */
 
 import { existsSync, readFileSync, mkdirSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { join, resolve, relative } from 'node:path';
 import { chromium } from 'playwright';
-import { capturePage, validateUrl, validatePageId, CATEGORIES } from './capture.mjs';
-import { POLICY, parseRobots, isAllowed, createPacer } from './politeness.mjs';
+import {
+  capturePage, validateUrl, validatePageId, CATEGORIES, captureDisposition, needsHeadedFallback,
+} from './capture.mjs';
+import { POLICY, createPacer } from './politeness.mjs';
 import {
   readLog, writeLog, appendAttempt, writeDerived, ELIGIBILITY_CRITERIA, APPROVAL,
   recordCandidates, lockCandidateSet, categorySettled, approveCandidateSet,
@@ -30,11 +32,13 @@ import {
   issueDiscoveryPermit, consumeDiscoveryPermit, findOpenPermit,
   unresolvedDiscoveryRounds, openDiscoveryPermits, robotsCheckIsFresh, isDiscoverySuperseded,
   reopenCandidateSet, closeDiscoveryPermit, permitAudit, PERMIT_DISPOSITIONS, corpusBlockers,
+  quarantineCapture, recordDeviation,
 } from './run.mjs';
 import { fetchRobotsPolicy, evaluatePolicy, DISPOSITION } from './robots-policy.mjs';
 import {
   DISCOVERY_KINDS, DISCOVERY_METHODS, DISCOVERY_OUTCOMES, remainingBudget, canonicalise,
   SEARCH_TERMS, parseDrawOrder, nextWork, isSuperseded, MAX_QUALIFIED_AGENCIES,
+  TECHNICAL_ATTRITION_OUTCOMES,
 } from './selection.mjs';
 import { readFileSync as readFile } from 'node:fs';
 import { buildPacket, renderPacket } from './packet.mjs';
@@ -107,21 +111,6 @@ const now = () => new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
 const logPathFor = (dir) => join(resolve(dir), 'capture-log.json');
 const require_ = (name) => flag(name) ?? die(`--${name} is required\n\n${USAGE}`);
 
-/** Fetches and parses robots.txt for an origin, cached for the life of the process. */
-const robotsCache = new Map();
-async function robotsFor(origin) {
-  if (robotsCache.has(origin)) return robotsCache.get(origin);
-  let groups = null;
-  try {
-    const res = await fetch(new URL('/robots.txt', origin), { redirect: 'follow' });
-    if (res.ok) groups = parseRobots(await res.text());
-  } catch {
-    groups = null; // Unreachable robots.txt is treated as absent, which is standard.
-  }
-  robotsCache.set(origin, groups);
-  return groups;
-}
-
 const pacer = createPacer();
 
 async function doCapture() {
@@ -154,19 +143,40 @@ async function doCapture() {
   };
 
   // robots.txt decides before anything is fetched from the site itself.
-  const groups = await robotsFor(parsed.origin);
-  const verdict = isAllowed(groups, parsed.pathname + parsed.search, 'chromium');
+  //
+  // capture-v1.0.7. Through the RECORDED policy, not a per-process cache of its own. The capture
+  // path kept its own `robotsFor`, which re-requested robots.txt on every invocation without
+  // writing a record of it, treated an unreachable file as absent and therefore permissive, and
+  // read a 200 as a policy whatever it contained. Discovery had all three defects fixed in turn
+  // while capture still had every one of them - the same rule, enforced in one place and not the
+  // other, which is how this scan keeps rediscovering the same class of hole.
+  const cachedCheck = findRobotsCheck(log, parsed.origin);
+  let check = robotsCheckIsFresh(cachedCheck) ? cachedCheck : null;
+  if (!check) {
+    check = recordRobotsCheck(log, await fetchRobotsPolicy(parsed.origin));
+    writeLog(logPath, log); // the request happened, so its record survives whatever follows
+  }
+  const verdict = evaluatePolicy(check, parsed.pathname + parsed.search, 'chromium');
   if (!verdict.allowed) {
+    // An unestablished policy is not a refusal by the host, so the reason must not say it was.
     const attempt = {
       ...base, status: 'excluded', category,
-      exclusionReason: `robots.txt disallows this path (${verdict.reason})`,
+      exclusionReason: verdict.unestablished
+        ? `not retrieved: ${verdict.reason}`
+        : `robots.txt disallows this path (${verdict.reason})`,
       eligibility: Object.fromEntries(ELIGIBILITY_CRITERIA.map((c) => [c, null])),
       politeness: { robots: verdict.reason },
+      robotsCheckId: check.id,
     };
     appendAttempt(log, attempt);
     writeLog(logPath, log);
     writeDerived({ log, dir, frameSha256: flag('frame-sha256'), drawOrderSha256: flag('draw-order-sha256'), synthetic: has('synthetic') });
-    console.log(`excluded: robots.txt disallows ${url}`);
+    console.log(
+      verdict.unestablished
+        ? `excluded without retrieving: no robots policy established for ${parsed.origin}`
+        : `excluded: robots.txt disallows ${url}`
+    );
+    console.log(`reason: ${verdict.reason}`);
     return;
   }
 
@@ -225,26 +235,9 @@ async function doCapture() {
   //                         headed Chromium; if still barred, `capture-blocked`.
   //
   // Collapsing them is what produced an eligibility claim the evidence did not support.
-  const isAuthBarrier = (b) => /sign-in wall/.test(b);
-  const authBarriers = (record?.accessBarriers ?? []).filter(isAuthBarrier);
-  const automationBarriers = (record?.accessBarriers ?? []).filter((b) => !isAuthBarrier(b));
-
-  if (record && authBarriers.length > 0) {
-    appendAttempt(log, {
-      ...base, status: 'excluded', category, finalUrl: record.finalUrl,
-      exclusionReason: `not publicly reachable: ${authBarriers.join(', ')}`,
-      eligibility: { ...Object.fromEntries(ELIGIBILITY_CRITERIA.map((c) => [c, null])),
-        publiclyReachableWithoutSigningIn: false },
-      attemptedModes,
-      politeness: { robots: verdict.reason, userAgent: record.userAgent },
-    });
-    writeLog(logPath, log);
-    writeDerived({ log, dir, frameSha256: flag('frame-sha256'), drawOrderSha256: flag('draw-order-sha256'), synthetic: has('synthetic') });
-    console.log(`excluded: ${authBarriers.join(', ')}`);
-    return;
-  }
-
-  if (record && automationBarriers.length > 0) {
+  // The headed fallback is attempted for an AUTOMATION barrier only. A sign-in wall is a finding
+  // about the page, and retrying it in a visible window would not change what the public sees.
+  if (needsHeadedFallback(record)) {
     console.error(
       `headless Chromium was access-barred (${record.accessBarriers.join(', ')}); ` +
         'retrying once with headed Chromium in a fresh context'
@@ -266,10 +259,62 @@ async function doCapture() {
     }
   }
 
+  // capture-v1.0.7. Classified from the FINAL record, after the fallback, and once.
+  //
+  // The previous order decided what the barriers meant from the headless attempt and then ran the
+  // fallback, so the classification described a page that had since been fetched again. A headed
+  // attempt that got past a challenge and revealed a sign-in wall fell through every branch: the
+  // sign-in exclusion was already behind it, `capture-blocked` tests for a non-auth barrier and
+  // there was none left, and the run reached the captured branch with a record carrying a barrier,
+  // no file and no hash - where it died inside validation. A page whose eligibility the harness
+  // had in fact established could not be recorded at all, and the failure looked like a bug in
+  // the log rather than in the order of these checks.
+  const disposition = captureDisposition(record);
+  const { authBarriers } = disposition;
+
+  // Before anything else: a 429 stops the run by policy, and the markup for this page is already
+  // on disk. Every exit from here on must leave the captures directory owning nothing it cannot
+  // account for, so the file is quarantined rather than left behind or deleted.
+  if (disposition.kind === 'rate-limited') {
+    const reason =
+      `HTTP 429 for ${url} at ${record.capturedAt ?? now()}. The run stops here by policy, so this ` +
+      'markup was never adopted as a capture. Preserved as evidence of the response.';
+    const moved = record.file ? quarantineCapture(capturesDir, record.file, { reason }) : null;
+    appendAttempt(log, {
+      ...base, status: 'failed', category, finalUrl: record.finalUrl,
+      exclusionReason:
+        'HTTP 429: the server asked for a slower rate and the run stops by policy. No judgement ' +
+        'was made about this page.',
+      eligibility: Object.fromEntries(ELIGIBILITY_CRITERIA.map((c) => [c, null])),
+      attemptedModes,
+      quarantinedFile: moved ? relative(resolve(dir), moved) : null,
+      politeness: { robots: verdict.reason, userAgent: record.userAgent },
+    });
+    writeLog(logPath, log);
+    writeDerived({ log, dir, frameSha256: flag('frame-sha256'), drawOrderSha256: flag('draw-order-sha256'), synthetic: has('synthetic') });
+    if (moved) console.error(`quarantined ${record.file} -> ${moved}`);
+    die('HTTP 429 received. The run stops here by policy. Respect Retry-After before resuming.');
+  }
+
+  if (disposition.kind === 'excluded-sign-in') {
+    appendAttempt(log, {
+      ...base, status: 'excluded', category, finalUrl: record.finalUrl,
+      exclusionReason: `not publicly reachable: ${authBarriers.join(', ')}`,
+      eligibility: { ...Object.fromEntries(ELIGIBILITY_CRITERIA.map((c) => [c, null])),
+        publiclyReachableWithoutSigningIn: false },
+      attemptedModes,
+      politeness: { robots: verdict.reason, userAgent: record.userAgent },
+    });
+    writeLog(logPath, log);
+    writeDerived({ log, dir, frameSha256: flag('frame-sha256'), drawOrderSha256: flag('draw-order-sha256'), synthetic: has('synthetic') });
+    console.log(`excluded: ${authBarriers.join(', ')}`);
+    return;
+  }
+
   // Both modes barred: the harness could not retrieve the page. That is recorded as its own
   // outcome, with every eligibility criterion left unknown, because nothing here establishes
   // whether the public can reach it.
-  if (record && record.blocked && record.accessBarriers.some((b) => !isAuthBarrier(b))) {
+  if (disposition.kind === 'capture-blocked') {
     appendAttempt(log, {
       ...base, status: 'capture-blocked', category, finalUrl: record.finalUrl,
       exclusionReason:
@@ -282,28 +327,35 @@ async function doCapture() {
     });
     writeLog(logPath, log);
     writeDerived({ log, dir, frameSha256: flag('frame-sha256'), drawOrderSha256: flag('draw-order-sha256'), synthetic: has('synthetic') });
-    die(`capture-blocked: ${record.accessBarriers.join(', ')} in both browser modes`);
+    die(`capture-blocked: ${record.accessBarriers.join(', ')} in ${attemptedModes.length} browser mode(s)`);
   }
 
-  if (record.httpStatus === 429) {
-    die('HTTP 429 received. The run stops here by policy. Respect Retry-After before resuming.');
+  try {
+    appendAttempt(log, {
+      ...base, ...record, status: 'captured',
+      inclusionEvidence: evidence,
+      eligibility: {
+        // Mechanically established by this run.
+        publiclyReachableWithoutSigningIn: record.accessBarriers.length === 0,
+        nameFieldVisibleWithoutEnteringDataOrSubmitting: true,
+        normalHtmlOrBrowserRenderedNotPdfOrNative: true,
+        // Proposed by the operator and confirmed at approval, per the frozen criteria.
+        reachedFromFrameWebsiteForThatAgency: true,
+        asksForTheNameOfANaturalPerson: true,
+      },
+      attemptedModes,
+      politeness: { robots: verdict.reason, userAgent: record.userAgent, settleMs },
+    });
+  } catch (error) {
+    // capture-v1.0.7. Any refusal after the markup is written must take the file with it. A
+    // validation failure used to leave an unowned capture in the directory, which then blocked
+    // every later build with a complaint about an orphan whose origin nothing recorded.
+    const moved = record.file
+      ? quarantineCapture(capturesDir, record.file, { reason: `not adopted: ${error.message}` })
+      : null;
+    if (moved) console.error(`quarantined ${record.file} -> ${moved}`);
+    throw error;
   }
-
-  appendAttempt(log, {
-    ...base, ...record, status: 'captured',
-    inclusionEvidence: evidence,
-    eligibility: {
-      // Mechanically established by this run.
-      publiclyReachableWithoutSigningIn: record.accessBarriers.length === 0,
-      nameFieldVisibleWithoutEnteringDataOrSubmitting: true,
-      normalHtmlOrBrowserRenderedNotPdfOrNative: true,
-      // Proposed by the operator and confirmed at approval, per the frozen criteria.
-      reachedFromFrameWebsiteForThatAgency: true,
-      asksForTheNameOfANaturalPerson: true,
-    },
-    attemptedModes,
-    politeness: { robots: verdict.reason, userAgent: record.userAgent, settleMs },
-  });
   writeLog(logPath, log);
   const { ledgerPath, draftHeld } = writeDerived({
     log, dir, frameSha256: flag('frame-sha256'), drawOrderSha256: flag('draw-order-sha256'),
@@ -389,6 +441,10 @@ function doStatus() {
   console.log(`  captured      ${by((a) => a.status === 'captured')}`);
   console.log(`  excluded      ${by((a) => a.status === 'excluded')}`);
   console.log(`  failed        ${by((a) => a.status === 'failed')}`);
+  // capture-v1.0.7. Both statuses were missing, so the four printed lines did not sum to the
+  // total above them and a `capture-blocked` page appeared nowhere in the report at all.
+  console.log(`  blocked       ${by((a) => a.status === 'capture-blocked')}`);
+  console.log(`  discovery     ${by((a) => a.status === 'discovery')}`);
 
   const approvedCaptures = by((a) => a.status === 'captured' && a.approval === APPROVAL.APPROVED);
   console.log(`approved captures ${approvedCaptures} of a target of ${MAX_QUALIFIED_AGENCIES}`);
@@ -400,6 +456,22 @@ function doStatus() {
         `${audit.closedDuplicateRequest} closed duplicate-request, ${audit.closedUnused} closed unused, ` +
         `${audit.open} open`
     );
+    if (audit.recordedLate) {
+      console.log(`  ${audit.recordedLate} record(s) written more than an hour after the navigation`);
+    }
+  }
+  const attrition = log.attempts.filter(
+    (a) => a.status === 'discovery' && TECHNICAL_ATTRITION_OUTCOMES.includes(a.outcome)
+  );
+  if (attrition.length) {
+    console.log(`technical discovery attrition: ${attrition.length} record(s)`);
+    const byOutcome = {};
+    for (const a of attrition) byOutcome[a.outcome] = (byOutcome[a.outcome] ?? 0) + 1;
+    for (const [outcome, n] of Object.entries(byOutcome)) console.log(`  ${outcome}: ${n}`);
+  }
+  if ((log.deviations ?? []).length) {
+    console.log(`recorded deviations: ${log.deviations.length}`);
+    for (const d of log.deviations) console.log(`  ${d.id} ${d.kind}: ${d.summary}`);
   }
 
   // selection-v1.0.17. The same list the corpus gate reads. Computing it separately here is how
@@ -701,10 +773,16 @@ async function doPreflightDiscovery() {
     return;
   }
 
-  // Forbidden: record it directly and make no request to the target.
+  // Withheld: record it directly and make no request to the target.
+  //
+  // selection-v1.0.21. Two reasons to withhold, and they are not the same finding. `disallowed`
+  // says the host published a policy forbidding this path. An unestablished policy says the host
+  // published nothing we could read - so recording it as `disallowed` would put a refusal in the
+  // record that no server ever made, and would attribute to the agency a decision it did not take.
   appendAttempt(log, {
     examinedAt: now(), agency, website, url,
-    status: 'discovery', discoveryKind: method, outcome: 'disallowed',
+    status: 'discovery', discoveryKind: method,
+    outcome: verdict.unestablished ? 'robots-unestablished' : 'disallowed',
     category, candidateSetVersion: setVersion,
     navigationPerformed: false,
     checkedAt: now(),
@@ -714,8 +792,58 @@ async function doPreflightDiscovery() {
   });
   writeLog(logPath, log);
   writeDerived({ log, dir, frameSha256: flag('frame-sha256'), drawOrderSha256: flag('draw-order-sha256'), synthetic: has('synthetic') });
-  console.log(`disallowed, recorded without navigating: ${url}`);
+  console.log(
+    verdict.unestablished
+      ? `no robots policy established, recorded without navigating: ${url}`
+      : `disallowed, recorded without navigating: ${url}`
+  );
   console.log(`reason: ${verdict.reason}`);
+}
+
+/**
+ * Re-reads one origin's robots policy and appends the result. Nothing else is requested.
+ *
+ * selection-v1.0.21. Needed because a policy recorded under the old classifier may be wrong about
+ * what it read, and the correction has to be a fresh observation rather than a re-labelling of the
+ * old record - which is append-only and stays exactly as it was. `/robots.txt` is implicitly
+ * allowed by RFC 9309 section 2.2.2, so this needs no permit; it records its own request.
+ */
+async function doRecheckRobots() {
+  const dir = require_('out');
+  const origin = new URL(require_('origin')).origin;
+  const logPath = logPathFor(dir);
+  const log = readLog(logPath);
+  const previous = findRobotsCheck(log, origin);
+  const check = recordRobotsCheck(log, await fetchRobotsPolicy(origin));
+  writeLog(logPath, log);
+  console.log(`${check.id} ${origin} HTTP ${check.httpStatus ?? 'unreachable'} -> ${check.disposition}`);
+  console.log(`content-type: ${check.contentType ?? 'none'}  bytes: ${check.bytes}  sha256: ${check.sha256.slice(0, 16)}`);
+  if (check.representation) console.log(`representation: ${check.representation.reason}`);
+  if (check.representation?.challenge) console.log(`challenge: ${check.representation.challenge}`);
+  if (previous) {
+    console.log(`previous: ${previous.id} ${previous.disposition} (${previous.fetchedAt}) - retained unchanged`);
+  }
+}
+
+/** Records a structured deviation from the frozen protocol, with the evidence it rests on. */
+function doDeviation() {
+  const dir = require_('out');
+  const logPath = logPathFor(dir);
+  const log = readLog(logPath);
+  const list = (name) => (flag(name) ? flag(name).split(',').map((v) => v.trim()).filter(Boolean) : undefined);
+  const deviation = recordDeviation(log, {
+    kind: require_('kind'),
+    summary: require_('summary'),
+    detail: require_('detail'),
+    ...(list('robots-checks') ? { robotsCheckIds: list('robots-checks') } : {}),
+    ...(list('permits') ? { permitIds: list('permits') } : {}),
+    ...(list('attempts') ? { attemptIds: list('attempts') } : {}),
+    ...(flag('requests-affected') ? { requestsAffected: Number(flag('requests-affected')) } : {}),
+    ...(has('no-candidate-evidence') ? { candidateEvidenceObtained: false } : {}),
+    ...(list('corrected-by') ? { correctedBy: list('corrected-by') } : {}),
+  });
+  writeLog(logPath, log);
+  console.log(`recorded deviation ${deviation.id}: ${deviation.kind}`);
 }
 
 /**
@@ -755,7 +883,8 @@ function doClosePermit() {
 }
 
 const commands = { packet: doPacket, candidates: doCandidates, lock: doLock, 'approve-set': doApproveSet,
-  'supersede-set': doSupersedeSet, publish: doPublish, next: doNext, capture: doCapture, exclude: doExclude, discovery: doDiscovery, budget: doBudget, approve: doApprove, status: doStatus, build: doBuild, exhaust: doExhaust, 'preflight-discovery': doPreflightDiscovery, 'reopen-set': doReopenSet, 'close-permit': doClosePermit };
+  'supersede-set': doSupersedeSet, publish: doPublish, next: doNext, capture: doCapture, exclude: doExclude, discovery: doDiscovery, budget: doBudget, approve: doApprove, status: doStatus, build: doBuild, exhaust: doExhaust, 'preflight-discovery': doPreflightDiscovery, 'reopen-set': doReopenSet, 'close-permit': doClosePermit,
+  deviation: doDeviation, 'recheck-robots': doRecheckRobots };
 if (!commands[command]) die(USAGE);
 try {
   await commands[command]();

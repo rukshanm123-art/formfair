@@ -329,6 +329,14 @@ describe('a blocked capture is not an eligibility finding', () => {
 
   before(async () => {
     barrier = createServer((req, res) => {
+      // A real site behind bot management still serves its robots file as text/plain. The fixture
+      // served the form for every path including /robots.txt, and once the capture path started
+      // reading the RECORDED policy (capture-v1.0.7) that 200-with-text/html was correctly
+      // classified `unestablished`, so the page was withheld and the fallback never ran.
+      if (req.url === '/robots.txt') {
+        res.writeHead(200, { 'content-type': 'text/plain' });
+        return res.end('User-agent: *\nDisallow: /nothing\n');
+      }
       const headless = /HeadlessChrome/.test(req.headers['user-agent'] ?? '');
       const mode = headless ? 'headless' : 'headed';
       if (blockModes.has(mode)) {

@@ -2077,3 +2077,178 @@ rejected attempt is preserved and its replacement must name it; and the capture 
 against its own source to use no stored state, no invented user agent, no stealth plugin, no init
 script, no typing and no clicking — because that distinction lives in what the code does *not* do,
 which no behavioural test can observe. The capture package has 280 tests.
+
+## Amendment 26: a 200 is not a robots file
+
+**Dated 27 September 2026.** `selection-v1.0.21` and `capture-v1.0.7`. Moves no earlier tag.
+
+**Triggered before any New Zealand Security Intelligence Service discovery record was written, and
+before any candidate set was locked.** Agency 4 in the frozen draw order has three frame websites.
+All three sit behind Imperva/Incapsula, and two of them answer `/robots.txt` with **HTTP 200 and a
+212-byte HTML challenge page**:
+
+```
+r-0012  https://www.nzsis.govt.nz/robots.txt               200  text/html  212 bytes
+r-0013  https://www.protectivesecurity.govt.nz/robots.txt  200  text/html  212 bytes
+r-0014  https://providinginformation.nzsis.govt.nz/robots.txt  404         0 bytes
+```
+
+Both 200 bodies are byte-identical, SHA-256 `d0203228…`, and open:
+
+```html
+<html><head><META NAME="robots" CONTENT="noindex,nofollow">
+<script src="/_Incapsula_Resource?SWJIYLWA=…"></script><body></body></html>
+```
+
+`fetchRobotsPolicy` classified them on the status code alone, so both were recorded as disposition
+`rules`. `parseRobots` finds no directives in HTML and returns `[]`; `isAllowed` then answers:
+
+```
+isAllowed('/user/register') -> { allowed: true, reason: "no applicable rule" }
+```
+
+So the log recorded that robots permitted the path, on the evidence of a document that is not a
+robots file and says nothing whatever about crawling. **Nine permits were issued on that basis and
+all nine requests were made.** Every one returned a challenge page or, on the third host, a 404 or a
+client-rendered shell; none returned agency content.
+
+### Why neither existing disposition fits
+
+RFC 9309 §2.3 requires the `/robots.txt` representation to be UTF-8 `text/plain`. A 2xx that is not
+one establishes **no policy at all**, and that is a third state:
+
+- not `rules`, because nothing was parsed;
+- not `allow-all`, because the host *did* serve something and we cannot read it — and reading a
+  challenge page as permission is the defect itself;
+- not `disallow-all`, because the host has refused nothing. Recording a refusal the server never
+  made would attribute to the agency a decision it did not take.
+
+### `unestablished`
+
+A fourth disposition. It means the host returned something other than a valid robots
+representation. It is **not** `allow-all`, **not** `disallow-all`, and **not** an eligibility
+finding. Automated discovery is withheld for **every path on that origin except a later
+`/robots.txt` recheck** — which stays retrievable under RFC 9309 §2.2.2, or an origin that answered
+with a challenge once could never be re-checked. The limitation is reported as **technical discovery
+attrition**, and it is cached for no more than 24 hours like any other policy.
+
+A 2xx is classified `rules` only when all three hold:
+
+1. the media type is `text/plain`, parameters such as `charset=utf-8` permitted;
+2. the bytes are valid UTF-8;
+3. the body is not HTML and not a recognised challenge document.
+
+**An empty `text/plain` robots file is valid and means no rules.** At least one directive is *not*
+required: a server may legitimately publish an empty policy, and demanding a directive would turn a
+real permissive policy into an unreadable one. The media type is also a claim by the server, so
+markup labelled `text/plain` is still `unestablished`; vendor detection names what was served
+(Imperva/Incapsula, Cloudflare, Akamai, AWS WAF) but the decision does not rest on it, because HTML
+disqualifies a robots representation whether or not the vendor is recognised.
+
+### Three attrition outcomes, because `no-candidates` would have been a false statement
+
+`no-candidates` asserts that a page was read and contained nothing. Said of a page nobody could
+read, it converts a failure of the method into a fact about the ministry, and the prevalence
+denominator then counts an agency as searched when it was not.
+
+| outcome | request made? | what it means |
+| --- | --- | --- |
+| `robots-unestablished` | no | no policy could be read, so discovery was withheld. Not a refusal by the host. |
+| `retrieval-blocked` | yes | answered with a challenge or refusal. No agency content and no candidate judgement obtained. |
+| `retrieval-inconclusive` | yes, successfully | nothing arrived on which a candidate judgement could rest — a client-rendered shell, for instance. The page is neither absent nor empty; this method could not read it. |
+
+`preflight-discovery` now records `robots-unestablished` rather than `disallowed` when no policy
+could be established, for the same reason: the two are different findings.
+
+### The nine permits, accounted for and not closed as unused
+
+All nine authorised real requests, so none is `unused` and none is `duplicate-request`. Each is
+consumed by a discovery record carrying its **real** navigation timestamp, taken from the retained
+response files rather than invented:
+
+- **`p-0084`–`p-0089`** (`www.nzsis.govt.nz` and `www.protectivesecurity.govt.nz`, robots, sitemap
+  and home page): `retrieval-blocked`, each recording HTTP status, content type, byte count,
+  SHA-256 and the Incapsula signature, and each stating that no agency content and no candidate
+  judgement was obtained.
+- **`p-0090`–`p-0091`** (`providinginformation.nzsis.govt.nz/robots.txt` and `/sitemap.xml`):
+  `unavailable`. Both genuinely returned 404. The robots distinction is kept — RFC 9309 §2.3.1.3
+  permits subsequent requests — but those two resources were themselves unavailable.
+- **`p-0092`** (`providinginformation.nzsis.govt.nz/`): **`retrieval-inconclusive`, not
+  `unavailable`.** The retained response is HTTP **200** with a genuine client-rendered application
+  shell — `<script src="static/main.min.js">`, a websocket parameter block, release `v1.2.0-rc1` —
+  and no Incapsula markup. The assumption that all three of this host's requests returned 404 does
+  not hold for the home page, so recording it as `unavailable` would have been false.
+
+### Recording a real past navigation
+
+The previous rule refused to consume a permit issued more than an hour earlier, whatever the
+navigation time said. That conflated two different things: the permit's life governs the **request**,
+while writing the record down later is a **disclosure** problem. Under the old rule these nine
+navigations — each made seconds after its own permit — became impossible to record once an hour had
+passed, and would have stayed permanently unaccounted for.
+
+So a navigation is accepted when `issued ≤ navigatedAt ≤ issued + 1h`, whenever the record is
+written, and the delay is **disclosed**: `permitAudit` reports `recordedLate` and the affected
+records, **derived** from consumption time against the recorded navigation time rather than stored,
+so it cannot be omitted by a writer. Consuming a stale permit with **no** navigation time remains
+refused — with nothing saying when the request happened, consumption time is the only evidence of it.
+
+### Structured deviations
+
+The earlier robots breach was disclosed in a dated note beside the politeness clause. That is
+honest but not checkable: nothing verified that the record identifiers it cited existed, and nothing
+would notice if a later correction made it false. A deviation is now **data**: append-only, naming
+its robots checks, permits and attempts, validated against the log at write time *and* at every
+gate, published with the provenance. A deviation naming a permit that does not exist is refused, and
+one asserting that no candidate evidence was obtained while naming a record that reports
+`candidates-found` is refused. A disclosure nobody can check is worth less than none, because it
+also buys credit.
+
+`v-0001` records this one: robots checks `r-0012` and `r-0013`, permits `p-0084`–`p-0089`, the six
+requests made under the invalid permissive interpretation, and that none yielded candidate evidence.
+The historical records are **not rewritten**.
+
+### Capture integrity (`capture-v1.0.7`)
+
+Four items identified with Amendment 25 and not closed by it. Only the weak assertion was fixed
+then, in `4835aed`.
+
+**The result is reclassified after the fallback.** The CLI decided what the barriers meant from the
+*headless* attempt and then ran the headed retry, never revisiting the decision. A headed attempt
+that got past a challenge and revealed a **sign-in wall** therefore matched no branch at all — the
+sign-in test was already behind it, `capture-blocked` tests for a non-auth barrier and none was
+left — and execution reached the adoption branch with a record carrying a barrier, no file and no
+hash, where it died inside validation. A page whose ineligibility the harness had in fact
+established could not be written down, and the failure looked like a bug in the log. The decision is
+now one function of the final record, so it cannot drift out of order, and that combination is a row
+in a table rather than a path nobody could reach.
+
+**Every capture file is hashed against its logged digest.** Correspondence by filename established
+that a file with the right name existed and nothing about its contents, so a capture edited,
+truncated or replaced afterwards passed every gate and would have been sealed under a hash it no
+longer had.
+
+**No refusal after the write leaves an orphan.** `capturePage` writes the markup as soon as the page
+is readable, and HTTP 429 then stopped the run with `die()` — leaving the file in the captures
+directory, owned by nothing, which blocked every later build with a complaint about an orphan whose
+origin nothing recorded. A 429 is now recorded as a `failed` attempt making no judgement about the
+page, and the file is **quarantined** — preserved, because it is evidence of the response — as is
+any file whose adoption is refused for any other reason.
+
+**`capture-blocked` is counted.** It appeared in neither `status` nor the published provenance, so
+the printed columns did not sum to the total above them and a page the harness could not retrieve
+appeared nowhere in the audit. `status` now also prints `discovery`, so the lines add up.
+
+**And the capture path now reads the *recorded* robots policy.** It kept a per-process `robotsFor`
+of its own, which re-requested `robots.txt` on every invocation without recording it, treated an
+unreachable file as absent and therefore permissive, and read a 200 as a policy whatever it
+contained. Discovery had all three defects fixed in turn while capture still had every one — the
+same rule enforced in one place and not the other, which is how this scan keeps rediscovering one
+class of hole.
+
+### What this does not establish
+
+Nothing here says anything about whether NZSIS publishes forms with name-field constraints, or
+whether a member of the public can reach them. Two of its three origins could not be searched by
+this method at all, and the third's home page could not be read without executing its application.
+That is attrition in the instrument, and it is reported as attrition.

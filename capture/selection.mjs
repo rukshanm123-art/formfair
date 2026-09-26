@@ -43,12 +43,42 @@ export const DISCOVERY_KINDS = DISCOVERY_METHODS;
  * What the inspection established. A method that turned out not to exist, or to be
  * forbidden, is a finding about the agency and has to be as visible as a method that
  * produced candidates.
+ *
+ * selection-v1.0.21. Three of these are technical attrition, not findings about the agency, and
+ * they exist because `no-candidates` was about to be used for all three. `no-candidates` asserts
+ * that a page was read and contained nothing; saying that of a page nobody could read turns a
+ * failure of the method into a fact about the ministry, and the prevalence denominator then
+ * counts an agency as searched when it was not.
+ *
+ *   robots-unestablished    No request was made. The host answered /robots.txt with something
+ *                           that is not a robots representation, so no policy could be read and
+ *                           discovery was withheld. Not a refusal by the host.
+ *   retrieval-blocked       A request was made and answered with a challenge or a refusal. No
+ *                           agency content and no candidate judgement was obtained.
+ *   retrieval-inconclusive  A request was made and succeeded, but the retrieval obtained nothing
+ *                           on which a candidate judgement could rest - a client-rendered shell
+ *                           whose content never arrives in the markup, for instance. The page is
+ *                           neither absent nor empty; this method could not read it.
  */
 export const DISCOVERY_OUTCOMES = Object.freeze([
   'candidates-found',
   'no-candidates',
   'unavailable',
   'disallowed',
+  'robots-unestablished',
+  'retrieval-blocked',
+  'retrieval-inconclusive',
+]);
+
+/**
+ * The outcomes that record attrition in the discovery method rather than a property of the
+ * agency. Reported separately so that "searched and found nothing" is never silently merged
+ * with "could not be searched".
+ */
+export const TECHNICAL_ATTRITION_OUTCOMES = Object.freeze([
+  'robots-unestablished',
+  'retrieval-blocked',
+  'retrieval-inconclusive',
 ]);
 
 /**

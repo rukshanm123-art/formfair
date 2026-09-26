@@ -22,7 +22,7 @@ import { POLICY } from './politeness.mjs';
 import {
   DISCOVERY_KINDS, remainingBudget, MAX_CANDIDATES_PER_CATEGORY, MAX_CANDIDATES_PER_AGENCY,
   canonicalise, setKey, MAX_QUALIFIED_AGENCIES, CATEGORY_ORDER, lockCandidates, isSuperseded,
-  DISCOVERY_METHODS, DISCOVERY_OUTCOMES, nextWork, isExhausted,
+  DISCOVERY_METHODS, DISCOVERY_OUTCOMES, nextWork, isExhausted, TECHNICAL_ATTRITION_OUTCOMES,
 } from './selection.mjs';
 
 export const LOG_SCHEMA = 'formfair/capture-log@1';
@@ -954,6 +954,11 @@ export function publishProvenance(log, { to }) {
       captured: candidates.filter((a) => a.status === 'captured').length,
       excluded: candidates.filter((a) => a.status === 'excluded').length,
       failed: candidates.filter((a) => a.status === 'failed').length,
+      // capture-v1.0.7. `capture-blocked` was omitted here, so the published counts did not add
+      // up to the attempts they came from and a page the harness could not retrieve appeared in
+      // no column at all. An outcome that exists in the log and nowhere in the audit is an
+      // outcome a reader cannot know happened.
+      captureBlocked: candidates.filter((a) => a.status === 'capture-blocked').length,
       pendingApprovalAttempts: log.attempts.filter((a) => a.approval === APPROVAL.PENDING).length,
       pendingApprovalCandidateSets: Object.values(log.candidateSets ?? {}).filter(
         (set) => set.approval === APPROVAL.PENDING
@@ -971,6 +976,29 @@ export function publishProvenance(log, { to }) {
     exhaustedAgencies: (log.exhausted ?? []).map((e) =>
       typeof e === 'string' ? { agency: e, exhaustedAt: null, reason: EXHAUSTION_REASON } : e
     ),
+    // selection-v1.0.21. Attrition in the discovery METHOD, separated from findings about the
+    // agencies. An origin that could not be read is not an agency that publishes no forms, and a
+    // prevalence denominator that merges the two would overstate how much of the frame was
+    // actually searched.
+    technicalAttrition: {
+      records: discovery.filter((a) => TECHNICAL_ATTRITION_OUTCOMES.includes(a.outcome)).length,
+      byOutcome: discovery.reduce((acc, a) => {
+        if (!TECHNICAL_ATTRITION_OUTCOMES.includes(a.outcome)) return acc;
+        acc[a.outcome] = (acc[a.outcome] ?? 0) + 1;
+        return acc;
+      }, {}),
+      byOrigin: discovery.reduce((acc, a) => {
+        if (!TECHNICAL_ATTRITION_OUTCOMES.includes(a.outcome)) return acc;
+        let origin = '?';
+        try { origin = new URL(a.url).origin; } catch { origin = '?'; }
+        const key = `${a.agency} ${origin}`;
+        acc[key] = (acc[key] ?? 0) + 1;
+        return acc;
+      }, {}),
+    },
+    // Deviations from the frozen protocol, published with the evidence they name so a reader does
+    // not have to take the prose account on trust.
+    deviations: (log.deviations ?? []).map((d) => ({ ...d })),
     // The traffic audit. A duplicate-request permit covered a real request and is counted as
     // traffic; it produced no additional inspection, candidate, page or observation, and is
     // counted nowhere else.
@@ -1127,16 +1155,28 @@ export function consumeDiscoveryPermit(log, { agency, category, candidateSetVers
   // have happened after it was issued and within its life. Without this, a permit could be
   // issued now and attached to an observation made days ago, which would make the check look
   // preventative when it was retrospective - the exact appearance the permit exists to deny.
+  //
+  // selection-v1.0.21. The life of a permit governs the NAVIGATION, not the bookkeeping. The
+  // previous rule also required the record to be written within the hour, which made nine real
+  // navigations - each made seconds after its own permit - impossible to write down once a day
+  // had passed, and would have left them permanently unaccounted for. Writing a record late is a
+  // disclosure problem, not an authorisation one, so it is disclosed: `permitAudit` derives
+  // lateness from `consumedAt` against the recorded navigation time and reports it.
   const issued = Date.parse(permit.issuedAt);
   const now = Date.now();
-  if (now - issued > PERMIT_TTL_MS) {
-    throw new Error(
-      `permit ${permit.id} was issued at ${permit.issuedAt} and has expired. Re-run ` +
-        '`preflight-discovery`: a stale permit cannot authorise a request made much later, ' +
-        'because the policy may have changed in between.'
-    );
-  }
-  if (navigatedAt !== null) {
+  if (navigatedAt === null) {
+    // Nothing says when the request happened, so consumption time is the only evidence of it and
+    // the wall clock governs. This is the path that must stay strict: without a navigation time,
+    // a stale permit consumed today is indistinguishable from one used when it was issued.
+    if (now - issued > PERMIT_TTL_MS) {
+      throw new Error(
+        `permit ${permit.id} was issued at ${permit.issuedAt} and has expired. Re-run ` +
+          '`preflight-discovery`, or name the navigation time with --navigated-at if the request ' +
+          'was genuinely made while the permit was live: a stale permit cannot authorise a ' +
+          'request made much later, because the policy may have changed in between.'
+      );
+    }
+  } else {
     const navigated = Date.parse(navigatedAt);
     if (Number.isNaN(navigated)) throw new Error(`navigatedAt ${navigatedAt} is not a timestamp`);
     if (navigated < issued) {
@@ -1151,6 +1191,11 @@ export function consumeDiscoveryPermit(log, { agency, category, candidateSetVers
         `the navigation at ${navigatedAt} is more than an hour after permit ${permit.id} was issued`
       );
     }
+    // A navigation dated after its own consumption is refused too - but by `checkPermitLedger`,
+    // which already holds `consumedAt >= navigatedAt` and is run by every gate that matters:
+    // `status`, `deriveDraft`, `publishProvenance` and every closure. Duplicating it here would
+    // put the same rule in two places with two error messages, and the second copy is the one
+    // that drifts.
   }
 
   permit.consumedAt = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
@@ -1298,9 +1343,33 @@ export function closeDiscoveryPermit(log, { permitId, disposition, reason, accou
 export function permitAudit(log) {
   const permits = log.discoveryPermits ?? [];
   const closed = permits.filter((p) => p.closedAt);
+
+  // selection-v1.0.21. Records written long after the request they describe, DERIVED rather than
+  // stored: a stored flag is a claim a writer can omit, whereas consumption time against the
+  // navigation time it names cannot be omitted without breaking other checks. Lateness is not a
+  // breach - the navigation was authorised when it happened - but a reader comparing timestamps
+  // deserves to be told which records were reconstructed rather than written as the scan ran.
+  const byId = new Map(log.attempts.map((a) => [a.permitId, a]));
+  const lateRecorded = [];
+  for (const p of permits) {
+    const record = byId.get(p.id);
+    const consumed = Date.parse(p.consumedAt ?? '');
+    const navigated = Date.parse(record?.navigatedAt ?? '');
+    if (Number.isNaN(consumed) || Number.isNaN(navigated)) continue;
+    if (consumed - navigated > PERMIT_TTL_MS) {
+      lateRecorded.push({
+        permitId: p.id, recordId: record.id, url: p.url,
+        navigatedAt: record.navigatedAt, recordedAt: p.consumedAt,
+        delayMs: consumed - navigated,
+      });
+    }
+  }
+
   return {
     issued: permits.length,
     consumed: permits.filter((p) => p.consumedAt).length,
+    recordedLate: lateRecorded.length,
+    lateRecords: lateRecorded,
     closedUnused: closed.filter((p) => p.disposition === PERMIT_DISPOSITIONS.UNUSED).length,
     closedDuplicateRequest: closed.filter((p) => p.disposition === PERMIT_DISPOSITIONS.DUPLICATE_REQUEST).length,
     open: openDiscoveryPermits(log).length,
@@ -1685,6 +1754,97 @@ export function checkPermitLedger(log) {
 }
 
 /**
+ * A deviation from the frozen protocol, recorded as data rather than prose.
+ *
+ * selection-v1.0.21. The robots breach earlier in the scan was disclosed in a dated note beside
+ * the politeness clause, which is honest but not checkable: nothing verified that the record ids
+ * it named existed, and nothing would have noticed if a later correction made the note false. A
+ * deviation that names its evidence can be validated against the log, published with it, and
+ * counted - so a reader is told how many there were rather than having to find them by reading.
+ *
+ * Append-only, like every other history here. A deviation that turned out to be wrong is
+ * superseded by a later one; it is not edited, because the point of it is what was believed and
+ * done at the time.
+ */
+export function recordDeviation(log, deviation) {
+  (log.deviations ??= []);
+  const record = {
+    id: `v-${String(log.deviations.length + 1).padStart(4, '0')}`,
+    recordedAt: new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'),
+    ...deviation,
+  };
+  log.deviations.push(record);
+  const problems = checkDeviations(log);
+  if (problems.length) {
+    log.deviations.pop();
+    throw new Error(`the deviation would not be consistent with the log:\n  ${problems.join('\n  ')}`);
+  }
+  return record;
+}
+
+/**
+ * Every deviation must name evidence that exists and must not contradict it.
+ *
+ * The failure this prevents is a disclosure that reads as thorough and cites nothing real: a
+ * deviation naming `p-0084` when no such permit exists, or asserting that no candidate evidence
+ * was obtained while one of the records it names reports `candidates-found`. A disclosure nobody
+ * can check is worth less than no disclosure, because it also buys credit.
+ */
+export function checkDeviations(log) {
+  const problems = [];
+  const deviations = log.deviations ?? [];
+  const seen = new Set();
+  const checks = new Set((log.robotsChecks ?? []).map((c) => c.id));
+  const permits = new Set((log.discoveryPermits ?? []).map((p) => p.id));
+  const attempts = new Map(log.attempts.map((a) => [a.id, a]));
+
+  for (const d of deviations) {
+    const where = d.id ?? '(a deviation with no id)';
+    if (!d.id) problems.push('a deviation has no id');
+    else if (seen.has(d.id)) problems.push(`deviation id ${d.id} appears more than once`);
+    seen.add(d.id);
+    if (!isoUtcish(d.recordedAt)) {
+      problems.push(`${where} has recordedAt ${JSON.stringify(d.recordedAt)}, which is not a UTC timestamp`);
+    }
+    for (const field of ['kind', 'summary', 'detail']) {
+      if (typeof d[field] !== 'string' || d[field].trim() === '') {
+        problems.push(`${where} has no ${field}`);
+      }
+    }
+    for (const [field, known, label] of [
+      ['robotsCheckIds', checks, 'robots check'],
+      ['permitIds', permits, 'permit'],
+      ['attemptIds', new Set(attempts.keys()), 'attempt'],
+    ]) {
+      const ids = d[field];
+      if (ids === undefined) continue;
+      if (!Array.isArray(ids)) { problems.push(`${where} has ${field} that is not a list`); continue; }
+      for (const id of ids) {
+        if (!known.has(id)) problems.push(`${where} names ${label} ${id}, which does not exist`);
+      }
+    }
+    if (d.requestsAffected !== undefined &&
+        (!Number.isInteger(d.requestsAffected) || d.requestsAffected < 0)) {
+      problems.push(`${where} has requestsAffected ${JSON.stringify(d.requestsAffected)}`);
+    }
+    // The claim most likely to become false as the scan continues, so it is the one checked
+    // against the records the deviation itself names.
+    if (d.candidateEvidenceObtained === false) {
+      const found = (d.attemptIds ?? [])
+        .map((id) => attempts.get(id))
+        .filter((a) => a?.outcome === 'candidates-found');
+      if (found.length) {
+        problems.push(
+          `${where} states no candidate evidence was obtained, but it names ` +
+            `${found.map((a) => a.id).join(', ')}, which report candidates-found`
+        );
+      }
+    }
+  }
+  return problems;
+}
+
+/**
  * Everything unfinished that withholds the corpus draft.
  *
  * selection-v1.0.17. `status` and `deriveDraft` each computed this list for themselves, and drifted
@@ -1756,6 +1916,11 @@ export function corpusBlockers(log) {
   const ledger = checkPermitLedger(log);
   if (ledger.length) add('permit-ledger', `the permit ledger is inconsistent: ${ledger.length} problem(s)`, ledger);
 
+  const deviations = checkDeviations(log);
+  if (deviations.length) {
+    add('deviations', `the recorded deviations do not match the log: ${deviations.length} problem(s)`, deviations);
+  }
+
   const awaiting = agenciesAwaitingExhaustion(log);
   if (awaiting.length) {
     add('awaiting-exhaustion', `${awaiting.length} agency(ies) awaiting an exhaustion record`, awaiting);
@@ -1798,7 +1963,53 @@ export function checkCaptureFiles(log, capturesDir) {
   for (const [file, attempt] of owned) {
     if (!present.includes(file)) {
       problems.push(`${attempt.id} is recorded as captured but ${file} is not on disk`);
+      continue;
+    }
+    // capture-v1.0.7. The bytes, not merely the filename. Correspondence by name established that
+    // a file with the right name existed; it established nothing about its contents, so a capture
+    // edited, truncated or replaced after the fact would have passed every gate and been sealed
+    // under a hash it no longer had. The seal hashes the file at sealing time, which means a
+    // silent substitution before then would produce a corpus whose manifest was internally
+    // consistent and whose page was not the page that was captured and approved.
+    let actual = null;
+    try {
+      actual = sha256(readFileSync(join(root, file), 'utf8'));
+    } catch (error) {
+      problems.push(`${attempt.id} names ${file}, which could not be read: ${error.message}`);
+      continue;
+    }
+    if (attempt.htmlSha256 && actual !== attempt.htmlSha256) {
+      problems.push(
+        `${file} hashes to ${actual.slice(0, 12)} but ${attempt.id} records ` +
+          `${String(attempt.htmlSha256).slice(0, 12)}. The file on disk is not the markup that ` +
+          'was captured, so it must not be sealed as though it were.'
+      );
     }
   }
   return problems;
+}
+
+/**
+ * Moves a capture file out of the captures directory, preserving it.
+ *
+ * capture-v1.0.7. The harness wrote the markup as soon as the page was readable, and every
+ * refusal AFTER that point left the file behind with no attempt owning it. HTTP 429 was the clear
+ * case: the policy stops the run, the process exited, and the file stayed in the captures
+ * directory looking exactly like corpus material. `checkCaptureFiles` would then refuse every
+ * later build until somebody worked out by hand what the stray file was.
+ *
+ * Quarantined rather than deleted, for the same reason the Cloudflare interstitial was: it is
+ * evidence of what the server returned, and destroying it to tidy the directory would destroy the
+ * record of the refusal along with it.
+ */
+export function quarantineCapture(capturesDir, file, { reason }) {
+  const from = join(resolve(capturesDir), file);
+  if (!existsSync(from)) return null;
+  const dir = join(resolve(capturesDir), '..', 'quarantine');
+  mkdirSync(dir, { recursive: true });
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-').replace(/-\d{3}Z$/, 'Z');
+  const to = join(dir, `${stamp}-${file}`);
+  renameSync(from, to);
+  writeFileSync(`${to}.reason.txt`, `${reason}\n`, 'utf8');
+  return to;
 }
