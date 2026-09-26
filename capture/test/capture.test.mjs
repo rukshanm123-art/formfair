@@ -651,10 +651,11 @@ describe('access barriers, submission protection and authentication signals', ()
  * wants, so content inputs are counted outside any form carrying a password field. That alone
  * would classify a registration form as a wall, since its name field sits beside the password.
  *
- * What tells them apart is that the registration form asks for a person's name - which is this
- * study's subject. So a password-bearing form containing a name field is never a wall, however
- * the surrounding page is worded, and the highest-priority category cannot be excluded by a
- * stray "already have an account? Log in" link.
+ * The discriminator is whether the password-bearing form exposes a personal-name field, which is
+ * this study's subject. Such a form is not AUTOMATICALLY a sign-in wall; it proceeds to researcher
+ * assessment under the frozen criteria. The rule is conservative in one direction only - no
+ * automatic exclusion, and no automatic inclusion - so a stray "already have an account? Log in"
+ * link cannot discard the highest-priority category unseen, and the approval gates still decide.
  */
 describe('a registration form is not a sign-in wall', () => {
   let server;

@@ -200,9 +200,12 @@ export async function detectBlocking(page, httpStatus) {
     const contentInputsOutsideCredentials = contentInputs.filter(outside);
     const textareasOutsideCredentials = textareas.filter(outside);
 
-    // What separates a registration form from a login form is that the registration form asks
-    // for a person's name - which is precisely this study's subject. A password-bearing form
-    // containing one is not a wall, however the surrounding page is worded.
+    // The discriminator is whether the password-bearing form exposes a personal-name field,
+    // which is precisely this study's subject. Such a form is not AUTOMATICALLY classified as a
+    // sign-in wall; it proceeds to researcher assessment. A name field does not prove the form is
+    // a registration - it means the detector must not decide, and the candidate-set and
+    // attempt-approval gates still control inclusion. Conservative in one direction only: no
+    // automatic exclusion, and no automatic inclusion either.
     const NAME_HINT = /(^|[^a-z])(name|firstname|first_name|givenname|given_name|surname|lastname|last_name|fullname|full_name)([^a-z]|$)/i;
     const asksForAName = [...passwordForms].some((form) =>
       [...form.querySelectorAll('input, label')].some((el) =>

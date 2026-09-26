@@ -1959,10 +1959,16 @@ corpus draft, the seal and the published provenance:
 Two judgements inside that deserve stating. A login form's username box is part of the barrier
 rather than the form under study, so readable content is counted *outside* any form carrying a
 password field. That alone would classify a registration form as a wall, since its name field sits
-beside the password — so what separates them is that **the registration form asks for a person's
-name**, which is this study's own subject. A password-bearing form containing a name field is
-never a wall, however the surrounding page is worded, which stops a stray "already have an
-account? Log in" link excluding the highest-priority category.
+beside the password — so the discriminator is whether the password-bearing form exposes a
+personal-name field, which is this study's own subject.
+
+**A password-bearing form that exposes a personal-name field is not automatically classified as a
+sign-in wall; it proceeds to researcher assessment under the frozen eligibility criteria.** The
+rule is deliberately conservative in one direction only: it prevents automatic *exclusion* without
+producing automatic *inclusion*. A name field does not prove the form is a registration — it means
+the detector must not decide, and the candidate-set approval and attempt-approval gates continue to
+control what enters the corpus. This is what stops a stray "already have an account? Log in" link
+discarding the highest-priority category unseen.
 
 Eight tests: a visible contact form with reCAPTCHA captured with the protection recorded and its
 `name` field intact in the saved markup; a public registration form with two password fields not
