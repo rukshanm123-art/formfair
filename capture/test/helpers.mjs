@@ -7,6 +7,7 @@
  * here once.
  */
 
+import { createHash } from 'node:crypto';
 import {
   appendAttempt, recordCandidates, lockCandidateSet, approveCandidateSet,
 } from '../run.mjs';
@@ -17,9 +18,26 @@ export const nextTimestamp = () =>
   new Date(Date.UTC(2026, 8, 24, 0, tick++ * 2)).toISOString().replace(/\.\d{3}Z$/, 'Z');
 
 /** One discovery record, enough to support a set. */
-export function addDiscovery(log, { agency, category, version = 1, url, method = 'navigation', outcome = 'candidates-found', supersedes = null }) {
+let renderSeq = 0;
+
+export function addDiscovery(log, { agency, category, version = 1, url, method = 'navigation', outcome = 'candidates-found', supersedes = null, evidence = null }) {
   const at = nextTimestamp();
+  // selection-v1.0.24. A navigation or internal-search fixture carries RENDERED evidence by
+  // default, because that is what the protocol in force requires of one. The helper produced
+  // plain-retrieval records, so four fixtures that assert a clean corpus gate began failing the
+  // moment the render backlog became a gate - the fixtures were describing a state the protocol no
+  // longer permits. Pass `evidence: 'plain-retrieval'` for a test that wants the backlog populated.
+  const rendered = (evidence ?? (['navigation', 'internal-search'].includes(method) ? 'rendered-dom' : null));
+  const renderFields = rendered === 'rendered-dom'
+    ? {
+        evidence: 'rendered-dom',
+        renderFile: `fixture-${++renderSeq}.html`,
+        renderedSha256: createHash('sha256').update(`fixture-${renderSeq}`).digest('hex'),
+        renderedBytes: 1024,
+      }
+    : (rendered ? { evidence: rendered } : {});
   appendAttempt(log, {
+    ...renderFields,
     examinedAt: at, agency, website: 'https://w.govt.nz/',
     url: url ?? `https://w.govt.nz/discovery/${encodeURIComponent(agency)}/${category}/v${version}/${tick}`,
     status: 'discovery', discoveryKind: method, outcome, category,

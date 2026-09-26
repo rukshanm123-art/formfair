@@ -23,16 +23,18 @@ import { chromium } from 'playwright';
 import {
   capturePage, validateUrl, validatePageId, CATEGORIES, captureDisposition, needsHeadedFallback,
 } from './capture.mjs';
+import { renderDiscoveryPage, RENDERED_METHODS } from './render-discovery.mjs';
 import { POLICY, createPacer } from './politeness.mjs';
 import {
   readLog, writeLog, appendAttempt, writeDerived, ELIGIBILITY_CRITERIA, APPROVAL,
   recordCandidates, lockCandidateSet, categorySettled, approveCandidateSet,
-  supersedeCandidateSet, publishProvenance, exhaustAgency, EXHAUSTION_REASON,
+  supersedeCandidateSet, publishProvenance, exhaustAgency,
   agenciesAwaitingExhaustion, findRobotsCheck, recordRobotsCheck, checkCaptureFiles,
   issueDiscoveryPermit, consumeDiscoveryPermit, findOpenPermit,
   unresolvedDiscoveryRounds, openDiscoveryPermits, robotsCheckIsFresh, isDiscoverySuperseded,
   reopenCandidateSet, closeDiscoveryPermit, permitAudit, PERMIT_DISPOSITIONS, corpusBlockers,
-  quarantineCapture, recordDeviation, agencyResolutions, agencyResolution,
+  quarantineCapture, recordDeviation, agencyResolutions, agencyResolution, reResolveExhaustion,
+  renderBacklog, renderBacklogByUrl, renderPrerequisite,
 } from './run.mjs';
 import { fetchRobotsPolicy, evaluatePolicy, DISPOSITION } from './robots-policy.mjs';
 import {
@@ -469,10 +471,19 @@ function doStatus() {
     for (const a of attrition) byOutcome[a.outcome] = (byOutcome[a.outcome] ?? 0) + 1;
     for (const [outcome, n] of Object.entries(byOutcome)) console.log(`  ${outcome}: ${n}`);
   }
+  const backlog = renderBacklog(log);
+  if (backlog.length) {
+    const byUrl = renderBacklogByUrl(log);
+    const ready = byUrl.filter((g) => renderPrerequisite(log, backlog.find((a) => a.url === g.url)) === null);
+    console.log(
+      `render backlog: ${backlog.length} record(s) across ${byUrl.length} URL(s) rest on plain ` +
+        `retrieval; ${ready.length} renderable now`
+    );
+  }
   const res = agencyResolutions(log);
   if (res.records.length) {
     console.log(
-      `agencies resolved: ${res.counts['searched-in-full'] ?? 0} searched in full, ` +
+      `agencies resolved: ${res.counts['bounded-discovery-complete'] ?? 0} bounded discovery complete, ` +
         `${res.counts['technical-discovery-attrition'] ?? 0} technical discovery attrition`
     );
     for (const r of res.records) console.log(`  ${r.resolution.padEnd(30)} ${r.agency}`);
@@ -670,7 +681,7 @@ function doNext() {
       console.log('NOT as an agency searched in full with no eligible form.');
       return;
     }
-    return console.log(`${work.agency}: every category is settled with no eligible form. Record it as exhausted (searched-in-full).`);
+    return console.log(`${work.agency}: the frozen bounded procedure is complete for every category with no eligible form. Record it as exhausted (bounded-discovery-complete).`);
   }
   console.log(`agency:   ${work.agency}`);
   console.log(`category: ${work.category}`);
@@ -862,6 +873,128 @@ async function doRecheckRobots() {
   }
 }
 
+/**
+ * Records a discovery inspection from the RENDERED DOM, which is its authoritative evidence.
+ *
+ * selection-v1.0.24. Consumes a fresh permit, paces like every other navigation, and writes the
+ * rendered markup into the private data tree rather than beside the corpus captures - it is
+ * third-party markup and only its hash and provenance are published. Nothing is typed, clicked or
+ * submitted, and no challenge is answered.
+ */
+async function doRenderDiscovery() {
+  const dir = require_('out');
+  const agency = require_('agency');
+  const website = require_('website');
+  const url = require_('url');
+  const category = require_('category');
+  const setVersion = Number(require_('set-version'));
+  const method = flag('method') ?? 'navigation';
+  const outcome = require_('outcome');
+  const permitId = require_('permit-id');
+  const settleMs = Number(flag('settle-ms') ?? POLICY.postLoadSettleMs);
+
+  if (!RENDERED_METHODS.includes(method)) {
+    die(
+      `--method must be one of ${RENDERED_METHODS.join(', ')}. A rendered DOM is the authoritative ` +
+        'evidence for a page; robots.txt, sitemaps, status codes and non-HTML files are read plainly.'
+    );
+  }
+  if (!DISCOVERY_OUTCOMES.includes(outcome)) die(`--outcome must be one of ${DISCOVERY_OUTCOMES.join(', ')}`);
+  if (!CATEGORIES.includes(category)) die(`--category must be one of ${CATEGORIES.join(', ')}`);
+  if (!Number.isInteger(setVersion) || setVersion < 1) die('--set-version must be a positive integer');
+
+  validateUrl(url);
+  const logPath = logPathFor(dir);
+  const log = readLog(logPath);
+  const renderedDir = join(resolve(dir), 'rendered');
+
+  await pacer.beforeNavigation(null);
+  const rendered = await renderDiscoveryPage({
+    browserFactory: () => chromium.launch({ headless: true }),
+    url, outDir: renderedDir, recordId: `r${Date.now()}`, settleMs,
+    browserMode: 'headless',
+  });
+
+  // A challenge is a mechanical fact, so the harness decides it rather than accepting a label.
+  const barred = rendered.accessBarriers.length > 0;
+  if (barred && outcome !== 'retrieval-blocked') {
+    die(
+      `the render was access-barred (${rendered.accessBarriers.join(', ')}), so the outcome must be ` +
+        `retrieval-blocked, not ${outcome}. The rendered bytes are kept at ${rendered.renderFile}.`
+    );
+  }
+
+  const permit = consumeDiscoveryPermit(log, {
+    agency, category, candidateSetVersion: setVersion, url,
+    navigatedAt: rendered.navigatedAt, permitId,
+  });
+
+  appendAttempt(log, {
+    permitId: permit.id,
+    ...(flag('renders') ? { rendersDiscoveryId: flag('renders') } : {}),
+    examinedAt: now(), agency, website, url,
+    status: 'discovery', discoveryKind: method, outcome, category, candidateSetVersion: setVersion,
+    navigatedAt: rendered.navigatedAt,
+    finalUrl: rendered.finalUrl,
+    evidence: rendered.evidence,
+    renderFile: rendered.renderFile,
+    renderedSha256: rendered.renderedSha256,
+    renderedBytes: rendered.renderedBytes,
+    httpStatus: rendered.httpStatus,
+    loadState: rendered.loadState,
+    domNodes: rendered.domNodes,
+    linkCount: rendered.links.length,
+    formCount: rendered.forms.length,
+    accessBarriers: rendered.accessBarriers,
+    submissionProtection: rendered.submissionProtection,
+    authenticationSignals: rendered.authenticationSignals,
+    ...(flag('note') ? { note: flag('note') } : {}),
+    approval: APPROVAL.APPROVED,
+    politeness: { userAgent: rendered.userAgent, settleMs, browserMode: rendered.browserMode },
+  });
+  writeLog(logPath, log);
+  writeDerived({ log, dir, frameSha256: flag('frame-sha256'), drawOrderSha256: flag('draw-order-sha256'), synthetic: has('synthetic') });
+
+  const record = log.attempts.at(-1);
+  console.log(`recorded ${record.id}: rendered ${method} / ${outcome} (${category} v${setVersion})`);
+  console.log(`HTTP ${rendered.httpStatus ?? "-"}  ${rendered.domNodes} DOM nodes, ${rendered.links.length} link(s), ${rendered.forms.length} form(s)`);
+  console.log(`rendered bytes: ${rendered.renderedBytes} sha256 ${rendered.renderedSha256.slice(0, 16)} (private: rendered/${rendered.renderFile})`);
+  if (rendered.title) console.log(`title: ${rendered.title}`);
+  if (rendered.accessBarriers.length) console.log(`accessBarriers: ${rendered.accessBarriers.join(", ")}`);
+  if (rendered.submissionProtection.length) console.log(`submissionProtection: ${rendered.submissionProtection.join(", ")}`);
+  for (const f of rendered.forms.slice(0, 6)) {
+    console.log(`  form ${f.method} ${f.action || "(self)"} -> ${f.controls.map((c) => `${c.tag}${c.type ? `[${c.type}]` : ""}${c.name ? ` name=${c.name}` : ""}`).join(", ")}`);
+  }
+  for (const l of rendered.links.slice(0, 40)) console.log(`  link ${l}`);
+  if (rendered.links.length > 40) console.log(`  ... and ${rendered.links.length - 40} more link(s)`);
+}
+
+/**
+ * Re-records an agency's resolution under the protocol now in force, keeping the old record.
+ *
+ * Takes no resolution and no reason FOR the resolution - only a reason for re-resolving, which is
+ * recorded. The resolution itself is derived, exactly as it is the first time.
+ */
+function doReResolve() {
+  const dir = require_('out');
+  const logPath = logPathFor(dir);
+  const log = readLog(logPath);
+  for (const forbidden of ['resolution', 'exhaustion-reason']) {
+    if (flag(forbidden) !== null) die(`--${forbidden} cannot be given; the resolution is derived`);
+  }
+  const { record, previous } = reResolveExhaustion(log, {
+    agency: require_('agency'), reason: require_('reason'),
+  });
+  writeLog(logPath, log);
+  writeDerived({ log, dir, frameSha256: flag('frame-sha256'), drawOrderSha256: flag('draw-order-sha256'), synthetic: has('synthetic') });
+  console.log(`re-resolved ${record.agency} at ${record.reResolvedAt}`);
+  console.log(`  was: ${previous.resolution ?? 'bounded-discovery-complete (implied)'}`);
+  console.log(`       ${previous.reason}`);
+  console.log(`  now: ${record.resolution}`);
+  console.log(`       ${record.reason}`);
+  console.log(`exhausted at ${record.exhaustedAt} - unchanged; only the wording was corrected`);
+}
+
 /** Records a structured deviation from the frozen protocol, with the evidence it rests on. */
 function doDeviation() {
   const dir = require_('out');
@@ -921,7 +1054,8 @@ function doClosePermit() {
 
 const commands = { packet: doPacket, candidates: doCandidates, lock: doLock, 'approve-set': doApproveSet,
   'supersede-set': doSupersedeSet, publish: doPublish, next: doNext, capture: doCapture, exclude: doExclude, discovery: doDiscovery, budget: doBudget, approve: doApprove, status: doStatus, build: doBuild, exhaust: doExhaust, 'preflight-discovery': doPreflightDiscovery, 'reopen-set': doReopenSet, 'close-permit': doClosePermit,
-  deviation: doDeviation, 'recheck-robots': doRecheckRobots };
+  deviation: doDeviation, 'recheck-robots': doRecheckRobots, 're-resolve': doReResolve,
+  'render-discovery': doRenderDiscovery };
 if (!commands[command]) die(USAGE);
 try {
   await commands[command]();

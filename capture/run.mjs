@@ -19,6 +19,8 @@ import { existsSync, readFileSync, writeFileSync, renameSync, unlinkSync, mkdirS
 import { dirname, join, resolve } from 'node:path';
 import { LEDGER_HEADER, recordExamination, CATEGORIES } from './capture.mjs';
 import { POLICY } from './politeness.mjs';
+import { DISCOVERY_EVIDENCE, RENDERED_METHODS } from './render-discovery.mjs';
+import { evaluatePolicy } from './robots-policy.mjs';
 import {
   DISCOVERY_KINDS, remainingBudget, MAX_CANDIDATES_PER_CATEGORY, MAX_CANDIDATES_PER_AGENCY,
   canonicalise, setKey, MAX_QUALIFIED_AGENCIES, CATEGORY_ORDER, lockCandidates, isSuperseded,
@@ -133,6 +135,30 @@ function checkAttempt(attempt) {
     } else if (!isoUtcish(attempt.navigatedAt)) {
       problems.push('a discovery record needs navigatedAt as a UTC timestamp');
     }
+    // selection-v1.0.24. A record claiming rendered evidence must carry the evidence. Without
+    // this, `evidence: 'rendered-dom'` would be a word that satisfies the backlog gate while
+    // resting on nothing - and the gate exists precisely because plain retrieval was being
+    // treated as though it had read the page.
+    if (attempt.evidence !== undefined) {
+      if (!['rendered-dom', 'plain-retrieval'].includes(attempt.evidence)) {
+        problems.push(`evidence must be rendered-dom or plain-retrieval, not ${JSON.stringify(attempt.evidence)}`);
+      }
+      if (attempt.evidence === 'rendered-dom') {
+        if (!/^[0-9a-f]{64}$/.test(attempt.renderedSha256 ?? '')) {
+          problems.push('a rendered-dom record needs renderedSha256, the digest of the rendered markup');
+        }
+        if (!attempt.renderFile) problems.push('a rendered-dom record needs renderFile');
+        if (!Number.isInteger(attempt.renderedBytes) || attempt.renderedBytes < 0) {
+          problems.push('a rendered-dom record needs renderedBytes');
+        }
+        if (!RENDERED_METHODS.includes(attempt.discoveryKind)) {
+          problems.push(
+            `a rendered-dom record must be a ${RENDERED_METHODS.join(' or ')} inspection; there is ` +
+              'no DOM behind a robots file, a sitemap or a status code'
+          );
+        }
+      }
+    }
   }
   if (attempt.status !== 'discovery') {
     for (const c of ELIGIBILITY_CRITERIA) {
@@ -218,6 +244,30 @@ export function appendAttempt(log, attempt) {
       throw new Error(`${target.id} has already been corrected; correct the correction instead`);
     }
   }
+  // selection-v1.0.24. A rendered inspection names the plain-fetch record it supersedes as
+  // evidence, and the original is PRESERVED. Not `supersedesDiscoveryId`: that requires the same
+  // category, and the first use of this is a service-application render of a page first inspected
+  // under account-registration. The link must therefore cross categories, and it is not a
+  // correction - the earlier record was true about the method it used.
+  if (attempt.rendersDiscoveryId) {
+    const target = log.attempts.find((a) => a.id === attempt.rendersDiscoveryId);
+    if (!target) {
+      throw new Error(`rendersDiscoveryId ${attempt.rendersDiscoveryId} matches no recorded attempt`);
+    }
+    if (target.status !== 'discovery') {
+      throw new Error(`${target.id} is a ${target.status} attempt; a render names a discovery record`);
+    }
+    if (canonicalise(target.url) !== canonicalise(attempt.url)) {
+      throw new Error(
+        `a render must be of the same page: ${target.id} is ${target.url}, this record is ` +
+          `${attempt.url}`
+      );
+    }
+    if (attempt.evidence !== 'rendered-dom') {
+      throw new Error('only a rendered-dom record may name the plain-retrieval record it answers');
+    }
+  }
+
   const priorForUrl = log.attempts.filter(
     (a) => a.status !== 'discovery' && a.agency === attempt.agency && a.url === attempt.url
   );
@@ -628,25 +678,53 @@ export function approveCandidateSet(log, { agency, category, approved, note }) {
  * an operator can choose is a reason an operator can choose wrongly, and this one decides what the
  * denominator means.
  */
+/**
+ * selection-v1.0.24. `searched-in-full` was itself an overclaim, and so was the prose defending
+ * it. The procedure is BOUNDED: five candidates per category, twenty per agency, four methods, and
+ * a robots-disallowed URL is deliberately never retrieved. "Searched in full" says an agency's web
+ * presence was exhaustively examined. What was actually completed is a fixed procedure.
+ *
+ * The robots case is the clearest illustration. Respecting a `Disallow` is part of the planned
+ * boundary, so it is not attrition - but what was read there is the robots POLICY, not the target
+ * page. Amendment 27 said "both were read" of a 404 and a Disallow; only the first is true.
+ */
 export const AGENCY_RESOLUTIONS = Object.freeze({
-  /** Every category was read and none held an eligible form. A finding about the agency. */
-  SEARCHED_IN_FULL: 'searched-in-full',
-  /** Every category was attempted, but retrieval barriers prevented complete discovery. */
+  /** The frozen bounded procedure ran to completion and located no eligible form. */
+  BOUNDED_DISCOVERY_COMPLETE: 'bounded-discovery-complete',
+  /** Technical barriers stopped the procedure completing, and no eligible form was located. */
   TECHNICAL_ATTRITION: 'technical-discovery-attrition',
 });
 
-export const EXHAUSTION_REASON =
-  'all four categories in the frozen priority order were searched and none yielded an eligible form';
+export const BOUNDED_COMPLETE_REASON =
+  'the frozen bounded discovery procedure was completed for all four categories in the priority ' +
+  'order, and no eligible form was located';
 
 export const ATTRITION_REASON =
-  'all four categories in the frozen priority order were attempted, but technical retrieval ' +
-  'barriers prevented complete discovery and no eligible form was located';
+  'technical retrieval barriers prevented the frozen bounded discovery procedure from completing, ' +
+  'and no eligible form was located';
 
 /** The one frozen reason each resolution may carry. Nothing else seals. */
 export const RESOLUTION_REASONS = Object.freeze({
-  [AGENCY_RESOLUTIONS.SEARCHED_IN_FULL]: EXHAUSTION_REASON,
+  [AGENCY_RESOLUTIONS.BOUNDED_DISCOVERY_COMPLETE]: BOUNDED_COMPLETE_REASON,
   [AGENCY_RESOLUTIONS.TECHNICAL_ATTRITION]: ATTRITION_REASON,
 });
+
+/**
+ * The reason strings this scan has used for a completed bounded search, newest first.
+ *
+ * An exhaustion recorded under an earlier protocol carries the wording frozen then. It is NOT
+ * silently accepted as current: `agencyResolutions` reports it as needing re-resolution, and the
+ * seal refuses it, so the old wording cannot reach a manifest. This list exists only so the
+ * machinery can recognise such a record and say what it is, rather than failing obscurely.
+ */
+export const SUPERSEDED_COMPLETE_REASONS = Object.freeze([
+  'all four categories in the frozen priority order were searched and none yielded an eligible form',
+]);
+
+export const SUPERSEDED_ATTRITION_REASONS = Object.freeze([
+  'all four categories in the frozen priority order were attempted, but technical retrieval ' +
+    'barriers prevented complete discovery and no eligible form was located',
+]);
 
 /**
  * Which resolution the evidence supports, and the records that support it.
@@ -669,7 +747,7 @@ export function agencyResolution(log, agency) {
   const attrition = records.filter((a) => TECHNICAL_ATTRITION_OUTCOMES.includes(a.outcome));
   const resolution = attrition.length > 0
     ? AGENCY_RESOLUTIONS.TECHNICAL_ATTRITION
-    : AGENCY_RESOLUTIONS.SEARCHED_IN_FULL;
+    : AGENCY_RESOLUTIONS.BOUNDED_DISCOVERY_COMPLETE;
   const byOutcome = {};
   for (const a of attrition) byOutcome[a.outcome] = (byOutcome[a.outcome] ?? 0) + 1;
   return {
@@ -819,22 +897,92 @@ export function exhaustAgency(log, drawOrder, { agency = null } = {}) {
  * have been bound into the agency's round.
  */
 export function agencyResolutions(log) {
-  const counts = { [AGENCY_RESOLUTIONS.SEARCHED_IN_FULL]: 0, [AGENCY_RESOLUTIONS.TECHNICAL_ATTRITION]: 0 };
+  const counts = { [AGENCY_RESOLUTIONS.BOUNDED_DISCOVERY_COMPLETE]: 0, [AGENCY_RESOLUTIONS.TECHNICAL_ATTRITION]: 0 };
   const records = [];
   const disagreements = [];
   for (const raw of log.exhausted ?? []) {
     const agency = typeof raw === 'string' ? raw : raw?.agency;
-    const stored = (typeof raw === 'string' ? null : raw?.resolution) ?? AGENCY_RESOLUTIONS.SEARCHED_IN_FULL;
+    const stored = (typeof raw === 'string' ? null : raw?.resolution) ?? AGENCY_RESOLUTIONS.BOUNDED_DISCOVERY_COMPLETE;
+    const storedReason = typeof raw === 'string' ? null : raw?.reason;
     counts[stored] = (counts[stored] ?? 0) + 1;
-    records.push({ agency, resolution: stored });
+    records.push({ agency, resolution: stored, reason: storedReason });
     const derived = agencyResolution(log, agency).resolution;
     if (derived !== stored) {
       disagreements.push(
         `${agency} is recorded as ${stored} but its bound evidence supports ${derived}`
       );
     }
+    // selection-v1.0.24. Wording frozen under an earlier protocol is not silently carried forward.
+    // The Family Violence and Sexual Violence Executive Board was exhausted under a reason that
+    // said all four categories "were searched" - a claim this protocol has withdrawn as an
+    // overclaim. Leaving it in place would publish the withdrawn wording; accepting it as
+    // equivalent to the new one would make the correction cosmetic. It must be re-resolved.
+    if (storedReason !== null && storedReason !== RESOLUTION_REASONS[stored]) {
+      const known = SUPERSEDED_COMPLETE_REASONS.includes(storedReason) ||
+        SUPERSEDED_ATTRITION_REASONS.includes(storedReason);
+      disagreements.push(
+        `${agency} carries ${known ? 'wording frozen under an earlier protocol' : 'a reason that is not frozen'}` +
+          `; run \`re-resolve\` so the record states the current one`
+      );
+    }
   }
   return { counts, records, disagreements };
+}
+
+/**
+ * Re-records an agency's resolution under the protocol now in force, preserving the old record.
+ *
+ * selection-v1.0.24. Renaming a frozen reason strands every exhaustion already recorded: the seal
+ * requires the reason frozen for the resolution, so an older record simply stops sealing. Editing
+ * it in place would rewrite what was decided, and accepting the old wording would make the
+ * correction cosmetic. So the prior record is archived with the reason it was superseded for, and a
+ * freshly DERIVED one replaces it - derived, because a re-resolution is no more an occasion to type
+ * a resolution than the first one was.
+ */
+export function reResolveExhaustion(log, { agency, reason }) {
+  if (typeof reason !== 'string' || reason.trim() === '') {
+    throw new Error('re-resolving an exhaustion requires a reason for doing so, which is recorded');
+  }
+  const list = log.exhausted ?? [];
+  const index = list.findIndex((e) => (typeof e === 'string' ? e : e?.agency) === agency);
+  if (index === -1) throw new Error(`${agency} is not recorded as exhausted`);
+  const previous = list[index];
+  const resolved = agencyResolution(log, agency);
+  if (resolved.boundRecords === 0) {
+    throw new Error(
+      `${agency} has no discovery records bound to its four sets, so nothing supports either ` +
+        'resolution'
+    );
+  }
+  const storedResolution = (typeof previous === 'string' ? null : previous?.resolution) ??
+    AGENCY_RESOLUTIONS.BOUNDED_DISCOVERY_COMPLETE;
+  const storedReason = typeof previous === 'string' ? null : previous?.reason;
+  if (storedResolution === resolved.resolution && storedReason === resolved.reason) {
+    throw new Error(
+      `${agency} already states the current resolution and reason; there is nothing to re-resolve`
+    );
+  }
+
+  (log.supersededExhaustions ??= []).push({
+    ...(typeof previous === 'string' ? { agency: previous } : previous),
+    supersededAt: new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'),
+    supersededReason: reason,
+  });
+  const record = {
+    agency,
+    exhaustedAt: typeof previous === 'string' ? null : previous?.exhaustedAt ?? null,
+    // The re-resolution is stamped separately, so the manifest still says when the agency was
+    // actually searched rather than when its wording was corrected.
+    reResolvedAt: new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'),
+    resolution: resolved.resolution,
+    reason: resolved.reason,
+    categorySetVersions: typeof previous === 'string' ? null : previous?.categorySetVersions ?? null,
+    ...(resolved.resolution === AGENCY_RESOLUTIONS.TECHNICAL_ATTRITION
+      ? { attritionRecordIds: resolved.attritionRecordIds, attritionByOutcome: resolved.attritionByOutcome }
+      : {}),
+  };
+  list[index] = record;
+  return { record, previous };
 }
 
 /**
@@ -1039,11 +1187,12 @@ export function deriveDraft(log, { frameSha256, drawOrderSha256, selectionLedger
     exhaustedAgencies: (log.exhausted ?? []).map((e) =>
       typeof e === 'string'
         ? {
-            agency: e, exhaustedAt: null, resolution: AGENCY_RESOLUTIONS.SEARCHED_IN_FULL,
-            reason: EXHAUSTION_REASON, categorySetVersions: null,
+            agency: e, exhaustedAt: null, resolution: AGENCY_RESOLUTIONS.BOUNDED_DISCOVERY_COMPLETE,
+            reason: BOUNDED_COMPLETE_REASON, categorySetVersions: null,
           }
-        : { ...e, resolution: e.resolution ?? AGENCY_RESOLUTIONS.SEARCHED_IN_FULL }
+        : { ...e, resolution: e.resolution ?? AGENCY_RESOLUTIONS.BOUNDED_DISCOVERY_COMPLETE }
     ),
+    supersededExhaustions: (log.supersededExhaustions ?? []).map((e) => ({ ...e })),
   };
 }
 
@@ -1102,8 +1251,8 @@ export function publishProvenance(log, { to }) {
     }, {}),
     exhaustedAgencies: (log.exhausted ?? []).map((e) =>
       typeof e === 'string'
-        ? { agency: e, exhaustedAt: null, resolution: AGENCY_RESOLUTIONS.SEARCHED_IN_FULL, reason: EXHAUSTION_REASON }
-        : { ...e, resolution: e.resolution ?? AGENCY_RESOLUTIONS.SEARCHED_IN_FULL }
+        ? { agency: e, exhaustedAt: null, resolution: AGENCY_RESOLUTIONS.BOUNDED_DISCOVERY_COMPLETE, reason: BOUNDED_COMPLETE_REASON }
+        : { ...e, resolution: e.resolution ?? AGENCY_RESOLUTIONS.BOUNDED_DISCOVERY_COMPLETE }
     ),
     // selection-v1.0.23. Counted apart, never summed into one "agencies searched" figure. An
     // agency whose discovery was blocked is not evidence that it publishes no such form, and a
@@ -1111,7 +1260,7 @@ export function publishProvenance(log, { to }) {
     agencyResolutions: (() => {
       const { counts, records, disagreements } = agencyResolutions(log);
       return {
-        searchedInFull: counts[AGENCY_RESOLUTIONS.SEARCHED_IN_FULL] ?? 0,
+        boundedDiscoveryComplete: counts[AGENCY_RESOLUTIONS.BOUNDED_DISCOVERY_COMPLETE] ?? 0,
         technicalDiscoveryAttrition: counts[AGENCY_RESOLUTIONS.TECHNICAL_ATTRITION] ?? 0,
         byAgency: records,
         disagreements,
@@ -1986,6 +2135,83 @@ export function checkDeviations(log) {
 }
 
 /**
+ * Navigation and internal-search records whose evidence is a plain fetch, not a rendered DOM.
+ *
+ * selection-v1.0.24. The backlog is DERIVED rather than written down, because a list I counted by
+ * hand is a list that goes stale the moment a record is added. A record satisfies the rule either
+ * by carrying rendered evidence itself or by having a rendered follow-up that names it through
+ * `rendersDiscoveryId` - the original is preserved, never edited, so both forms must count.
+ *
+ * Only HTML pages are in scope. A PDF or a DOCX has no DOM to render, and a plain fetch is the
+ * right evidence for it.
+ */
+const NON_HTML = /\.(pdf|docx?|xlsx?|pptx?|csv|txt|xml|json|zip|jpe?g|png|gif|svg)$/i;
+
+/**
+ * The outcomes that are judgements about a page's CONTENT, and so rest on the DOM.
+ *
+ * `unavailable` and `disallowed` are not among them, and neither are the two attrition outcomes
+ * that describe a refusal. Plain retrieval is the authoritative evidence for a status code and for
+ * a robots decision - there is no DOM behind a 404, and a `Disallow` means there must not be one.
+ * `retrieval-inconclusive` IS here: it says this method could not read the page, which is precisely
+ * the claim a rendered DOM settles.
+ */
+const CONTENT_OUTCOMES = Object.freeze(['candidates-found', 'no-candidates', 'retrieval-inconclusive']);
+
+export function renderBacklog(log) {
+  const rendered = new Set(
+    log.attempts.map((a) => a.rendersDiscoveryId).filter((id) => id !== undefined && id !== null)
+  );
+  return log.attempts.filter((a) => {
+    if (a.status !== 'discovery') return false;
+    if (!RENDERED_METHODS.includes(a.discoveryKind)) return false;
+    if (isDiscoverySuperseded(log, a.id)) return false;
+    if (a.evidence === DISCOVERY_EVIDENCE.RENDERED_DOM) return false;
+    if (rendered.has(a.id)) return false;
+    if (!CONTENT_OUTCOMES.includes(a.outcome)) return false;
+    // A record that never navigated has no DOM to have rendered.
+    if (a.navigationPerformed === false) return false;
+    let url = null;
+    try { url = new URL(a.url); } catch { return false; }
+    if (NON_HTML.test(url.pathname)) return false;
+    // And the request must not be FORBIDDEN by the policy in force now. Without this the gate would
+    // demand renders that politeness forbids - an obligation meetable only by breaching robots,
+    // which is worse than the bias it was added to remove. Six `disallowed` and two
+    // Incapsula-blocked records were in the first version of this list for exactly that reason.
+    //
+    // An origin with no RECORDED policy is a different case and must not be quietly dropped: the
+    // early rounds predate the recorded-policy model, so most of the backlog has none. Needing a
+    // robots check first is a prerequisite, not an exemption - excluding those records would have
+    // shrunk the obligation from 101 to 32 by losing the ones nobody had checked.
+    const check = findRobotsCheck(log, url.origin);
+    if (check && !evaluatePolicy(check, url.pathname + url.search, 'chromium').allowed) return false;
+    return true;
+  });
+}
+
+/** Why a backlog entry cannot be rendered yet, or null if it can. */
+export function renderPrerequisite(log, attempt) {
+  let url = null;
+  try { url = new URL(attempt.url); } catch { return 'the url does not parse'; }
+  const check = findRobotsCheck(log, url.origin);
+  if (!check) return `no recorded robots policy for ${url.origin}; run \`recheck-robots\` first`;
+  if (!robotsCheckIsFresh(check)) return `the robots policy for ${url.origin} is more than 24 hours old`;
+  const verdict = evaluatePolicy(check, url.pathname + url.search, 'chromium');
+  return verdict.allowed ? null : verdict.reason;
+}
+
+/** Backlog entries grouped by URL: one render answers every record naming that page. */
+export function renderBacklogByUrl(log) {
+  const groups = new Map();
+  for (const a of renderBacklog(log)) {
+    const key = a.url;
+    if (!groups.has(key)) groups.set(key, { url: key, agency: a.agency, records: [] });
+    groups.get(key).records.push(a.id);
+  }
+  return [...groups.values()];
+}
+
+/**
  * Everything unfinished that withholds the corpus draft.
  *
  * selection-v1.0.17. `status` and `deriveDraft` each computed this list for themselves, and drifted
@@ -2071,6 +2297,16 @@ export function corpusBlockers(log) {
     add('resolution-disagreements',
       `${disagreements.length} exhaustion(s) claim a resolution their evidence does not support`,
       disagreements);
+  }
+
+  // selection-v1.0.24. Plain-fetch evidence for a page whose authoritative evidence is now the
+  // rendered DOM. A gate rather than a note: the whole point is that a script-inserted form was
+  // undiscoverable, so leaving the backlog optional would leave the bias in the corpus.
+  const backlog = renderBacklog(log);
+  if (backlog.length) {
+    add('render-backlog',
+      `${backlog.length} navigation/internal-search record(s) rest on plain retrieval, not a rendered DOM`,
+      backlog.map((a) => `${a.id} ${a.agency} / ${a.category}: ${a.url}`));
   }
 
   const awaiting = agenciesAwaitingExhaustion(log);

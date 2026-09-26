@@ -168,33 +168,51 @@ const FRAME_FILES = [
  * exhaustion records at all. A manifest that misnames its own protocol is worse than one that
  * omits it: a reader checking which rules a corpus was sealed under would be told the wrong ones.
  */
-export const SOLO_PROTOCOL_TAG = 'solo-protocol-v1.0.4';
+export const SOLO_PROTOCOL_TAG = 'solo-protocol-v1.0.5';
 
 /**
  * Two resolutions, mirrored from the capture package and checked equal by a test.
  *
  * solo-protocol-v1.0.4. One frozen reason asserted that all four categories "were searched". For
  * an agency whose websites answer every request with a bot-management challenge that is false:
- * the categories were attempted. Sealing it under the searched-in-full reason would put a
+ * the categories were attempted. Sealing it under the bounded-discovery-complete reason would put a
  * completed search into the denominator of every prevalence figure on the strength of requests
  * that returned no agency content.
  */
+/**
+ * solo-protocol-v1.0.5. `bounded-discovery-complete` overclaimed in its turn. The procedure is BOUNDED - five
+ * candidates a category, four methods, and a robots-disallowed URL deliberately never retrieved -
+ * so what runs to completion is a fixed procedure, not an exhaustive examination of an agency's web
+ * presence. Where a `Disallow` was honoured, what was read is the robots POLICY, not the page.
+ */
 export const AGENCY_RESOLUTIONS = Object.freeze({
-  SEARCHED_IN_FULL: 'searched-in-full',
+  BOUNDED_DISCOVERY_COMPLETE: 'bounded-discovery-complete',
   TECHNICAL_ATTRITION: 'technical-discovery-attrition',
 });
 
-export const EXHAUSTION_REASON =
-  'all four categories in the frozen priority order were searched and none yielded an eligible form';
+export const BOUNDED_COMPLETE_REASON =
+  'the frozen bounded discovery procedure was completed for all four categories in the priority ' +
+  'order, and no eligible form was located';
 
 export const ATTRITION_REASON =
-  'all four categories in the frozen priority order were attempted, but technical retrieval ' +
-  'barriers prevented complete discovery and no eligible form was located';
+  'technical retrieval barriers prevented the frozen bounded discovery procedure from completing, ' +
+  'and no eligible form was located';
 
 export const RESOLUTION_REASONS = Object.freeze({
-  [AGENCY_RESOLUTIONS.SEARCHED_IN_FULL]: EXHAUSTION_REASON,
+  [AGENCY_RESOLUTIONS.BOUNDED_DISCOVERY_COMPLETE]: BOUNDED_COMPLETE_REASON,
   [AGENCY_RESOLUTIONS.TECHNICAL_ATTRITION]: ATTRITION_REASON,
 });
+
+/**
+ * Wordings frozen under earlier protocols. Recognised so the seal can SAY what such a record is,
+ * never accepted as current: an exhaustion recorded under superseded wording must be re-resolved
+ * before it can be sealed, or a manifest would carry a claim the protocol has since withdrawn.
+ */
+export const SUPERSEDED_REASONS = Object.freeze([
+  'all four categories in the frozen priority order were searched and none yielded an eligible form',
+  'all four categories in the frozen priority order were attempted, but technical retrieval ' +
+    'barriers prevented complete discovery and no eligible form was located',
+]);
 
 /** The discovery outcomes that mean a page could not be read. Mirrored, and checked equal. */
 export const TECHNICAL_ATTRITION_OUTCOMES = Object.freeze([
@@ -368,8 +386,8 @@ export function sealCorpus({
     }
     // solo-protocol-v1.0.4. The resolution, and the one frozen reason it may carry. A record with
     // no resolution predates the distinction and asserted a completed search, so it reads as
-    // `searched-in-full` - and is then held to that claim against the log below.
-    const resolution = record?.resolution ?? AGENCY_RESOLUTIONS.SEARCHED_IN_FULL;
+    // `bounded-discovery-complete` - and is then held to that claim against the log below.
+    const resolution = record?.resolution ?? AGENCY_RESOLUTIONS.BOUNDED_DISCOVERY_COMPLETE;
     if (!Object.values(AGENCY_RESOLUTIONS).includes(resolution)) {
       problems.push(
         `${where}.resolution must be ${Object.values(AGENCY_RESOLUTIONS).join(' or ')}, not ` +
@@ -377,9 +395,13 @@ export function sealCorpus({
       );
     } else if (record?.reason !== RESOLUTION_REASONS[resolution]) {
       problems.push(
-        `${where}.reason must be the frozen reason for ${resolution}. Agencies that did not ` +
-          'qualify are interpretable only if each left for one of two stated reasons, and only ' +
-          'if the reason matches the resolution it is filed under.'
+        SUPERSEDED_REASONS.includes(record?.reason)
+          ? `${where}.reason is wording frozen under an earlier protocol and withdrawn by ` +
+            `${SOLO_PROTOCOL_TAG}. Re-resolve the exhaustion so the record states the current ` +
+            'reason; sealing it would publish a claim the protocol has withdrawn.'
+          : `${where}.reason must be the frozen reason for ${resolution}. Agencies that did not ` +
+            'qualify are interpretable only if each left for one of two stated reasons, and only ' +
+            'if the reason matches the resolution it is filed under.'
       );
     }
     if (resolution === AGENCY_RESOLUTIONS.TECHNICAL_ATTRITION) {
@@ -410,6 +432,9 @@ export function sealCorpus({
     exhausted.push({
       agency: record.agency,
       exhaustedAt: record.exhaustedAt,
+      // When the wording was corrected under a later protocol, both times are kept: the manifest
+      // says when the agency was searched, not when its record was rephrased.
+      ...(record.reResolvedAt !== undefined ? { reResolvedAt: record.reResolvedAt } : {}),
       resolution,
       reason: record.reason,
       categorySetVersions: record.categorySetVersions,
@@ -560,7 +585,7 @@ export function sealCorpus({
           // records were bound into it - the claim would be consistent with the log and false
           // about the world. Re-derived here rather than trusted, for the same reason the
           // exhaustion contract is duplicated at all: the seal is the authority.
-          const loggedResolution = inLog.resolution ?? AGENCY_RESOLUTIONS.SEARCHED_IN_FULL;
+          const loggedResolution = inLog.resolution ?? AGENCY_RESOLUTIONS.BOUNDED_DISCOVERY_COMPLETE;
           if (loggedResolution !== record.resolution) {
             problems.push(
               `${where}.resolution is ${record.resolution} but the capture log records ` +
@@ -580,7 +605,7 @@ export function sealCorpus({
             (a) => bound.has(a.id) && a.status === 'discovery' && !superseded.has(a.id) &&
               TECHNICAL_ATTRITION_OUTCOMES.includes(a.outcome)
           );
-          // With nothing bound, `searched-in-full` would be vacuously derivable - the stronger
+          // With nothing bound, `bounded-discovery-complete` would be vacuously derivable - the stronger
           // claim, on no evidence. The absence of attrition only means something where there is
           // evidence in which attrition could have shown up.
           const boundInLog = attempts.filter((a) => bound.has(a.id) && a.status === 'discovery' && !superseded.has(a.id));
@@ -592,7 +617,7 @@ export function sealCorpus({
           }
           const derived = attritionInLog.length > 0
             ? AGENCY_RESOLUTIONS.TECHNICAL_ATTRITION
-            : AGENCY_RESOLUTIONS.SEARCHED_IN_FULL;
+            : AGENCY_RESOLUTIONS.BOUNDED_DISCOVERY_COMPLETE;
           if (derived !== record.resolution) {
             problems.push(
               `${where} is sealed as ${record.resolution}, but the capture log's bound discovery ` +
@@ -699,7 +724,7 @@ export function sealCorpus({
       // tally the array to learn how much of the frame was actually read. An agency whose
       // discovery was blocked belongs in neither the numerator nor the searched denominator.
       agencyResolutions: {
-        searchedInFull: exhausted.filter((e) => e.resolution === AGENCY_RESOLUTIONS.SEARCHED_IN_FULL).length,
+        boundedDiscoveryComplete: exhausted.filter((e) => e.resolution === AGENCY_RESOLUTIONS.BOUNDED_DISCOVERY_COMPLETE).length,
         technicalDiscoveryAttrition:
           exhausted.filter((e) => e.resolution === AGENCY_RESOLUTIONS.TECHNICAL_ATTRITION).length,
       },

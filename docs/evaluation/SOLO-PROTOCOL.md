@@ -2277,13 +2277,21 @@ what makes the denominator "agencies searched" rather than "agencies with a form
 
 ### Two frozen resolutions
 
+> **Superseded by Amendment 28 (27 September 2026).** The resolution named here was
+> `searched-in-full`, carrying the reason "all four categories in the frozen priority order were
+> searched and none yielded an eligible form". That was itself an overclaim and has been renamed to
+> `bounded-discovery-complete` with new wording; see Amendment 28. The paragraph below also said of
+> a 404 and a `Disallow` that "both were read", which is true only of the 404 — where a `Disallow`
+> was honoured, what was read is the robots **policy**, not the target page. The reasoning about
+> *why* two resolutions are needed stands; the names and the wording do not.
+
 | resolution | reason |
 | --- | --- |
-| `searched-in-full` | all four categories in the frozen priority order were searched and none yielded an eligible form |
-| `technical-discovery-attrition` | all four categories in the frozen priority order were attempted, but technical retrieval barriers prevented complete discovery and no eligible form was located |
+| `bounded-discovery-complete` | the frozen bounded discovery procedure was completed for all four categories in the priority order, and no eligible form was located |
+| `technical-discovery-attrition` | technical retrieval barriers prevented the frozen bounded discovery procedure from completing, and no eligible form was located |
 
-`searched-in-full` keeps the existing reason, unchanged, and is now the narrower claim it always
-purported to be: it may be used **only** where every category was conclusively searched.
+The completed resolution is the narrower claim it always purported to be: it may be used **only**
+where the frozen procedure ran to completion for every category.
 
 ### Derived, never typed
 
@@ -2295,13 +2303,16 @@ One is enough: an agency whose discovery was blocked anywhere was not searched i
 the two readings differ the honest one is the weaker.
 
 `unavailable` and `disallowed` are **not** attrition. A 404 says the resource is not there; a
-`Disallow` says the host forbids it. Both were read, and both are findings.
+`Disallow` says the host forbids it, and honouring it is part of the planned boundary rather than a
+barrier that defeated the method. In the first case the resource was read; in the second the **robots
+policy** was read and the target page deliberately was not. Both are findings, and neither is a
+failure of the instrument.
 
 `exhaustAgency` takes no reason and no resolution from its caller, and `exhaust` **refuses**
 `--reason` and `--resolution` outright rather than merely not offering them. A reason an operator
 can choose is a reason an operator can choose wrongly, and this one decides what an agency's
 absence from the corpus means. A `technical-discovery-attrition` record must name the supporting
-records; a `searched-in-full` record must name none.
+records; a completed-procedure record must name none.
 
 ### Checked where it is written and where it is trusted
 
@@ -2311,7 +2322,7 @@ turn a true record false:
 
 1. `corpusBlockers` reports any exhaustion whose stored resolution its bound evidence no longer
    supports, and withholds the draft.
-2. `deriveDraft` normalises a legacy record with no `resolution` to `searched-in-full`, which is
+2. `deriveDraft` normalises a legacy record with no `resolution` to the completed resolution, which is
    exactly what it asserted — and gate 1 refuses the draft if that claim is now untrue, so the
    normalisation cannot quietly promote an attrition round into a completed search.
 3. The seal validates the resolution, requires the frozen reason **for that resolution**, and
@@ -2348,3 +2359,105 @@ NZSIS has not yet reached exhaustion; only its `account-registration` round is s
 with zero candidates under a technically incomplete search. When and if it does reach exhaustion, it
 will resolve as `technical-discovery-attrition` and will sit outside the searched denominator. That
 is a limitation of the instrument against bot-managed hosts, not a finding about the agency.
+
+## Amendment 28: what completed, and what the evidence is
+
+**Dated 27 September 2026.** `selection-v1.0.24` and `solo-protocol-v1.0.5`. Moves no earlier tag.
+No new capture tag: shared browser-capture behaviour is unchanged, and `capture-v1.0.7` stands.
+
+Two corrections, both to claims this protocol was making about its own thoroughness.
+
+### 1. `searched-in-full` → `bounded-discovery-complete`
+
+Amendment 27 replaced one overclaiming reason with two, and one of the two overclaimed in the same
+way. The procedure is **bounded** by design: five candidates per category, twenty per agency, four
+methods, a frozen term list, and a robots-disallowed URL that is **deliberately never retrieved**.
+"Searched in full" says an agency's web presence was exhaustively examined. What actually ran to
+completion is a fixed procedure.
+
+| resolution | reason |
+| --- | --- |
+| `bounded-discovery-complete` | the frozen bounded discovery procedure was completed for all four categories in the priority order, and no eligible form was located |
+| `technical-discovery-attrition` | technical retrieval barriers prevented the frozen bounded discovery procedure from completing, and no eligible form was located |
+
+A robots-disallowed URL remains **non-attrition**, because honouring the `Disallow` is part of the
+planned boundary rather than a barrier that defeated the method. But Amendment 27's defence of that
+said "both were read" of a 404 and a `Disallow`, and only the first is true: where a `Disallow` was
+honoured, what was read is the **robots policy**, not the target page. Both amendments are corrected
+in place, with the superseded wording quoted rather than deleted.
+
+**Renaming a frozen reason strands every exhaustion already recorded.** The Family Violence and
+Sexual Violence Executive Board was exhausted on 25 September under the withdrawn wording, and the
+seal requires the reason frozen for the resolution — so that record simply stops sealing. Editing it
+would rewrite what was decided; accepting the old wording as equivalent would make the correction
+cosmetic. So `re-resolve` archives the prior record with the reason it was superseded for and writes
+a freshly **derived** replacement. `exhaustedAt` is preserved and `reResolvedAt` recorded separately,
+so the manifest still says when the agency was searched rather than when its record was rephrased. A
+record carrying superseded wording is reported by the corpus gate and refused by the seal; it cannot
+reach a manifest.
+
+### 2. The rendered DOM is the authoritative discovery evidence
+
+Every discovery inspection in this scan until now was a plain HTTP fetch, while the capture step
+drives Chromium and executes JavaScript. That asymmetry is a **selection bias**, not a detail: a form
+inserted by script is invisible to discovery and perfectly capturable, so a client-rendered
+service-application form would have been recorded as `no-candidates` — the same false statement
+`no-candidates` would have made about an Incapsula challenge page.
+
+**The rejected alternative.** The first proposal was to render only where a plain fetch returned
+something "script-driven with no form". That trigger does not hold. A raw page can carry a search
+box, a cookie banner or a login form while script inserts the personal-name form later, and such a
+page escapes the trigger entirely — so the bias would survive inside the rule meant to remove it.
+
+**The rule is therefore unconditional.** For a permitted HTML **navigation** or **internal-search**
+page, the rendered DOM is the authoritative discovery evidence. Plain retrieval remains the right
+evidence for `robots.txt`, sitemaps, status codes and non-HTML files: there is no DOM behind a 404,
+and a `Disallow` means there must not be one.
+
+Renders run under the same discipline as captures: a fresh single-use permit, five seconds between
+navigations, a fresh context with no persistent profile and no imported cookies, the unmodified
+Chromium user agent, 1280×800, `en-NZ`, a 2000 ms settle — and **nothing typed, clicked or
+submitted, and no challenge answered**. A render that meets an access barrier must be recorded
+`retrieval-blocked`; the harness decides that mechanically rather than accepting a label for it.
+
+**The rendered bytes are private.** They are third-party markup and stay in the ignored data tree,
+beside the captures rather than among them. Only the hash, the byte count, the DOM-node count, the
+link and form counts and the browser provenance are published.
+
+**Originals are preserved.** A rendered inspection names the plain-retrieval record it answers
+through `rendersDiscoveryId`, and that record stays exactly as written — it was true about the method
+it used. This is deliberately *not* `supersedesDiscoveryId`, which requires the same category: the
+first real use is a **service-application** render of a page first inspected under
+**account-registration**, so the link must cross categories, and it is not a correction. If a render
+changes a candidate set, the set is **rejected and superseded**, never edited.
+
+### The retrospective backlog, derived rather than counted
+
+The obligation is computed from the log, because a list counted by hand goes stale the moment a
+record is added. `renderBacklog` returns the active navigation/internal-search records whose outcome
+is a judgement about page **content** (`candidates-found`, `no-candidates`,
+`retrieval-inconclusive`), that navigated, that are HTML, and that the robots policy in force does
+not forbid. It withholds the corpus draft.
+
+**As at this amendment: 99 records across 59 unique URLs** — Te Puni Kōkiri 43, Family Violence and
+Sexual Violence Executive Board 24, Ministry of Health 31, NZSIS 1. One render answers every record
+naming that page, so the work is 59 renders, not 99.
+
+Two figures quoted when this correction was requested do not reproduce: the review pool was given as
+74 active navigation/internal-search records with 66 conclusive. **74 is the `sitemap` method count**
+in the published provenance, not a navigation figure. The actual counts are above.
+
+Two exclusions were added after the first version of the backlog demanded work it should not have:
+
+- **A robots-forbidden page is not in the backlog.** Six `disallowed` and two Incapsula-blocked
+  records were in the first list, and a gate demanding those renders could only have been satisfied
+  by ignoring robots — worse than the bias it was added to remove.
+- **An origin with no recorded policy, or a policy over 24 hours old, stays in the backlog** with a
+  stated prerequisite. Treating a missing policy as an exemption shrank the obligation from 99
+  records to 32, by quietly losing exactly the ones nobody had checked.
+
+### What this does not establish
+
+No page has been re-inspected yet. Until the backlog is worked, every `no-candidates` record for the
+first three agencies rests on plain retrieval, and any script-inserted form on those pages is still
+undiscovered. That limitation is in the record and in the gate, not only in this paragraph.

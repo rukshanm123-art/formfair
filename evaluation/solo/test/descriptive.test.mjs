@@ -13,13 +13,14 @@ import {
   sealCorpus,
   FROZEN_FRAME_SHA256,
   FROZEN_DRAW_ORDER_SHA256,
-  EXHAUSTION_REASON,
+  BOUNDED_COMPLETE_REASON,
   MAX_QUALIFIED_AGENCIES,
   EXHAUSTION_CATEGORIES,
   SOLO_PROTOCOL_TAG,
   AGENCY_RESOLUTIONS,
   ATTRITION_REASON,
   RESOLUTION_REASONS,
+  SUPERSEDED_REASONS,
   TECHNICAL_ATTRITION_OUTCOMES,
 } from '../descriptive.mjs';
 import { loadSoloInstrument, sealerIdentity, SOLO_INSTRUMENT_TAG, SOLO_SEALER_TAG } from '../instrument.mjs';
@@ -249,7 +250,7 @@ describe('the corpus seal requires the exhaustion records', () => {
   const exhaustion = (agency) => ({
     agency,
     exhaustedAt: '2026-09-25T04:00:00Z',
-    reason: EXHAUSTION_REASON,
+    reason: BOUNDED_COMPLETE_REASON,
     categorySetVersions: {
       'account-registration': 1,
       'service-application': 3,
@@ -396,7 +397,7 @@ describe('the corpus seal requires the exhaustion records', () => {
       assert.ok(sealed.manifest, sealed.problems.join('; '));
       assert.equal(sealed.manifest.exhaustedAgencies.length, order.length - 2);
       assert.equal(sealed.manifest.exhaustedAgencies[0].agency, order[2]);
-      assert.equal(sealed.manifest.exhaustedAgencies[0].reason, EXHAUSTION_REASON);
+      assert.equal(sealed.manifest.exhaustedAgencies[0].reason, BOUNDED_COMPLETE_REASON);
       assert.equal(sealed.manifest.exhaustedAgencies[0].categorySetVersions['service-application'], 3);
 
       // Survives being written and read back, which is how the study consumes it.
@@ -457,12 +458,12 @@ describe('the corpus seal requires the exhaustion records', () => {
       assert.deepEqual(record.attritionRecordIds, ['d-9001']);
       // The counts a reader needs without tallying the array: one agency was not searched.
       assert.equal(sealed.manifest.agencyResolutions.technicalDiscoveryAttrition, 1);
-      assert.equal(sealed.manifest.agencyResolutions.searchedInFull, order.length - 3);
-      assert.notEqual(record.reason, EXHAUSTION_REASON);
+      assert.equal(sealed.manifest.agencyResolutions.boundedDiscoveryComplete, order.length - 3);
+      assert.notEqual(record.reason, BOUNDED_COMPLETE_REASON);
     });
   });
 
-  test('THE ATTACK: searched-in-full does not seal when the log shows the round could not be read', async () => {
+  test('THE ATTACK: bounded-discovery-complete does not seal when the log shows the round could not be read', async () => {
     // The one that matters. The record is internally perfect and matches the capture log's own
     // exhaustion entry; what gives it away is the log's BOUND discovery evidence. Without
     // re-deriving, an exhaustion written before a round was corrected would go on asserting a
@@ -547,14 +548,14 @@ describe('the corpus seal requires the exhaustion records', () => {
       const agency = d.exhaustedAgencies[0].agency;
       d.exhaustedAgencies[0] = attritionExhaustion(agency);
       const log = withAttritionRecord(captureLogFor(d), agency);
-      // The log still says searched-in-full for it.
+      // The log still says bounded-discovery-complete for it.
       log.exhausted = log.exhausted.map((e) =>
         e.agency === agency ? { ...exhaustion(agency) } : e
       );
       const { capturesDir, captureLogPath } = prepareReal(dir, d, { log });
       const sealed = sealCorpus({ draft: d, capturesDir, instrument: identity, frameDir, captureLogPath });
       assert.equal(sealed.manifest, null);
-      assert.ok(sealed.problems.some((p) => /but the capture log records searched-in-full/.test(p)),
+      assert.ok(sealed.problems.some((p) => /but the capture log records bounded-discovery-complete/.test(p)),
         sealed.problems.join('; '));
     });
   });
@@ -582,7 +583,7 @@ describe('the corpus seal requires the exhaustion records', () => {
   });
 
   test('an exhaustion bound to nothing does not seal, in either resolution', async () => {
-    // With no bound record, `searched-in-full` is derivable from nothing at all - the stronger of
+    // With no bound record, `bounded-discovery-complete` is derivable from nothing at all - the stronger of
     // the two claims, on no evidence. The absence of attrition only means something where there
     // was evidence in which attrition could have appeared.
     await inTemp(async (dir) => {
@@ -609,14 +610,14 @@ describe('the corpus seal requires the exhaustion records', () => {
       const { capturesDir, captureLogPath } = prepareReal(dir, d);
       const sealed = sealCorpus({ draft: d, capturesDir, instrument: identity, frameDir, captureLogPath });
       assert.equal(sealed.manifest, null);
-      assert.ok(sealed.problems.some((p) => /must be the frozen reason for searched-in-full/.test(p)));
+      assert.ok(sealed.problems.some((p) => /must be the frozen reason for bounded-discovery-complete/.test(p)));
     });
   });
 
   test('a legacy exhaustion with no timestamp or versions does not seal', async () => {
     await inTemp(async (dir) => {
       const d = realDraft({ pageCount: 2, exhaustedCount: order.length - 2 });
-      d.exhaustedAgencies[0] = { agency: order[2], exhaustedAt: null, reason: EXHAUSTION_REASON, categorySetVersions: null };
+      d.exhaustedAgencies[0] = { agency: order[2], exhaustedAt: null, reason: BOUNDED_COMPLETE_REASON, categorySetVersions: null };
       const { capturesDir, captureLogPath } = prepareReal(dir, d);
       const sealed = sealCorpus({ draft: d, capturesDir, instrument: identity, frameDir, captureLogPath });
       assert.equal(sealed.manifest, null);
@@ -689,7 +690,7 @@ describe('the corpus seal requires the exhaustion records', () => {
     // The duplication is only safe if it is checked.
     const capture = await import(pathToFileURL(join(repo, 'capture', 'run.mjs')).href);
     const selection = await import(pathToFileURL(join(repo, 'capture', 'selection.mjs')).href);
-    assert.equal(capture.EXHAUSTION_REASON, EXHAUSTION_REASON);
+    assert.equal(capture.BOUNDED_COMPLETE_REASON, BOUNDED_COMPLETE_REASON);
     assert.equal(selection.MAX_QUALIFIED_AGENCIES, MAX_QUALIFIED_AGENCIES);
     assert.deepEqual([...selection.CATEGORY_ORDER], [...EXHAUSTION_CATEGORIES]);
     // solo-protocol-v1.0.4: the second resolution, its frozen reason, and the outcomes that
@@ -700,6 +701,12 @@ describe('the corpus seal requires the exhaustion records', () => {
     assert.deepEqual(
       [...selection.TECHNICAL_ATTRITION_OUTCOMES], [...TECHNICAL_ATTRITION_OUTCOMES]
     );
+    // solo-protocol-v1.0.5: every wording the capture package knows to be superseded must be one
+    // the seal also recognises, or a re-worded reason would fail here with an unhelpful message
+    // instead of being named as withdrawn.
+    for (const reason of [...capture.SUPERSEDED_COMPLETE_REASONS, ...capture.SUPERSEDED_ATTRITION_REASONS]) {
+      assert.ok(SUPERSEDED_REASONS.includes(reason), `the seal does not recognise ${JSON.stringify(reason)}`);
+    }
     assert.equal(SOLO_PROTOCOL_TAG, SOLO_SEALER_TAG, 'the sealer and the protocol tag must agree');
   });
   test('THE FABRICATION: 44 well-shaped but unsupported exhaustions cannot seal', async () => {
@@ -891,7 +898,7 @@ describe('the sealed capture log is bound by path and re-verified', () => {
     .map((r) => r.agency);
 
   const exhaustion = (agency) => ({
-    agency, exhaustedAt: '2026-09-25T04:00:00Z', reason: EXHAUSTION_REASON,
+    agency, exhaustedAt: '2026-09-25T04:00:00Z', reason: BOUNDED_COMPLETE_REASON,
     categorySetVersions: {
       'account-registration': 1, 'service-application': 3,
       'enquiry-or-contact': 1, 'subscription-or-newsletter': 1,

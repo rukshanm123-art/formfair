@@ -138,14 +138,15 @@ const lockSet = async (dir, agency, category, urls) => {
   // selection-v1.0.14: the record names the permit that authorised it.
   const permitId = permit.stdout.match(/permit (p-\d+):/)?.[1];
   assert.ok(permitId, `no permit id in: ${permit.stdout}`);
-  // Taken AFTER the permit exists. Timestamps are truncated to the second, so a value read
-  // before the preflight can land a second earlier than the permit and be rejected as
-  // retrospective - which is the check working, and the fixture getting the order wrong.
-  const at = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
-  const disc = await run(['discovery', '--out', dir, '--agency', agency, '--website', origin,
+  // selection-v1.0.24: `render-discovery`, not `discovery`. For a navigation page the authoritative
+  // evidence is the rendered DOM, so a fixture that recorded a plain fetch was describing a state
+  // the protocol no longer permits - and the render backlog gate correctly withheld the draft,
+  // which is how this fixture came to fail. It needs no `--navigated-at`: the render navigates now
+  // and stamps its own time.
+  const disc = await run(['render-discovery', '--out', dir, '--agency', agency, '--website', origin,
     '--url', discoveryUrl, '--method', 'navigation',
     '--outcome', 'candidates-found', '--category', category, '--set-version', '1',
-    '--navigated-at', at, '--permit-id', permitId]);
+    '--permit-id', permitId]);
   assert.equal(disc.status, 0, disc.stderr);
   const add = await run(['candidates', '--out', dir, '--agency', agency, '--category', category, '--add', urls.join(',')]);
   assert.equal(add.status, 0, add.stderr);

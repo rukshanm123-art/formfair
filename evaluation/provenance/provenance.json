@@ -12,19 +12,19 @@
     "postLoadSettleMs": 2000
   },
   "counts": {
-    "discoveryPages": 283,
+    "discoveryPages": 287,
     "candidatesAssessed": 18,
     "captured": 2,
     "excluded": 15,
     "failed": 1,
     "captureBlocked": 0,
     "pendingApprovalAttempts": 0,
-    "pendingApprovalCandidateSets": 0
+    "pendingApprovalCandidateSets": 1
   },
   "discoveryByMethod": {
-    "navigation": 78,
+    "navigation": 80,
     "internal-search": 54,
-    "sitemap": 74,
+    "sitemap": 76,
     "robots": 77
   },
   "discoveryByOutcome": {
@@ -34,42 +34,46 @@
     "disallowed": 38,
     "candidates-found": 14,
     "retrieval-blocked": 6,
-    "retrieval-inconclusive": 1
+    "retrieval-inconclusive": 1,
+    "robots-unestablished": 4
   },
   "exhaustedAgencies": [
     {
       "agency": "Family Violence and Sexual Violence Executive Board",
       "exhaustedAt": "2026-09-25T04:42:39Z",
-      "reason": "all four categories in the frozen priority order were searched and none yielded an eligible form",
+      "reResolvedAt": "2026-09-26T22:03:15Z",
+      "resolution": "bounded-discovery-complete",
+      "reason": "the frozen bounded discovery procedure was completed for all four categories in the priority order, and no eligible form was located",
       "categorySetVersions": {
         "account-registration": 1,
         "service-application": 2,
         "enquiry-or-contact": 1,
         "subscription-or-newsletter": 1
-      },
-      "resolution": "searched-in-full"
+      }
     }
   ],
   "agencyResolutions": {
-    "searchedInFull": 1,
+    "boundedDiscoveryComplete": 1,
     "technicalDiscoveryAttrition": 0,
     "byAgency": [
       {
         "agency": "Family Violence and Sexual Violence Executive Board",
-        "resolution": "searched-in-full"
+        "resolution": "bounded-discovery-complete",
+        "reason": "the frozen bounded discovery procedure was completed for all four categories in the priority order, and no eligible form was located"
       }
     ],
     "disagreements": []
   },
   "technicalAttrition": {
-    "records": 7,
+    "records": 11,
     "byOutcome": {
       "retrieval-blocked": 6,
-      "retrieval-inconclusive": 1
+      "retrieval-inconclusive": 1,
+      "robots-unestablished": 4
     },
     "byOrigin": {
-      "New Zealand Security Intelligence Service https://www.nzsis.govt.nz": 3,
-      "New Zealand Security Intelligence Service https://www.protectivesecurity.govt.nz": 3,
+      "New Zealand Security Intelligence Service https://www.nzsis.govt.nz": 5,
+      "New Zealand Security Intelligence Service https://www.protectivesecurity.govt.nz": 5,
       "New Zealand Security Intelligence Service https://providinginformation.nzsis.govt.nz": 1
     }
   },
@@ -246,7 +250,8 @@
     "Ministry of Health / account-registration v3": 28,
     "Ministry of Health / service-application v1": 26,
     "Ministry of Health / enquiry-or-contact v1": 35,
-    "New Zealand Security Intelligence Service / account-registration v1": 9
+    "New Zealand Security Intelligence Service / account-registration v1": 9,
+    "New Zealand Security Intelligence Service / service-application v1": 4
   },
   "candidateSets": [
     {
@@ -632,6 +637,19 @@
         "robots",
         "sitemap"
       ]
+    },
+    {
+      "agency": "New Zealand Security Intelligence Service",
+      "category": "service-application",
+      "version": 1,
+      "discovered": 0,
+      "locked": 0,
+      "droppedBeyondBound": 0,
+      "lockedAt": null,
+      "approval": "pending",
+      "approvedAt": null,
+      "supportedByDiscoveryRecords": [],
+      "discoveryMethods": []
     }
   ],
   "supersededCandidateSets": [

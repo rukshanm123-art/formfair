@@ -23,7 +23,8 @@ import {
   consumeDiscoveryPermit, appendAttempt, permitAudit, recordCandidates, lockCandidateSet,
   recordDeviation, checkDeviations, corpusBlockers, checkCaptureFiles, quarantineCapture,
   PERMIT_TTL_MS, sha256, approveCandidateSet, exhaustAgency, agencyResolution, agencyResolutions,
-  AGENCY_RESOLUTIONS, EXHAUSTION_REASON, ATTRITION_REASON,
+  AGENCY_RESOLUTIONS, BOUNDED_COMPLETE_REASON, ATTRITION_REASON, reResolveExhaustion,
+  renderBacklog, renderBacklogByUrl, renderPrerequisite, SUPERSEDED_COMPLETE_REASONS,
 } from '../run.mjs';
 import {
   DISCOVERY_OUTCOMES, TECHNICAL_ATTRITION_OUTCOMES, CATEGORY_ORDER, parseDrawOrder,
@@ -551,7 +552,7 @@ describe('the packet must not call an unreadable origin an empty one', () => {
 });
 
 describe('an agency leaves the scan under one of two resolutions', () => {
-  // selection-v1.0.23. `EXHAUSTION_REASON` asserted that all four categories "were searched".
+  // selection-v1.0.23. `BOUNDED_COMPLETE_REASON` asserted that all four categories "were searched".
   // For NZSIS that is false: two of three websites answer every request with an Incapsula
   // challenge, so the categories were ATTEMPTED. Filing that as a completed search would put it
   // in the denominator of every prevalence figure.
@@ -579,11 +580,11 @@ describe('an agency leaves the scan under one of two resolutions', () => {
     return log;
   };
 
-  test('every category read means searched-in-full', () => {
+  test('a completed bounded procedure means bounded-discovery-complete', () => {
     const log = settledAgency(emptyLog(), {});
     const r = agencyResolution(log, AGENCY);
-    assert.equal(r.resolution, AGENCY_RESOLUTIONS.SEARCHED_IN_FULL);
-    assert.equal(r.reason, EXHAUSTION_REASON);
+    assert.equal(r.resolution, AGENCY_RESOLUTIONS.BOUNDED_DISCOVERY_COMPLETE);
+    assert.equal(r.reason, BOUNDED_COMPLETE_REASON);
     assert.deepEqual(r.attritionRecordIds, []);
   });
 
@@ -595,7 +596,7 @@ describe('an agency leaves the scan under one of two resolutions', () => {
       assert.equal(r.reason, ATTRITION_REASON);
       assert.equal(r.attritionRecordIds.length, 1);
       assert.deepEqual(r.attritionByOutcome, { [outcome]: 1 });
-      assert.notEqual(r.reason, EXHAUSTION_REASON);
+      assert.notEqual(r.reason, BOUNDED_COMPLETE_REASON);
     }
   });
 
@@ -603,7 +604,7 @@ describe('an agency leaves the scan under one of two resolutions', () => {
     // A 404 says the resource is not there; a Disallow says the host forbids it. Both were read.
     for (const outcome of ['unavailable', 'disallowed', 'no-candidates']) {
       const log = settledAgency(emptyLog(), { 'service-application': outcome });
-      assert.equal(agencyResolution(log, AGENCY).resolution, AGENCY_RESOLUTIONS.SEARCHED_IN_FULL, outcome);
+      assert.equal(agencyResolution(log, AGENCY).resolution, AGENCY_RESOLUTIONS.BOUNDED_DISCOVERY_COMPLETE, outcome);
     }
   });
 
@@ -617,8 +618,8 @@ describe('an agency leaves the scan under one of two resolutions', () => {
     assert.deepEqual(record.attritionByOutcome, { 'retrieval-blocked': 1 });
 
     const clean = exhaustAgency(settledAgency(emptyLog(), {}), order);
-    assert.equal(clean.resolution, AGENCY_RESOLUTIONS.SEARCHED_IN_FULL);
-    assert.equal(clean.reason, EXHAUSTION_REASON);
+    assert.equal(clean.resolution, AGENCY_RESOLUTIONS.BOUNDED_DISCOVERY_COMPLETE);
+    assert.equal(clean.reason, BOUNDED_COMPLETE_REASON);
     assert.equal(clean.attritionRecordIds, undefined, 'a full search names no attrition evidence');
   });
 
@@ -627,16 +628,16 @@ describe('an agency leaves the scan under one of two resolutions', () => {
     exhaustAgency(log, order);
     const { counts, records, disagreements } = agencyResolutions(log);
     assert.equal(counts[AGENCY_RESOLUTIONS.TECHNICAL_ATTRITION], 1);
-    assert.equal(counts[AGENCY_RESOLUTIONS.SEARCHED_IN_FULL], 0);
+    assert.equal(counts[AGENCY_RESOLUTIONS.BOUNDED_DISCOVERY_COMPLETE], 0);
     assert.equal(records[0].agency, AGENCY);
     assert.deepEqual(disagreements, []);
   });
 
-  test('a legacy record with no resolution reads as searched-in-full', () => {
+  test('a legacy record with no resolution reads as bounded-discovery-complete', () => {
     const log = settledAgency(emptyLog(), {});
-    log.exhausted = [{ agency: AGENCY, exhaustedAt: iso(9), reason: EXHAUSTION_REASON, categorySetVersions: {} }];
+    log.exhausted = [{ agency: AGENCY, exhaustedAt: iso(9), reason: BOUNDED_COMPLETE_REASON, categorySetVersions: {} }];
     const { counts, disagreements } = agencyResolutions(log);
-    assert.equal(counts[AGENCY_RESOLUTIONS.SEARCHED_IN_FULL], 1);
+    assert.equal(counts[AGENCY_RESOLUTIONS.BOUNDED_DISCOVERY_COMPLETE], 1);
     assert.deepEqual(disagreements, [], 'and its claim is still true, so nothing is reported');
   });
 
@@ -653,7 +654,7 @@ describe('an agency leaves the scan under one of two resolutions', () => {
 
     const { disagreements } = agencyResolutions(log);
     assert.equal(disagreements.length, 1);
-    assert.match(disagreements[0], /recorded as searched-in-full but its bound evidence supports technical-discovery-attrition/);
+    assert.match(disagreements[0], /recorded as bounded-discovery-complete but its bound evidence supports technical-discovery-attrition/);
     const blocker = corpusBlockers(log).find((b) => b.kind === 'resolution-disagreements');
     assert.ok(blocker, 'and the corpus gate withholds the draft for it');
   });
@@ -667,7 +668,7 @@ describe('an agency leaves the scan under one of two resolutions', () => {
       outcome: 'retrieval-blocked', category: 'account-registration', candidateSetVersion: 1,
       navigatedAt: iso(10), approval: 'approved',
     });
-    assert.equal(agencyResolution(log, AGENCY).resolution, AGENCY_RESOLUTIONS.SEARCHED_IN_FULL);
+    assert.equal(agencyResolution(log, AGENCY).resolution, AGENCY_RESOLUTIONS.BOUNDED_DISCOVERY_COMPLETE);
   });
 });
 
@@ -762,4 +763,212 @@ test('an exhaustion bound to no evidence is refused, not resolved as a full sear
   assert.equal(agencyResolution(log, AGENCY).boundRecords, 0);
   assert.throws(() => exhaustAgency(log, order), /nothing supports either resolution/);
   assert.equal((log.exhausted ?? []).length, 0, 'and nothing is written');
+});
+
+describe('the bounded procedure is what completes, not a full search', () => {
+  // selection-v1.0.24. `searched-in-full` overclaimed in its turn: five candidates a category,
+  // four methods, and a robots-disallowed URL deliberately never retrieved. What runs to
+  // completion is a fixed procedure.
+  test('the frozen reason says the procedure completed, not that everything was searched', () => {
+    assert.match(BOUNDED_COMPLETE_REASON, /frozen bounded discovery procedure was completed/);
+    assert.doesNotMatch(BOUNDED_COMPLETE_REASON, /were searched/);
+    assert.doesNotMatch(ATTRITION_REASON, /were searched/);
+    assert.equal(AGENCY_RESOLUTIONS.BOUNDED_DISCOVERY_COMPLETE, 'bounded-discovery-complete');
+  });
+
+  const exhaustedUnderOldWording = () => {
+    const log = emptyLog();
+    log.exhausted = [{
+      agency: 'Legacy', exhaustedAt: '2026-09-25T04:00:00Z',
+      reason: SUPERSEDED_COMPLETE_REASONS[0],
+      categorySetVersions: { 'account-registration': 1 },
+    }];
+    // One bound readable record, so the derivation is not vacuous.
+    appendAttempt(log, {
+      examinedAt: '2026-09-25T03:00:00Z', agency: 'Legacy', website: 'https://l.govt.nz/',
+      url: 'https://l.govt.nz/', status: 'discovery', discoveryKind: 'navigation',
+      outcome: 'no-candidates', category: 'account-registration', candidateSetVersion: 1,
+      navigatedAt: '2026-09-25T03:00:00Z', approval: 'approved',
+    });
+    recordCandidates(log, { agency: 'Legacy', category: 'account-registration', urls: [], declaration: 'none' });
+    lockCandidateSet(log, { agency: 'Legacy', category: 'account-registration' });
+    return log;
+  };
+
+  test('an exhaustion under withdrawn wording is reported, not silently carried forward', () => {
+    const log = exhaustedUnderOldWording();
+    const { disagreements } = agencyResolutions(log);
+    assert.equal(disagreements.length, 1);
+    assert.match(disagreements[0], /wording frozen under an earlier protocol/);
+    assert.ok(corpusBlockers(log).some((b) => b.kind === 'resolution-disagreements'),
+      'and it withholds the draft, so the old wording cannot be published');
+  });
+
+  test('re-resolving replaces the wording, preserves the record, and keeps the search date', () => {
+    const log = exhaustedUnderOldWording();
+    const { record, previous } = reResolveExhaustion(log, { agency: 'Legacy', reason: 'protocol wording withdrawn' });
+    assert.equal(record.resolution, AGENCY_RESOLUTIONS.BOUNDED_DISCOVERY_COMPLETE);
+    assert.equal(record.reason, BOUNDED_COMPLETE_REASON);
+    assert.equal(record.exhaustedAt, '2026-09-25T04:00:00Z', 'when it was searched is unchanged');
+    assert.ok(record.reResolvedAt, 'when the wording was corrected is separate');
+    assert.equal(previous.reason, SUPERSEDED_COMPLETE_REASONS[0]);
+    // The old record is archived, not edited away.
+    assert.equal(log.supersededExhaustions.length, 1);
+    assert.equal(log.supersededExhaustions[0].reason, SUPERSEDED_COMPLETE_REASONS[0]);
+    assert.match(log.supersededExhaustions[0].supersededReason, /wording withdrawn/);
+    assert.deepEqual(agencyResolutions(log).disagreements, []);
+  });
+
+  test('re-resolving requires a reason and refuses a no-op', () => {
+    const log = exhaustedUnderOldWording();
+    assert.throws(() => reResolveExhaustion(log, { agency: 'Legacy', reason: '  ' }), /requires a reason/);
+    assert.throws(() => reResolveExhaustion(log, { agency: 'Nobody', reason: 'x' }), /is not recorded as exhausted/);
+    reResolveExhaustion(log, { agency: 'Legacy', reason: 'protocol wording withdrawn' });
+    assert.throws(() => reResolveExhaustion(log, { agency: 'Legacy', reason: 'again' }),
+      /nothing to re-resolve/);
+  });
+});
+
+describe('the rendered DOM is the authoritative discovery evidence', () => {
+  // The rejected alternative was "render only when the raw page is script-driven and has no form".
+  // A page can carry a search box, a cookie form or a login form while script inserts the
+  // personal-name form later - and that page escapes the trigger entirely.
+  let seq = 0;
+  /** A rendered record must carry the evidence, so the helper supplies it. */
+  const renderedFields = () => ({
+    evidence: 'rendered-dom',
+    renderFile: `t-${++seq}.html`,
+    renderedSha256: sha256(`t-${seq}`),
+    renderedBytes: 512,
+  });
+  const recordFor = (over = {}) => {
+    const base = {
+      examinedAt: '2026-09-26T19:00:00Z', agency: 'A', website: 'https://a.govt.nz/',
+      url: 'https://a.govt.nz/apply', status: 'discovery', discoveryKind: 'navigation',
+      outcome: 'no-candidates', category: 'service-application', candidateSetVersion: 1,
+      navigatedAt: '2026-09-26T19:00:00Z', approval: 'approved', ...over,
+    };
+    return base.evidence === 'rendered-dom' ? { ...renderedFields(), ...base } : base;
+  };
+  const withPolicy = (log, { origin = 'https://a.govt.nz', body = '' } = {}) => {
+    recordRobotsCheck(log, {
+      origin, url: `${origin}/robots.txt`,
+      fetchedAt: new Date(Date.now() - 60_000).toISOString().replace(/\.\d{3}Z$/, 'Z'),
+      httpStatus: 200, disposition: 'rules', sha256: sha256(body), bytes: body.length, body,
+    });
+    return log;
+  };
+
+  test('a plain-retrieval navigation record is in the backlog', () => {
+    const log = withPolicy(emptyLog());
+    appendAttempt(log, recordFor());
+    assert.equal(renderBacklog(log).length, 1);
+    assert.equal(renderPrerequisite(log, renderBacklog(log)[0]), null, 'and is renderable now');
+  });
+
+  test('a rendered record is not, and neither is the record it answers', () => {
+    const log = withPolicy(emptyLog());
+    appendAttempt(log, recordFor());
+    const original = log.attempts.at(-1).id;
+    appendAttempt(log, recordFor({
+      url: 'https://a.govt.nz/apply', category: 'account-registration',
+      navigatedAt: '2026-09-26T19:01:00Z', examinedAt: '2026-09-26T19:01:00Z',
+      evidence: 'rendered-dom', rendersDiscoveryId: original,
+    }));
+    assert.deepEqual(renderBacklog(log).map((a) => a.id), [], 'both are answered');
+  });
+
+  test('a render may cross categories, because the page is the same page', () => {
+    // The first real use: a service-application render of a page first inspected under
+    // account-registration. `supersedesDiscoveryId` requires one category and would refuse it.
+    const log = withPolicy(emptyLog());
+    appendAttempt(log, recordFor({ category: 'account-registration', outcome: 'retrieval-inconclusive' }));
+    const original = log.attempts.at(-1).id;
+    assert.doesNotThrow(() => appendAttempt(log, recordFor({
+      category: 'service-application', navigatedAt: '2026-09-26T19:02:00Z',
+      examinedAt: '2026-09-26T19:02:00Z', evidence: 'rendered-dom', rendersDiscoveryId: original,
+    })));
+  });
+
+  test('a render of a different page is refused', () => {
+    const log = withPolicy(emptyLog());
+    appendAttempt(log, recordFor());
+    const original = log.attempts.at(-1).id;
+    assert.throws(() => appendAttempt(log, recordFor({
+      url: 'https://a.govt.nz/elsewhere', navigatedAt: '2026-09-26T19:03:00Z',
+      examinedAt: '2026-09-26T19:03:00Z', evidence: 'rendered-dom', rendersDiscoveryId: original,
+    })), /a render must be of the same page/);
+  });
+
+  test('a plain-retrieval record may not claim to answer another', () => {
+    const log = withPolicy(emptyLog());
+    appendAttempt(log, recordFor());
+    const original = log.attempts.at(-1).id;
+    assert.throws(() => appendAttempt(log, recordFor({
+      category: 'enquiry-or-contact', navigatedAt: '2026-09-26T19:04:00Z',
+      examinedAt: '2026-09-26T19:04:00Z', rendersDiscoveryId: original,
+    })), /only a rendered-dom record may name/);
+  });
+
+  test('status codes, robots decisions and non-HTML files stay plain-retrieval evidence', () => {
+    // There is no DOM behind a 404, and a `Disallow` means there must not be one.
+    const log = withPolicy(emptyLog(), { body: 'User-agent: *\nDisallow: /forbidden\n' });
+    let t = 0;
+    for (const over of [
+      { outcome: 'unavailable', url: 'https://a.govt.nz/gone' },
+      { outcome: 'disallowed', url: 'https://a.govt.nz/forbidden', navigationPerformed: false, checkedAt: '2026-09-26T19:05:00Z', navigatedAt: undefined },
+      { outcome: 'no-candidates', url: 'https://a.govt.nz/form.pdf' },
+      { outcome: 'no-candidates', url: 'https://a.govt.nz/sitemap.xml', discoveryKind: 'sitemap' },
+      { outcome: 'no-candidates', url: 'https://a.govt.nz/robots.txt', discoveryKind: 'robots' },
+    ]) {
+      t += 1;
+      const at = `2026-09-26T19:1${t}:00Z`;
+      appendAttempt(log, recordFor({ examinedAt: at, navigatedAt: at, ...over }));
+    }
+    assert.deepEqual(renderBacklog(log).map((a) => a.url), []);
+  });
+
+  test('a robots-forbidden page is NOT in the backlog: the obligation cannot require a breach', () => {
+    const log = withPolicy(emptyLog(), { body: 'User-agent: *\nDisallow: /apply\n' });
+    appendAttempt(log, recordFor());
+    assert.deepEqual(renderBacklog(log), [],
+      'a gate that demanded this render could only be satisfied by ignoring robots');
+  });
+
+  test('an origin with no recorded policy stays in the backlog, needing a check first', () => {
+    // It must not be dropped: the early rounds predate the recorded-policy model, so excluding
+    // them shrank the real obligation from 99 records to 32.
+    const log = emptyLog();
+    appendAttempt(log, recordFor());
+    assert.equal(renderBacklog(log).length, 1);
+    assert.match(renderPrerequisite(log, renderBacklog(log)[0]), /no recorded robots policy/);
+  });
+
+  test('a stale policy is a prerequisite, not an exemption', () => {
+    const log = emptyLog();
+    recordRobotsCheck(log, {
+      origin: 'https://a.govt.nz', url: 'https://a.govt.nz/robots.txt',
+      fetchedAt: '2026-09-01T00:00:00Z', httpStatus: 200, disposition: 'rules',
+      sha256: sha256(''), bytes: 0, body: '',
+    });
+    appendAttempt(log, recordFor());
+    assert.equal(renderBacklog(log).length, 1);
+    assert.match(renderPrerequisite(log, renderBacklog(log)[0]), /more than 24 hours old/);
+  });
+
+  test('the backlog groups by URL, so one render answers every record naming that page', () => {
+    const log = withPolicy(emptyLog());
+    appendAttempt(log, recordFor({ category: 'account-registration' }));
+    appendAttempt(log, recordFor({ category: 'service-application', examinedAt: '2026-09-26T19:20:00Z', navigatedAt: '2026-09-26T19:20:00Z' }));
+    const groups = renderBacklogByUrl(log);
+    assert.equal(renderBacklog(log).length, 2);
+    assert.equal(groups.length, 1);
+    assert.equal(groups[0].records.length, 2);
+  });
+
+  test('the backlog withholds the corpus draft', () => {
+    const log = withPolicy(emptyLog());
+    appendAttempt(log, recordFor());
+    assert.ok(corpusBlockers(log).some((b) => b.kind === 'render-backlog'));
+  });
 });

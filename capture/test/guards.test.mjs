@@ -17,7 +17,7 @@ import { fileURLToPath } from 'node:url';
 import {
   emptyLog, appendAttempt, ELIGIBILITY_CRITERIA, recordCandidates, lockCandidateSet,
   categorySettled, deriveDraft, APPROVAL, approveCandidateSet,
-  exhaustAgency, EXHAUSTION_REASON, publishProvenance,
+  exhaustAgency, BOUNDED_COMPLETE_REASON, publishProvenance,
   unresolvedDiscoveryRounds, issueDiscoveryPermit, isDiscoverySuperseded, supersedeCandidateSet,
   reopenCandidateSet, recordRobotsCheck, findRobotsCheck, robotsCheckIsFresh,
   consumeDiscoveryPermit, closeDiscoveryPermit, permitAudit, openDiscoveryPermits,
@@ -425,7 +425,7 @@ describe('an agency is recorded as exhausted explicitly', () => {
     const record = exhaustAgency(log, drawOrder);
     assert.equal(record.agency, agency);
     assert.match(record.exhaustedAt, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
-    assert.equal(record.reason, EXHAUSTION_REASON);
+    assert.equal(record.reason, BOUNDED_COMPLETE_REASON);
     assert.deepEqual(Object.keys(record.categorySetVersions).sort(), [...CATEGORY_ORDER].sort());
     assert.equal(record.categorySetVersions['account-registration'], 1);
 
@@ -514,7 +514,7 @@ describe('an agency is recorded as exhausted explicitly', () => {
     const draft = deriveDraft(log, { frameSha256: 'a'.repeat(64), drawOrderSha256: 'b'.repeat(64) });
     assert.equal(draft.exhaustedAgencies.length, 1);
     assert.equal(draft.exhaustedAgencies[0].agency, agency);
-    assert.equal(draft.exhaustedAgencies[0].reason, EXHAUSTION_REASON);
+    assert.equal(draft.exhaustedAgencies[0].reason, BOUNDED_COMPLETE_REASON);
     assert.equal(draft.exhaustedAgencies[0].exhaustedAt, record.exhaustedAt);
 
     // Sealed: the hash the seal takes of the draft must change if the exhaustion changes.
@@ -529,7 +529,7 @@ describe('an agency is recorded as exhausted explicitly', () => {
       const published = JSON.parse(readFileSync(provenancePath, 'utf8'));
       assert.equal(published.exhaustedAgencies.length, 1);
       assert.equal(published.exhaustedAgencies[0].agency, agency);
-      assert.equal(published.exhaustedAgencies[0].reason, EXHAUSTION_REASON);
+      assert.equal(published.exhaustedAgencies[0].reason, BOUNDED_COMPLETE_REASON);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
