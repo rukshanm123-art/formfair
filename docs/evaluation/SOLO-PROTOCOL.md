@@ -2060,11 +2060,20 @@ and public eligibility are different facts. The interstitial is **quarantined**,
 count and relationship to `c-0291` recorded beside it. Any replacement attempt must name `c-0291`
 via `supersedesAttemptId`.
 
-Sixteen tests: headless blocked with headed succeeding yields exactly one official capture recording
+### The fallback needs a display
+
+Headed Chromium cannot start without one. On a headless CI runner the launch throws, the fallback
+degrades to `capture-blocked`, and a page a headed browser could read is recorded as unretrievable —
+a property of the environment, not of the page. So a failed launch is recorded in `attemptedModes`
+with its error rather than as an access barrier, keeping "barred by the site" and "could not launch"
+distinguishable, and CI now runs the capture suite under `xvfb` so the fallback is exercised for
+real. A capture recording `browserMode: headed` could not have been produced without a display.
+
+Seventeen tests: headless blocked with headed succeeding yields exactly one official capture recording
 both modes; both modes blocked yields `capture-blocked` with eligibility unknown; a blocked response
 leaves no file; an orphan is detected in both directions and fails draft generation; a
 `capture-blocked` attempt asserting eligibility is refused, as is one not naming its modes; a
 rejected attempt is preserved and its replacement must name it; and the capture path is asserted
 against its own source to use no stored state, no invented user agent, no stealth plugin, no init
 script, no typing and no clicking — because that distinction lives in what the code does *not* do,
-which no behavioural test can observe. The capture package has 279 tests.
+which no behavioural test can observe. The capture package has 280 tests.

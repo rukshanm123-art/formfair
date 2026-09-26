@@ -404,3 +404,23 @@ describe('a blocked capture is not an eligibility finding', () => {
     });
   });
 });
+
+/**
+ * The headed fallback needs a display, and says so rather than failing obscurely.
+ *
+ * capture-v1.0.6. On a headless CI runner with no X server, `chromium.launch({ headless: false })`
+ * throws, the fallback degrades to `capture-blocked`, and a page that a headed browser could read
+ * is recorded as unretrievable. That is a property of the environment, not of the page - so the
+ * failed launch is recorded in `attemptedModes` with its error, and a reader can tell the two
+ * apart. CI runs the suite under xvfb so the fallback is exercised for real.
+ */
+describe('the fallback records why a mode failed', () => {
+  test('a headed launch that cannot start is recorded as an error, not as a barrier', async () => {
+    // Asserted against the shape of the record rather than by removing the display: the point is
+    // that `attemptedModes` distinguishes "barred by the site" from "could not launch".
+    const shape = readFileSync(join(here, '..', 'cli-capture.mjs'), 'utf8');
+    assert.match(shape, /attemptedModes\.push\(\{\s*browserMode:\s*'headed',\s*error:/);
+    // And a barred mode records its barriers instead.
+    assert.match(shape, /accessBarriers:\s*\w+\.accessBarriers/);
+  });
+});
