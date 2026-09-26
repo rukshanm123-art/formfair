@@ -635,9 +635,19 @@ describe('access barriers, submission protection and authentication signals', ()
     await inTemp(async (dir) => {
       await capture(dir, '/contact-with-recaptcha', 'no-typing');
       const html = readFileSync(join(dir, 'captures', 'no-typing.html'), 'utf8');
-      // A value attribute would be the only trace typing could leave in the saved markup.
-      assert.doesNotMatch(html, /name="name"[^>]*value=/);
-      assert.doesNotMatch(html, /name="email"[^>]*value=/);
+      // Typing would leave a NON-EMPTY value. Asserting the attribute is absent was wrong: real
+      // markup routinely renders `value=""` - the captured Ministry of Health page does - so that
+      // assertion passed only because this fixture omits it, and would have failed on the very
+      // page it was written to protect.
+      const valueOf = (field) => {
+        const tag = html.match(new RegExp(`<(?:input|textarea)[^>]*name="${field}"[^>]*>`))?.[0] ?? '';
+        const m = tag.match(/value="([^"]*)"/);
+        return m ? m[1] : null; // null means no value attribute at all
+      };
+      for (const field of ['name', 'email']) {
+        const value = valueOf(field);
+        assert.ok(value === null || value === '', `${field} carries typed data: ${JSON.stringify(value)}`);
+      }
       // And the textarea is still empty.
       assert.match(html, /<textarea[^>]*id="f"[^>]*>\s*<\/textarea>/);
     });
