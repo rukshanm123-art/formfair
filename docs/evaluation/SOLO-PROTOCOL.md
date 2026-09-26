@@ -1861,3 +1861,53 @@ Ten tests, six being the reproduced states. The capture package has 249 tests.
 
 The live ledger passes unchanged — 51 permits, **0 problems** — with only the pending Ministry set
 and its four unassessed candidates outstanding.
+
+## Amendment 23: four states, enumerated rather than sampled
+
+**Dated 26 September 2026.** `selection-v1.0.20`. Moves no earlier tag. Nothing is redone.
+
+Truthiness, in the last few places it survived, let three impossible permits pass:
+
+- an open permit carrying `closureId: ''`, `closureReason: ''` and `disposition: ''`;
+- a consumed permit carrying `accountedBy`;
+- a `duplicate-request` closure timestamped **before** the navigation it claims to duplicate.
+
+`navigatedAt` was also reaching the temporal checks unvalidated, so a date-only
+`"2026-09-25"` was caught only incidentally, by falling outside the permit window rather than by
+being the wrong shape. It is now validated through the same `stamp()` as every other timestamp,
+so the reason given is the real one.
+
+An empty string and an absent field are the same thing to `if (x)`. They are not the same thing to
+a reader of the log: one says the field was set and left blank. Every closure-only field is now
+tested for presence.
+
+The state model is explicit and exclusive:
+
+| state | fields |
+| --- | --- |
+| open | `issuedAt` only |
+| consumed | `consumedAt`, and no closure metadata |
+| closed unused | `closedAt`, `disposition`, `closureId`, `closureReason`; no `accountedBy` |
+| closed duplicate-request | the same, plus `accountedBy` |
+
+Open and consumed both reject *all* closure metadata, `accountedBy` included. A
+`duplicate-request` closure must not predate its evidence navigation or that evidence permit's
+consumption.
+
+### Why this is a table and not four more tests
+
+This was the fifth consecutive amendment to the permit ledger, and the previous four were each one
+field at a time: a missing check, then an unvalidated timestamp, then a truthiness test. Testing
+one field per defect is what let the cycle continue, because the property being defended was never
+written down — only its latest counterexample.
+
+So it is written down. A table enumerates every combination of consumption, closure, disposition,
+id, reason and `accountedBy` — 360 of them — removes the four canonical states, and asserts that
+none of the rest is accepted. The next gap of this shape fails there rather than in a live ledger.
+
+The table was checked for vacuity: reverting `present` to truthiness makes it fail with the
+accepted states named, which is the regression that produced this amendment.
+
+Six tests, one of them the table. The capture package has 255 tests. The live ledger passes
+unchanged — 51 permits, **0 problems** — with only the pending Ministry set and its four
+unassessed candidates outstanding.

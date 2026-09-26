@@ -1438,37 +1438,58 @@ export function checkPermitLedger(log) {
       return ms(value);
     };
 
+    // selection-v1.0.20. Four states, mutually exclusive, tested by field PRESENCE rather than
+    // truthiness. Truthiness let `closureId: ''` and `disposition: ''` sit on an open permit
+    // unnoticed, and a consumed permit carry `accountedBy`, because an empty string and an absent
+    // field are the same thing to `if (x)`. They are not the same thing to a reader of the log:
+    // one says the field was set and left blank.
+    //
+    //   open                      nothing but issuedAt
+    //   consumed                  consumedAt, and no closure metadata
+    //   closed unused             closedAt, disposition, closureId, closureReason; no accountedBy
+    //   closed duplicate-request  the same, plus accountedBy
+    const present = (v) => v !== undefined && v !== null;
+    const CLOSURE_FIELDS = ['closedAt', 'disposition', 'closureId', 'closureReason', 'accountedBy'];
+
     for (const permit of allPermits) {
       const where = permit.id;
-      const closed = permit.closedAt !== undefined && permit.closedAt !== null;
-      const consumed = permit.consumedAt !== undefined && permit.consumedAt !== null;
+      const closed = present(permit.closedAt);
+      const consumed = present(permit.consumedAt);
 
-      if (permit.disposition && !closed) {
-        problems.push(`${where} carries disposition ${permit.disposition} but is not closed`);
-      }
-      if (closed) {
+      if (!closed && !consumed) {
+        for (const field of CLOSURE_FIELDS) {
+          if (present(permit[field])) {
+            problems.push(
+              `${where} is open but carries ${field} ${JSON.stringify(permit[field])}; an open permit ` +
+                'has neither been used nor accounted for'
+            );
+          }
+        }
+      } else if (consumed && !closed) {
+        for (const field of CLOSURE_FIELDS) {
+          if (present(permit[field])) {
+            problems.push(
+              `${where} is consumed but carries ${field} ${JSON.stringify(permit[field])}; a consumed ` +
+                'permit is accounted for by its own record, not by a closure'
+            );
+          }
+        }
+      } else if (closed) {
         if (!Object.values(PERMIT_DISPOSITIONS).includes(permit.disposition)) {
           problems.push(
             `${where} is closed with disposition ${JSON.stringify(permit.disposition)}, which is not ` +
               Object.values(PERMIT_DISPOSITIONS).join(' or ')
           );
         }
-        if (typeof permit.closureId !== 'string' || permit.closureId === '') {
+        if (typeof permit.closureId !== 'string' || permit.closureId.trim() === '') {
           problems.push(`${where} is closed without a closure id`);
         }
         if (typeof permit.closureReason !== 'string' || permit.closureReason.trim() === '') {
           problems.push(`${where} is closed without a reason`);
         }
-        if (permit.disposition === PERMIT_DISPOSITIONS.DUPLICATE_REQUEST && !permit.accountedBy) {
+        if (permit.disposition === PERMIT_DISPOSITIONS.DUPLICATE_REQUEST && !present(permit.accountedBy)) {
           problems.push(`${where} is closed duplicate-request but names no discovery record`);
         }
-      } else if (permit.closureId || permit.closureReason) {
-        problems.push(`${where} is not closed but carries closure fields`);
-      }
-
-      // An open permit is open: nothing about consumption or closure may be attached to it.
-      if (!closed && !consumed && permit.accountedBy) {
-        problems.push(`${where} is open but names ${permit.accountedBy}; an open permit accounts for nothing`);
       }
 
       const issued = stamp(permit.issuedAt, 'issuedAt', where);
@@ -1501,7 +1522,7 @@ export function checkPermitLedger(log) {
 
       const consumedAt = stamp(permit.consumedAt, 'consumedAt', where);
       const record = (citations.get(permit.id) ?? [])[0];
-      const navigated = record ? ms(record.navigatedAt) : null;
+      const navigated = record ? stamp(record.navigatedAt, `${record.id} navigatedAt`, where) : null;
       if (record) {
         if (record.status !== 'discovery') {
           problems.push(`${where} is named by ${record.id}, a ${record.status} attempt, not a discovery record`);
@@ -1537,6 +1558,31 @@ export function checkPermitLedger(log) {
       }
       if (issued !== null && consumedAt !== null && consumedAt < issued) {
         problems.push(`${where} was consumed at ${permit.consumedAt}, before it was issued`);
+      }
+    }
+
+    // A duplicate-request closure cannot predate the traffic it claims to duplicate: the second
+    // request happened after the first, and the closure records that it happened.
+    for (const permit of allPermits) {
+      if (permit.disposition !== PERMIT_DISPOSITIONS.DUPLICATE_REQUEST) continue;
+      const closedAt = ms(permit.closedAt);
+      const evidence = byId.get(permit.accountedBy);
+      if (closedAt === null || !evidence) continue;
+      const evidenceNavigated = ms(evidence.navigatedAt);
+      if (evidenceNavigated !== null && closedAt < evidenceNavigated) {
+        problems.push(
+          `${permit.id} was closed at ${permit.closedAt}, before ${evidence.id} navigated at ` +
+            `${evidence.navigatedAt}. A duplicate-request closure records traffic that has already ` +
+            'happened; it cannot precede the inspection that accounts for it.'
+        );
+      }
+      const evidencePermit = allPermits.find((p) => p.id === evidence.permitId);
+      const evidenceConsumed = evidencePermit ? ms(evidencePermit.consumedAt) : null;
+      if (evidenceConsumed !== null && closedAt < evidenceConsumed) {
+        problems.push(
+          `${permit.id} was closed at ${permit.closedAt}, before its evidence permit ` +
+            `${evidencePermit.id} was consumed at ${evidencePermit.consumedAt}`
+        );
       }
     }
 

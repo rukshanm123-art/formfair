@@ -1537,14 +1537,14 @@ describe('the permit lifecycle is ordered and complete', () => {
     assert.ok(found.some((p) => /closed without a reason/.test(p)));
   });
 
-  test('a disposition without a closure, or closure fields without a closure, are refused', () => {
+  test('a disposition or closure field on a consumed permit is refused', () => {
     const log = ledger();
     log.discoveryPermits[0].disposition = 'unused';
-    assert.ok(problems(log).some((p) => /carries disposition unused but is not closed/.test(p)));
+    assert.ok(problems(log).some((p) => /is consumed but carries disposition/.test(p)));
 
     const log2 = ledger();
     log2.discoveryPermits[0].closureId = 'x-0001';
-    assert.ok(problems(log2).some((p) => /is not closed but carries closure fields/.test(p)));
+    assert.ok(problems(log2).some((p) => /is consumed but carries closureId/.test(p)));
   });
 
   test('closure validates the whole ledger, not just the permit being closed', () => {
@@ -1610,7 +1610,7 @@ describe('permit fields are valid, ordered and permitted in their state', () => 
 
   test('THE GAP: an open permit may not carry accountedBy', () => {
     const log = ledger({ extra: openPermit({ accountedBy: 'd-0001' }) });
-    assert.ok(problems(log).some((p) => /is open but names d-0001/.test(p)));
+    assert.ok(problems(log).some((p) => /is open but carries accountedBy/.test(p)));
   });
 
   test('THE GAP: an unparseable closedAt is refused', () => {
@@ -1671,5 +1671,145 @@ describe('permit fields are valid, ordered and permitted in their state', () => 
       closedAt: T(9, 30), disposition: 'unused', closureId: 'x-0001', closureReason: 'not visited',
     }) });
     assert.deepEqual(problems(closedOk), []);
+  });
+});
+
+/**
+ * The permit state model, exhaustively.
+ *
+ * selection-v1.0.20. This is the fifth consecutive amendment to the permit ledger, and the
+ * previous four were each one field at a time: a missing check, then an unvalidated timestamp,
+ * then a truthiness test that treated `''` as absent. Testing one field per defect is what let the
+ * cycle continue, because the property being defended was never stated.
+ *
+ * It is stated here as a table. A permit is in exactly one of four states, and every other
+ * combination of consumption, closure, disposition, id, reason and `accountedBy` is invalid. The
+ * table enumerates them rather than sampling them, so the next gap of this shape fails here
+ * instead of in a live ledger.
+ */
+describe('only four permit states are valid', () => {
+  const CAT = 'account-registration';
+  const T = (h, m = 0) => `2026-09-25T${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:00Z`;
+  const UNUSED = 'unused';
+  const DUP = 'duplicate-request';
+
+  /**
+   * A ledger holding one probe permit, plus a consistent consumed permit and its record so the
+   * probe is the only thing under test. The probe is deliberately for a URL with no record, so
+   * a consumed probe must fail the pairing rule - which is itself part of the model.
+   */
+  function withProbe(probe, { pair = true } = {}) {
+    const log = emptyLog();
+    log.robotsChecks = [{
+      id: 'r-0001', origin: 'https://w.govt.nz', fetchedAt: T(8), httpStatus: 200,
+      disposition: 'rules', body: '',
+    }];
+    log.discoveryPermits = [{
+      id: 'p-0001', agency: 'TPK', category: CAT, candidateSetVersion: 1,
+      url: 'https://w.govt.nz/a', robotsCheckId: 'r-0001', issuedAt: T(9), consumedAt: T(9, 5),
+    }];
+    log.attempts = [{
+      id: 'd-0001', examinedAt: T(9, 1), agency: 'TPK', website: 'https://w.govt.nz/',
+      url: 'https://w.govt.nz/a', status: 'discovery', discoveryKind: 'navigation',
+      outcome: 'no-candidates', category: CAT, candidateSetVersion: 1, navigatedAt: T(9, 1),
+      approval: 'approved', permitId: 'p-0001',
+    }];
+    const probePermit = {
+      id: 'p-0002', agency: 'TPK', category: CAT, candidateSetVersion: 1,
+      url: 'https://w.govt.nz/b', robotsCheckId: 'r-0001', issuedAt: T(9),
+      ...probe,
+    };
+    log.discoveryPermits.push(probePermit);
+    // A consumed probe needs its own record, or it fails pairing rather than the state model.
+    if (pair && probe.consumedAt) {
+      log.attempts.push({
+        id: 'd-0002', examinedAt: T(9, 2), agency: 'TPK', website: 'https://w.govt.nz/',
+        url: 'https://w.govt.nz/b', status: 'discovery', discoveryKind: 'navigation',
+        outcome: 'no-candidates', category: CAT, candidateSetVersion: 1, navigatedAt: T(9, 2),
+        approval: 'approved', permitId: 'p-0002',
+      });
+    }
+    return log;
+  }
+  const ok = (probe, opts) => checkPermitLedger(withProbe(probe, opts)).length === 0;
+
+  /** The four canonical states. */
+  const canonical = [
+    ['open', {}],
+    ['consumed', { consumedAt: T(9, 3) }],
+    ['closed unused', { closedAt: T(9, 30), disposition: UNUSED, closureId: 'x-0001', closureReason: 'not visited' }],
+    ['closed duplicate-request', {
+      closedAt: T(9, 30), disposition: DUP, closureId: 'x-0001', closureReason: 'dup',
+      accountedBy: 'd-0001', url: 'https://w.govt.nz/a',
+    }],
+  ];
+
+  for (const [name, probe] of canonical) {
+    test(`the canonical state "${name}" passes`, () => {
+      assert.equal(ok(probe), true, `${name} should be valid`);
+    });
+  }
+
+  test('every other combination of the six fields is invalid', () => {
+    // Enumerated rather than sampled: consumption x closure x disposition x id x reason x
+    // accountedBy, with the canonical four removed.
+    const field = {
+      consumedAt: [undefined, T(9, 3)],
+      closedAt: [undefined, T(9, 30)],
+      disposition: [undefined, UNUSED, DUP, '', 'whatever'],
+      closureId: [undefined, 'x-0001', ''],
+      closureReason: [undefined, 'because', ''],
+      accountedBy: [undefined, 'd-0001'],
+    };
+    const isCanonical = (p) => {
+      const open = p.consumedAt === undefined && p.closedAt === undefined &&
+        p.disposition === undefined && p.closureId === undefined &&
+        p.closureReason === undefined && p.accountedBy === undefined;
+      const consumed = p.consumedAt !== undefined && p.closedAt === undefined &&
+        p.disposition === undefined && p.closureId === undefined &&
+        p.closureReason === undefined && p.accountedBy === undefined;
+      const closedUnused = p.consumedAt === undefined && p.closedAt !== undefined &&
+        p.disposition === UNUSED && p.closureId === 'x-0001' &&
+        p.closureReason === 'because' && p.accountedBy === undefined;
+      const closedDup = p.consumedAt === undefined && p.closedAt !== undefined &&
+        p.disposition === DUP && p.closureId === 'x-0001' &&
+        p.closureReason === 'because' && p.accountedBy === 'd-0001';
+      return open || consumed || closedUnused || closedDup;
+    };
+
+    const accepted = [];
+    let checked = 0;
+    for (const consumedAt of field.consumedAt) {
+      for (const closedAt of field.closedAt) {
+        for (const disposition of field.disposition) {
+          for (const closureId of field.closureId) {
+            for (const closureReason of field.closureReason) {
+              for (const accountedBy of field.accountedBy) {
+                const probe = {};
+                if (consumedAt !== undefined) probe.consumedAt = consumedAt;
+                if (closedAt !== undefined) probe.closedAt = closedAt;
+                if (disposition !== undefined) probe.disposition = disposition;
+                if (closureId !== undefined) probe.closureId = closureId;
+                if (closureReason !== undefined) probe.closureReason = closureReason;
+                if (accountedBy !== undefined) probe.accountedBy = accountedBy;
+                // A duplicate-request probe needs its evidence to be for the same scope.
+                if (probe.accountedBy) probe.url = 'https://w.govt.nz/a';
+                checked += 1;
+                if (isCanonical(probe)) continue;
+                if (ok(probe)) accepted.push(JSON.stringify(probe));
+              }
+            }
+          }
+        }
+      }
+    }
+    assert.ok(checked > 200, `the table should be exhaustive, checked ${checked}`);
+    assert.deepEqual(accepted, [], `these non-canonical states were accepted:\n${accepted.join('\n')}`);
+  });
+
+  test('an empty string is not an absent field', () => {
+    // The specific confusion that produced this amendment.
+    assert.equal(ok({ closureId: '', closureReason: '', disposition: '' }), false);
+    assert.equal(ok({ consumedAt: T(9, 3), accountedBy: 'd-0001' }), false);
   });
 });
