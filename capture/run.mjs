@@ -613,8 +613,73 @@ export function approveCandidateSet(log, { agency, category, approved, note }) {
  * qualified and five that did not is only interpretable if every one of the five left for the
  * same stated reason, and an operator-authored sentence per agency would not guarantee that.
  */
+/**
+ * How an agency left the scan without contributing a page. Two outcomes, not one.
+ *
+ * selection-v1.0.23. `EXHAUSTION_REASON` was a single frozen string asserting that all four
+ * categories "were searched". For the New Zealand Security Intelligence Service that would have
+ * been false: two of its three websites answer every request with an Imperva/Incapsula challenge,
+ * so those categories were ATTEMPTED, not searched. Recording it under the searched-in-full reason
+ * would have put a completed search into the denominator of every prevalence figure on the
+ * strength of requests that returned no agency content - the same collapse that made
+ * `no-candidates` wrong for the individual records, one level up.
+ *
+ * The distinction is derived from the bound evidence and cannot be typed by an operator. A reason
+ * an operator can choose is a reason an operator can choose wrongly, and this one decides what the
+ * denominator means.
+ */
+export const AGENCY_RESOLUTIONS = Object.freeze({
+  /** Every category was read and none held an eligible form. A finding about the agency. */
+  SEARCHED_IN_FULL: 'searched-in-full',
+  /** Every category was attempted, but retrieval barriers prevented complete discovery. */
+  TECHNICAL_ATTRITION: 'technical-discovery-attrition',
+});
+
 export const EXHAUSTION_REASON =
   'all four categories in the frozen priority order were searched and none yielded an eligible form';
+
+export const ATTRITION_REASON =
+  'all four categories in the frozen priority order were attempted, but technical retrieval ' +
+  'barriers prevented complete discovery and no eligible form was located';
+
+/** The one frozen reason each resolution may carry. Nothing else seals. */
+export const RESOLUTION_REASONS = Object.freeze({
+  [AGENCY_RESOLUTIONS.SEARCHED_IN_FULL]: EXHAUSTION_REASON,
+  [AGENCY_RESOLUTIONS.TECHNICAL_ATTRITION]: ATTRITION_REASON,
+});
+
+/**
+ * Which resolution the evidence supports, and the records that support it.
+ *
+ * Reads the discovery records BOUND to the agency's four locked sets, excluding superseded ones: a
+ * withdrawn finding is not evidence, and a record that no set claims is not part of the round the
+ * exhaustion rests on. One bound active record with an attrition outcome is enough - an agency
+ * whose discovery was blocked anywhere was not searched in full, and the honest resolution is the
+ * weaker of the two.
+ */
+export function agencyResolution(log, agency) {
+  const bound = new Set();
+  for (const category of CATEGORY_ORDER) {
+    const set = log.candidateSets?.[setKey(agency, category)];
+    for (const id of set?.discoveryRecordIds ?? []) bound.add(id);
+  }
+  const records = log.attempts.filter(
+    (a) => bound.has(a.id) && a.status === 'discovery' && !isDiscoverySuperseded(log, a.id)
+  );
+  const attrition = records.filter((a) => TECHNICAL_ATTRITION_OUTCOMES.includes(a.outcome));
+  const resolution = attrition.length > 0
+    ? AGENCY_RESOLUTIONS.TECHNICAL_ATTRITION
+    : AGENCY_RESOLUTIONS.SEARCHED_IN_FULL;
+  const byOutcome = {};
+  for (const a of attrition) byOutcome[a.outcome] = (byOutcome[a.outcome] ?? 0) + 1;
+  return {
+    resolution,
+    reason: RESOLUTION_REASONS[resolution],
+    boundRecords: records.length,
+    attritionRecordIds: attrition.map((a) => a.id).sort(),
+    attritionByOutcome: byOutcome,
+  };
+}
 
 /**
  * Records that an agency is exhausted: searched in full, contributing no page.
@@ -707,14 +772,69 @@ export function exhaustAgency(log, drawOrder, { agency = null } = {}) {
     categorySetVersions[category] = set.version;
   }
 
+  // selection-v1.0.23. Derived, never supplied. `exhaustAgency` takes no reason and no resolution
+  // from its caller, and the CLI exposes no flag for either: the string an agency leaves under is
+  // what its absence from the corpus MEANS, and a scan that lets the operator choose between
+  // "searched" and "could not be searched" has no denominator worth publishing.
+  const resolved = agencyResolution(log, target);
+  // An exhaustion must rest on something. With no bound active record the derivation would return
+  // `searched-in-full` by default - vacuously true, and the strongest of the two claims - so an
+  // agency whose sets were locked before binding existed could be filed as conclusively searched on
+  // no evidence whatever. The absence of attrition is only meaningful where there is evidence in
+  // which attrition could have appeared.
+  if (resolved.boundRecords === 0) {
+    throw new Error(
+      `${target} has no discovery records bound to its four sets, so nothing supports either ` +
+        'resolution. An exhaustion says how an agency was searched; it cannot rest on no evidence.'
+    );
+  }
+  if (resolved.resolution === AGENCY_RESOLUTIONS.TECHNICAL_ATTRITION &&
+      resolved.attritionRecordIds.length === 0) {
+    throw new Error(
+      `${target} resolves as ${AGENCY_RESOLUTIONS.TECHNICAL_ATTRITION} but names no supporting ` +
+        'record; the resolution and its evidence are written together or not at all'
+    );
+  }
+
   const record = {
     agency: target,
     exhaustedAt: new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'),
-    reason: EXHAUSTION_REASON,
+    resolution: resolved.resolution,
+    reason: resolved.reason,
     categorySetVersions,
+    ...(resolved.resolution === AGENCY_RESOLUTIONS.TECHNICAL_ATTRITION
+      ? { attritionRecordIds: resolved.attritionRecordIds, attritionByOutcome: resolved.attritionByOutcome }
+      : {}),
   };
   (log.exhausted ??= []).push(record);
   return record;
+}
+
+/**
+ * The two resolutions, counted separately.
+ *
+ * A legacy record carries no `resolution`. It is read as `searched-in-full`, which is what it
+ * asserted, and `resolutionDisagreements` reports any whose stored reason the evidence no longer
+ * supports - so an old record cannot go on claiming a completed search after attrition records
+ * have been bound into the agency's round.
+ */
+export function agencyResolutions(log) {
+  const counts = { [AGENCY_RESOLUTIONS.SEARCHED_IN_FULL]: 0, [AGENCY_RESOLUTIONS.TECHNICAL_ATTRITION]: 0 };
+  const records = [];
+  const disagreements = [];
+  for (const raw of log.exhausted ?? []) {
+    const agency = typeof raw === 'string' ? raw : raw?.agency;
+    const stored = (typeof raw === 'string' ? null : raw?.resolution) ?? AGENCY_RESOLUTIONS.SEARCHED_IN_FULL;
+    counts[stored] = (counts[stored] ?? 0) + 1;
+    records.push({ agency, resolution: stored });
+    const derived = agencyResolution(log, agency).resolution;
+    if (derived !== stored) {
+      disagreements.push(
+        `${agency} is recorded as ${stored} but its bound evidence supports ${derived}`
+      );
+    }
+  }
+  return { counts, records, disagreements };
 }
 
 /**
@@ -912,10 +1032,17 @@ export function deriveDraft(log, { frameSha256, drawOrderSha256, selectionLedger
     // and yielded nothing is part of the denominator, so a corpus that recorded only its pages
     // would describe a sample of forty without saying how many agencies were looked at to get
     // them. Legacy bare-string entries are normalised so an older log still seals.
+    // selection-v1.0.23. Every record carries an explicit `resolution`. A legacy record has none
+    // and is normalised to `searched-in-full`, which is precisely what it asserted; the gate above
+    // refuses the draft if that claim no longer matches the agency's bound evidence, so the
+    // normalisation cannot quietly promote an attrition round into a completed search.
     exhaustedAgencies: (log.exhausted ?? []).map((e) =>
       typeof e === 'string'
-        ? { agency: e, exhaustedAt: null, reason: EXHAUSTION_REASON, categorySetVersions: null }
-        : e
+        ? {
+            agency: e, exhaustedAt: null, resolution: AGENCY_RESOLUTIONS.SEARCHED_IN_FULL,
+            reason: EXHAUSTION_REASON, categorySetVersions: null,
+          }
+        : { ...e, resolution: e.resolution ?? AGENCY_RESOLUTIONS.SEARCHED_IN_FULL }
     ),
   };
 }
@@ -974,8 +1101,22 @@ export function publishProvenance(log, { to }) {
       return acc;
     }, {}),
     exhaustedAgencies: (log.exhausted ?? []).map((e) =>
-      typeof e === 'string' ? { agency: e, exhaustedAt: null, reason: EXHAUSTION_REASON } : e
+      typeof e === 'string'
+        ? { agency: e, exhaustedAt: null, resolution: AGENCY_RESOLUTIONS.SEARCHED_IN_FULL, reason: EXHAUSTION_REASON }
+        : { ...e, resolution: e.resolution ?? AGENCY_RESOLUTIONS.SEARCHED_IN_FULL }
     ),
+    // selection-v1.0.23. Counted apart, never summed into one "agencies searched" figure. An
+    // agency whose discovery was blocked is not evidence that it publishes no such form, and a
+    // denominator that merges the two would overstate how much of the frame was actually read.
+    agencyResolutions: (() => {
+      const { counts, records, disagreements } = agencyResolutions(log);
+      return {
+        searchedInFull: counts[AGENCY_RESOLUTIONS.SEARCHED_IN_FULL] ?? 0,
+        technicalDiscoveryAttrition: counts[AGENCY_RESOLUTIONS.TECHNICAL_ATTRITION] ?? 0,
+        byAgency: records,
+        disagreements,
+      };
+    })(),
     // selection-v1.0.21. Attrition in the discovery METHOD, separated from findings about the
     // agencies. An origin that could not be read is not an agency that publishes no forms, and a
     // prevalence denominator that merges the two would overstate how much of the frame was
@@ -1919,6 +2060,17 @@ export function corpusBlockers(log) {
   const deviations = checkDeviations(log);
   if (deviations.length) {
     add('deviations', `the recorded deviations do not match the log: ${deviations.length} problem(s)`, deviations);
+  }
+
+  // selection-v1.0.23. An exhaustion whose stored resolution the bound evidence no longer
+  // supports. It cannot arise from `exhaustAgency`, which derives it - but a round corrected after
+  // the exhaustion was written could turn a searched-in-full claim into a false one, and the
+  // resolution is what the prevalence denominator means.
+  const { disagreements } = agencyResolutions(log);
+  if (disagreements.length) {
+    add('resolution-disagreements',
+      `${disagreements.length} exhaustion(s) claim a resolution their evidence does not support`,
+      disagreements);
   }
 
   const awaiting = agenciesAwaitingExhaustion(log);

@@ -17,6 +17,10 @@ import {
   MAX_QUALIFIED_AGENCIES,
   EXHAUSTION_CATEGORIES,
   SOLO_PROTOCOL_TAG,
+  AGENCY_RESOLUTIONS,
+  ATTRITION_REASON,
+  RESOLUTION_REASONS,
+  TECHNICAL_ATTRITION_OUTCOMES,
 } from '../descriptive.mjs';
 import { loadSoloInstrument, sealerIdentity, SOLO_INSTRUMENT_TAG, SOLO_SEALER_TAG } from '../instrument.mjs';
 
@@ -307,14 +311,27 @@ describe('the corpus seal requires the exhaustion records', () => {
         url: page.originalUrl, finalUrl: page.finalUrl, pageId: page.pageId,
       });
     }
-    for (const record of draftObj.exhaustedAgencies ?? []) {
+    // solo-protocol-v1.0.4: the bound record has to EXIST. The fixture bound every set to
+    // `d-0001` and never created it, so the binding pointed at nothing - which the real log
+    // forbids, and which made the new non-vacuity check fire on every fixture. An exhaustion
+    // resolved as a full search rests on evidence in which attrition could have appeared;
+    // without any, the stronger claim would be derivable from nothing.
+    for (const [i, record] of (draftObj.exhaustedAgencies ?? []).entries()) {
+      const recordId = `d-${String(i + 1).padStart(4, '0')}`;
+      log.attempts.push({
+        id: recordId, agency: record.agency, category: 'account-registration',
+        status: 'discovery', discoveryKind: 'navigation', outcome: 'no-candidates',
+        candidateSetVersion: 1, approval: 'approved',
+        url: `https://example.invalid/${encodeURIComponent(record.agency)}`,
+        navigatedAt: '2026-09-25T03:20:00Z',
+      });
       for (const [category, version] of Object.entries(record.categorySetVersions ?? {})) {
         log.candidateSets[`${record.agency}\u0000${category}`] = {
           agency: record.agency, category, version,
           discovered: [], locked: [], ordered: [], droppedBeyondBound: [],
           lockedAt: '2026-09-25T03:00:00Z', approval: 'approved',
           candidateDeclaration: 'none', declaredAt: '2026-09-25T03:00:00Z',
-          discoveryRecordIds: ['d-0001'], discoveryMethods: ['navigation'],
+          discoveryRecordIds: [recordId], discoveryMethods: ['navigation'],
         };
       }
     }
@@ -396,6 +413,195 @@ describe('the corpus seal requires the exhaustion records', () => {
     });
   });
 
+  /**
+   * An exhaustion resolved as technical attrition, with a bound record to support it.
+   *
+   * solo-protocol-v1.0.4. The distinction these tests defend: "searched and found nothing" is a
+   * finding about an agency; "could not be searched" is a fact about the instrument. Sealing the
+   * second as the first would put a completed search into the prevalence denominator.
+   */
+  const attritionExhaustion = (agency) => ({
+    ...exhaustion(agency),
+    resolution: AGENCY_RESOLUTIONS.TECHNICAL_ATTRITION,
+    reason: ATTRITION_REASON,
+    attritionRecordIds: ['d-9001'],
+  });
+
+  /** Binds one unreadable discovery record into every category set of one agency. */
+  const withAttritionRecord = (log, agency, { outcome = 'retrieval-blocked', id = 'd-9001' } = {}) => {
+    log.attempts.push({
+      id, agency, category: 'account-registration', status: 'discovery',
+      discoveryKind: 'robots', outcome, candidateSetVersion: 1, approval: 'approved',
+      url: 'https://blocked.invalid/robots.txt', navigatedAt: '2026-09-25T03:30:00Z',
+    });
+    for (const category of EXHAUSTION_CATEGORIES) {
+      const set = log.candidateSets[`${agency}\u0000${category}`];
+      if (set) set.discoveryRecordIds = [...new Set([...(set.discoveryRecordIds ?? []), id])];
+    }
+    return log;
+  };
+
+  test('a technical-attrition exhaustion seals, and is counted apart from a full search', async () => {
+    await inTemp(async (dir) => {
+      const d = realDraft({ pageCount: 2, exhaustedCount: order.length - 2 });
+      const blocked = d.exhaustedAgencies[0].agency;
+      d.exhaustedAgencies[0] = attritionExhaustion(blocked);
+      const log = withAttritionRecord(captureLogFor(d), blocked);
+      const { capturesDir, captureLogPath } = prepareReal(dir, d, { log });
+      const sealed = sealCorpus({ draft: d, capturesDir, instrument: identity, frameDir, captureLogPath });
+      assert.ok(sealed.manifest, sealed.problems.join('; '));
+
+      const record = sealed.manifest.exhaustedAgencies.find((e) => e.agency === blocked);
+      assert.equal(record.resolution, AGENCY_RESOLUTIONS.TECHNICAL_ATTRITION);
+      assert.equal(record.reason, ATTRITION_REASON);
+      assert.deepEqual(record.attritionRecordIds, ['d-9001']);
+      // The counts a reader needs without tallying the array: one agency was not searched.
+      assert.equal(sealed.manifest.agencyResolutions.technicalDiscoveryAttrition, 1);
+      assert.equal(sealed.manifest.agencyResolutions.searchedInFull, order.length - 3);
+      assert.notEqual(record.reason, EXHAUSTION_REASON);
+    });
+  });
+
+  test('THE ATTACK: searched-in-full does not seal when the log shows the round could not be read', async () => {
+    // The one that matters. The record is internally perfect and matches the capture log's own
+    // exhaustion entry; what gives it away is the log's BOUND discovery evidence. Without
+    // re-deriving, an exhaustion written before a round was corrected would go on asserting a
+    // completed search after unreadable records were bound into it.
+    await inTemp(async (dir) => {
+      const d = realDraft({ pageCount: 2, exhaustedCount: order.length - 2 });
+      const agency = d.exhaustedAgencies[0].agency;
+      const log = withAttritionRecord(captureLogFor(d), agency);
+      const { capturesDir, captureLogPath } = prepareReal(dir, d, { log });
+      const sealed = sealCorpus({ draft: d, capturesDir, instrument: identity, frameDir, captureLogPath });
+      assert.equal(sealed.manifest, null);
+      assert.ok(
+        sealed.problems.some((p) => /support technical-discovery-attrition/.test(p)),
+        sealed.problems.join('; ')
+      );
+      assert.ok(sealed.problems.some((p) => /d-9001 retrieval-blocked/.test(p)));
+    });
+  });
+
+  test('all three unreadable outcomes force the weaker resolution', async () => {
+    for (const outcome of TECHNICAL_ATTRITION_OUTCOMES) {
+      await inTemp(async (dir) => {
+        const d = realDraft({ pageCount: 2, exhaustedCount: order.length - 2 });
+        const agency = d.exhaustedAgencies[0].agency;
+        const log = withAttritionRecord(captureLogFor(d), agency, { outcome });
+        const { capturesDir, captureLogPath } = prepareReal(dir, d, { log });
+        const sealed = sealCorpus({ draft: d, capturesDir, instrument: identity, frameDir, captureLogPath });
+        assert.equal(sealed.manifest, null, `${outcome} sealed as a full search`);
+      });
+    }
+  });
+
+  test('a technical-attrition exhaustion naming no supporting record does not seal', async () => {
+    await inTemp(async (dir) => {
+      const d = realDraft({ pageCount: 2, exhaustedCount: order.length - 2 });
+      const agency = d.exhaustedAgencies[0].agency;
+      d.exhaustedAgencies[0] = { ...attritionExhaustion(agency), attritionRecordIds: [] };
+      const log = withAttritionRecord(captureLogFor(d), agency);
+      const { capturesDir, captureLogPath } = prepareReal(dir, d, { log });
+      const sealed = sealCorpus({ draft: d, capturesDir, instrument: identity, frameDir, captureLogPath });
+      assert.equal(sealed.manifest, null);
+      assert.ok(sealed.problems.some((p) => /names no supporting record/.test(p)), sealed.problems.join('; '));
+    });
+  });
+
+  test('an attrition record the capture log does not have is refused', async () => {
+    await inTemp(async (dir) => {
+      const d = realDraft({ pageCount: 2, exhaustedCount: order.length - 2 });
+      const agency = d.exhaustedAgencies[0].agency;
+      d.exhaustedAgencies[0] = { ...attritionExhaustion(agency), attritionRecordIds: ['d-9001', 'd-9999'] };
+      const log = withAttritionRecord(captureLogFor(d), agency);
+      const { capturesDir, captureLogPath } = prepareReal(dir, d, { log });
+      const sealed = sealCorpus({ draft: d, capturesDir, instrument: identity, frameDir, captureLogPath });
+      assert.equal(sealed.manifest, null);
+      assert.ok(sealed.problems.some((p) => /d-9999.*no such bound, active, unreadable record/s.test(p)),
+        sealed.problems.join('; '));
+    });
+  });
+
+  test('a superseded unreadable record does not force attrition', async () => {
+    // A withdrawn finding is not evidence, in either direction.
+    await inTemp(async (dir) => {
+      const d = realDraft({ pageCount: 2, exhaustedCount: order.length - 2 });
+      const agency = d.exhaustedAgencies[0].agency;
+      const log = withAttritionRecord(captureLogFor(d), agency);
+      log.attempts.push({
+        id: 'd-9002', agency, category: 'account-registration', status: 'discovery',
+        discoveryKind: 'robots', outcome: 'no-candidates', candidateSetVersion: 1,
+        approval: 'approved', url: 'https://blocked.invalid/robots.txt',
+        navigatedAt: '2026-09-25T03:40:00Z', supersedesDiscoveryId: 'd-9001',
+      });
+      const { capturesDir, captureLogPath } = prepareReal(dir, d, { log });
+      const sealed = sealCorpus({ draft: d, capturesDir, instrument: identity, frameDir, captureLogPath });
+      assert.ok(sealed.manifest, sealed.problems.join('; '));
+      assert.equal(sealed.manifest.agencyResolutions.technicalDiscoveryAttrition, 0);
+    });
+  });
+
+  test('a resolution the capture log does not record is refused', async () => {
+    await inTemp(async (dir) => {
+      const d = realDraft({ pageCount: 2, exhaustedCount: order.length - 2 });
+      const agency = d.exhaustedAgencies[0].agency;
+      d.exhaustedAgencies[0] = attritionExhaustion(agency);
+      const log = withAttritionRecord(captureLogFor(d), agency);
+      // The log still says searched-in-full for it.
+      log.exhausted = log.exhausted.map((e) =>
+        e.agency === agency ? { ...exhaustion(agency) } : e
+      );
+      const { capturesDir, captureLogPath } = prepareReal(dir, d, { log });
+      const sealed = sealCorpus({ draft: d, capturesDir, instrument: identity, frameDir, captureLogPath });
+      assert.equal(sealed.manifest, null);
+      assert.ok(sealed.problems.some((p) => /but the capture log records searched-in-full/.test(p)),
+        sealed.problems.join('; '));
+    });
+  });
+
+  test('an unknown resolution is refused', async () => {
+    await inTemp(async (dir) => {
+      const d = realDraft({ pageCount: 2, exhaustedCount: order.length - 2 });
+      d.exhaustedAgencies[0] = { ...d.exhaustedAgencies[0], resolution: 'searched-ish' };
+      const { capturesDir, captureLogPath } = prepareReal(dir, d);
+      const sealed = sealCorpus({ draft: d, capturesDir, instrument: identity, frameDir, captureLogPath });
+      assert.equal(sealed.manifest, null);
+      assert.ok(sealed.problems.some((p) => /resolution must be/.test(p)), sealed.problems.join('; '));
+    });
+  });
+
+  test('a full search that names attrition records is refused', async () => {
+    await inTemp(async (dir) => {
+      const d = realDraft({ pageCount: 2, exhaustedCount: order.length - 2 });
+      d.exhaustedAgencies[0] = { ...d.exhaustedAgencies[0], attritionRecordIds: ['d-0001'] };
+      const { capturesDir, captureLogPath } = prepareReal(dir, d);
+      const sealed = sealCorpus({ draft: d, capturesDir, instrument: identity, frameDir, captureLogPath });
+      assert.equal(sealed.manifest, null);
+      assert.ok(sealed.problems.some((p) => /names attrition records/.test(p)), sealed.problems.join('; '));
+    });
+  });
+
+  test('an exhaustion bound to nothing does not seal, in either resolution', async () => {
+    // With no bound record, `searched-in-full` is derivable from nothing at all - the stronger of
+    // the two claims, on no evidence. The absence of attrition only means something where there
+    // was evidence in which attrition could have appeared.
+    await inTemp(async (dir) => {
+      const d = realDraft({ pageCount: 2, exhaustedCount: order.length - 2 });
+      const log = captureLogFor(d);
+      const agency = d.exhaustedAgencies[0].agency;
+      for (const category of EXHAUSTION_CATEGORIES) {
+        log.candidateSets[`${agency}\u0000${category}`].discoveryRecordIds = [];
+      }
+      const { capturesDir, captureLogPath } = prepareReal(dir, d, { log });
+      const sealed = sealCorpus({ draft: d, capturesDir, instrument: identity, frameDir, captureLogPath });
+      assert.equal(sealed.manifest, null);
+      assert.ok(
+        sealed.problems.some((p) => /nothing supports either resolution/.test(p)),
+        sealed.problems.join('; ')
+      );
+    });
+  });
+
   test('an exhaustion without the frozen reason does not seal', async () => {
     await inTemp(async (dir) => {
       const d = realDraft({ pageCount: 2, exhaustedCount: order.length - 2 });
@@ -403,7 +609,7 @@ describe('the corpus seal requires the exhaustion records', () => {
       const { capturesDir, captureLogPath } = prepareReal(dir, d);
       const sealed = sealCorpus({ draft: d, capturesDir, instrument: identity, frameDir, captureLogPath });
       assert.equal(sealed.manifest, null);
-      assert.ok(sealed.problems.some((p) => /must be the frozen exhaustion reason/.test(p)));
+      assert.ok(sealed.problems.some((p) => /must be the frozen reason for searched-in-full/.test(p)));
     });
   });
 
@@ -486,6 +692,15 @@ describe('the corpus seal requires the exhaustion records', () => {
     assert.equal(capture.EXHAUSTION_REASON, EXHAUSTION_REASON);
     assert.equal(selection.MAX_QUALIFIED_AGENCIES, MAX_QUALIFIED_AGENCIES);
     assert.deepEqual([...selection.CATEGORY_ORDER], [...EXHAUSTION_CATEGORIES]);
+    // solo-protocol-v1.0.4: the second resolution, its frozen reason, and the outcomes that
+    // force it. Three more constants duplicated across the boundary, so three more to check.
+    assert.equal(capture.ATTRITION_REASON, ATTRITION_REASON);
+    assert.deepEqual({ ...capture.AGENCY_RESOLUTIONS }, { ...AGENCY_RESOLUTIONS });
+    assert.deepEqual({ ...capture.RESOLUTION_REASONS }, { ...RESOLUTION_REASONS });
+    assert.deepEqual(
+      [...selection.TECHNICAL_ATTRITION_OUTCOMES], [...TECHNICAL_ATTRITION_OUTCOMES]
+    );
+    assert.equal(SOLO_PROTOCOL_TAG, SOLO_SEALER_TAG, 'the sealer and the protocol tag must agree');
   });
   test('THE FABRICATION: 44 well-shaped but unsupported exhaustions cannot seal', async () => {
     // Shape validation alone made the completion rule trivially satisfiable: a hand-written
@@ -705,13 +920,22 @@ describe('the sealed capture log is bound by path and re-verified', () => {
       }],
       candidateSets: {}, supersededCandidateSets: [], exhausted: structuredClone(exhaustedAgencies),
     };
-    for (const record of exhaustedAgencies) {
+    // solo-protocol-v1.0.4: the bound record must exist, here too. Every set pointed at a
+    // `d-0001` nobody wrote, so each exhaustion rested on a binding to nothing.
+    for (const [i, record] of exhaustedAgencies.entries()) {
+      const recordId = `d-${String(i + 1).padStart(4, '0')}`;
+      log.attempts.push({
+        id: recordId, agency: record.agency, category: 'account-registration', status: 'discovery',
+        discoveryKind: 'navigation', outcome: 'no-candidates', candidateSetVersion: 1,
+        approval: 'approved', url: `https://example.invalid/${encodeURIComponent(record.agency)}`,
+        navigatedAt: '2026-09-25T03:20:00Z',
+      });
       for (const [category, version] of Object.entries(record.categorySetVersions)) {
         log.candidateSets[`${record.agency}\u0000${category}`] = {
           agency: record.agency, category, version, discovered: [], locked: [], ordered: [],
           droppedBeyondBound: [], lockedAt: '2026-09-25T03:00:00Z', approval: 'approved',
           candidateDeclaration: 'none', declaredAt: '2026-09-25T03:00:00Z',
-          discoveryRecordIds: ['d-0001'], discoveryMethods: ['navigation'],
+          discoveryRecordIds: [recordId], discoveryMethods: ['navigation'],
         };
       }
     }

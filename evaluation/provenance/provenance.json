@@ -12,30 +12,241 @@
     "postLoadSettleMs": 2000
   },
   "counts": {
-    "discoveryPages": 30,
-    "candidatesAssessed": 0,
-    "captured": 0,
-    "excluded": 0,
-    "failed": 0,
+    "discoveryPages": 283,
+    "candidatesAssessed": 18,
+    "captured": 2,
+    "excluded": 15,
+    "failed": 1,
+    "captureBlocked": 0,
     "pendingApprovalAttempts": 0,
-    "pendingApprovalCandidateSets": 1
+    "pendingApprovalCandidateSets": 0
   },
   "discoveryByMethod": {
-    "navigation": 7,
-    "internal-search": 8,
-    "sitemap": 11,
-    "robots": 4
+    "navigation": 78,
+    "internal-search": 54,
+    "sitemap": 74,
+    "robots": 77
   },
   "discoveryByOutcome": {
     "unrecorded": 15,
-    "unavailable": 4,
-    "no-candidates": 8,
-    "disallowed": 2,
-    "candidates-found": 1
+    "unavailable": 49,
+    "no-candidates": 160,
+    "disallowed": 38,
+    "candidates-found": 14,
+    "retrieval-blocked": 6,
+    "retrieval-inconclusive": 1
+  },
+  "exhaustedAgencies": [
+    {
+      "agency": "Family Violence and Sexual Violence Executive Board",
+      "exhaustedAt": "2026-09-25T04:42:39Z",
+      "reason": "all four categories in the frozen priority order were searched and none yielded an eligible form",
+      "categorySetVersions": {
+        "account-registration": 1,
+        "service-application": 2,
+        "enquiry-or-contact": 1,
+        "subscription-or-newsletter": 1
+      },
+      "resolution": "searched-in-full"
+    }
+  ],
+  "agencyResolutions": {
+    "searchedInFull": 1,
+    "technicalDiscoveryAttrition": 0,
+    "byAgency": [
+      {
+        "agency": "Family Violence and Sexual Violence Executive Board",
+        "resolution": "searched-in-full"
+      }
+    ],
+    "disagreements": []
+  },
+  "technicalAttrition": {
+    "records": 7,
+    "byOutcome": {
+      "retrieval-blocked": 6,
+      "retrieval-inconclusive": 1
+    },
+    "byOrigin": {
+      "New Zealand Security Intelligence Service https://www.nzsis.govt.nz": 3,
+      "New Zealand Security Intelligence Service https://www.protectivesecurity.govt.nz": 3,
+      "New Zealand Security Intelligence Service https://providinginformation.nzsis.govt.nz": 1
+    }
+  },
+  "deviations": [
+    {
+      "id": "v-0001",
+      "recordedAt": "2026-09-26T20:28:48Z",
+      "kind": "robots-representation-misclassified",
+      "summary": "Two HTTP 200 Imperva/Incapsula challenge pages were classified as valid permissive robots files, and six requests were authorised on that basis",
+      "detail": "fetchRobotsPolicy decided the disposition from the status code alone, so www.nzsis.govt.nz/robots.txt and www.protectivesecurity.govt.nz/robots.txt - each HTTP 200, content-type text/html, 212 bytes, sha256 d02032286070b4dd, an Incapsula challenge document - were recorded as disposition 'rules'. parseRobots finds no directives in HTML and returns no groups, so isAllowed answered 'no applicable rule' and the log asserted that robots permitted /user/register on the evidence of a document that is not a robots file. RFC 9309 section 2.3 requires a UTF-8 text/plain representation. Six permits were issued under that reading and all six requests were made; every one returned a challenge page and none returned agency content, so no candidate evidence was obtained and no candidate set rests on any of them. The incorrect checks r-0012 and r-0013 are retained unchanged, because a permit must point at the evidence that existed when it was issued; the corrected re-reads under selection-v1.0.21 are r-0015 and r-0016, which classify the byte-identical responses as unestablished. The records of the six requests were written approximately 81 minutes after the navigations, which permitAudit discloses as recordedLate.",
+      "robotsCheckIds": [
+        "r-0012",
+        "r-0013"
+      ],
+      "permitIds": [
+        "p-0084",
+        "p-0085",
+        "p-0086",
+        "p-0087",
+        "p-0088",
+        "p-0089"
+      ],
+      "attemptIds": [
+        "d-0293",
+        "d-0294",
+        "d-0295",
+        "d-0296",
+        "d-0297",
+        "d-0298"
+      ],
+      "requestsAffected": 6,
+      "candidateEvidenceObtained": false,
+      "correctedBy": [
+        "selection-v1.0.21",
+        "capture-v1.0.7"
+      ]
+    }
+  ],
+  "permits": {
+    "issued": 92,
+    "consumed": 89,
+    "recordedLate": 9,
+    "lateRecords": [
+      {
+        "permitId": "p-0084",
+        "recordId": "d-0293",
+        "url": "https://www.nzsis.govt.nz/robots.txt",
+        "navigatedAt": "2026-09-26T19:06:44Z",
+        "recordedAt": "2026-09-26T20:28:10Z",
+        "delayMs": 4886000
+      },
+      {
+        "permitId": "p-0085",
+        "recordId": "d-0294",
+        "url": "https://www.nzsis.govt.nz/sitemap.xml",
+        "navigatedAt": "2026-09-26T19:06:50Z",
+        "recordedAt": "2026-09-26T20:28:10Z",
+        "delayMs": 4880000
+      },
+      {
+        "permitId": "p-0086",
+        "recordId": "d-0295",
+        "url": "https://www.nzsis.govt.nz/",
+        "navigatedAt": "2026-09-26T19:06:56Z",
+        "recordedAt": "2026-09-26T20:28:10Z",
+        "delayMs": 4874000
+      },
+      {
+        "permitId": "p-0087",
+        "recordId": "d-0296",
+        "url": "https://www.protectivesecurity.govt.nz/robots.txt",
+        "navigatedAt": "2026-09-26T19:07:03Z",
+        "recordedAt": "2026-09-26T20:28:10Z",
+        "delayMs": 4867000
+      },
+      {
+        "permitId": "p-0088",
+        "recordId": "d-0297",
+        "url": "https://www.protectivesecurity.govt.nz/sitemap.xml",
+        "navigatedAt": "2026-09-26T19:07:09Z",
+        "recordedAt": "2026-09-26T20:28:10Z",
+        "delayMs": 4861000
+      },
+      {
+        "permitId": "p-0089",
+        "recordId": "d-0298",
+        "url": "https://www.protectivesecurity.govt.nz/",
+        "navigatedAt": "2026-09-26T19:07:15Z",
+        "recordedAt": "2026-09-26T20:28:10Z",
+        "delayMs": 4855000
+      },
+      {
+        "permitId": "p-0090",
+        "recordId": "d-0299",
+        "url": "https://providinginformation.nzsis.govt.nz/robots.txt",
+        "navigatedAt": "2026-09-26T19:07:21Z",
+        "recordedAt": "2026-09-26T20:28:10Z",
+        "delayMs": 4849000
+      },
+      {
+        "permitId": "p-0091",
+        "recordId": "d-0300",
+        "url": "https://providinginformation.nzsis.govt.nz/sitemap.xml",
+        "navigatedAt": "2026-09-26T19:07:28Z",
+        "recordedAt": "2026-09-26T20:28:11Z",
+        "delayMs": 4843000
+      },
+      {
+        "permitId": "p-0092",
+        "recordId": "d-0301",
+        "url": "https://providinginformation.nzsis.govt.nz/",
+        "navigatedAt": "2026-09-26T19:07:34Z",
+        "recordedAt": "2026-09-26T20:28:11Z",
+        "delayMs": 4837000
+      }
+    ],
+    "closedUnused": 0,
+    "closedDuplicateRequest": 3,
+    "open": 0,
+    "networkRequestsAuthorised": 92,
+    "closures": [
+      {
+        "closureId": "x-0001",
+        "permitId": "p-0031",
+        "closedAt": "2026-09-25T07:35:50Z",
+        "disposition": "duplicate-request",
+        "reason": "Two permits and two requests occurred for this URL: one issued to inspect the page in the browser, one issued by the recording script, and the page was fetched under each. Only one discovery judgement was recorded. Because consumption took the oldest matching permit rather than a named one, the pairing between each request and its permit was ambiguous, so this permit cannot be attributed to a specific request. It is closed as duplicate-request and accounted for by the inspection named below. selection-v1.0.14 removes the ambiguity by requiring a record to name its permit.",
+        "accountedBy": "d-0231",
+        "url": "https://www.health.govt.nz/regulation-legislation/radiation/managing-radiation-sources/register-radiation-sources",
+        "agency": "Ministry of Health",
+        "category": "service-application",
+        "round": 1
+      },
+      {
+        "closureId": "x-0002",
+        "permitId": "p-0035",
+        "closedAt": "2026-09-25T07:35:50Z",
+        "disposition": "duplicate-request",
+        "reason": "Two permits and two requests occurred for this URL: one issued to inspect the page in the browser, one issued by the recording script, and the page was fetched under each. Only one discovery judgement was recorded. Because consumption took the oldest matching permit rather than a named one, the pairing between each request and its permit was ambiguous, so this permit cannot be attributed to a specific request. It is closed as duplicate-request and accounted for by the inspection named below. selection-v1.0.14 removes the ambiguity by requiring a record to name its permit.",
+        "accountedBy": "d-0235",
+        "url": "https://ethics.health.govt.nz/hdec-reviews-and-approvals/how-to-apply-for-hdec-review/",
+        "agency": "Ministry of Health",
+        "category": "service-application",
+        "round": 1
+      },
+      {
+        "closureId": "x-0003",
+        "permitId": "p-0039",
+        "closedAt": "2026-09-25T07:35:50Z",
+        "disposition": "duplicate-request",
+        "reason": "Two permits and two requests occurred for this URL: one issued to inspect the page in the browser, one issued by the recording script, and the page was fetched under each. Only one discovery judgement was recorded. Because consumption took the oldest matching permit rather than a named one, the pairing between each request and its permit was ambiguous, so this permit cannot be attributed to a specific request. It is closed as duplicate-request and accounted for by the inspection named below. selection-v1.0.14 removes the ambiguity by requiring a record to name its permit.",
+        "accountedBy": "d-0239",
+        "url": "https://www.medsafe.govt.nz/",
+        "agency": "Ministry of Health",
+        "category": "service-application",
+        "round": 1
+      }
+    ]
   },
   "discoveryByRound": {
     "Te Puni Kōkiri / unattributed v?": 15,
-    "Te Puni Kōkiri / account-registration v3": 15
+    "Te Puni Kōkiri / account-registration v3": 15,
+    "Te Puni Kōkiri / service-application v1": 18,
+    "Te Puni Kōkiri / enquiry-or-contact v1": 19,
+    "Family Violence and Sexual Violence Executive Board / account-registration v1": 5,
+    "Family Violence and Sexual Violence Executive Board / service-application v1": 8,
+    "Family Violence and Sexual Violence Executive Board / service-application v2": 8,
+    "Te Puni Kōkiri / service-application v2": 9,
+    "Te Puni Kōkiri / service-application v3": 24,
+    "Family Violence and Sexual Violence Executive Board / enquiry-or-contact v1": 7,
+    "Family Violence and Sexual Violence Executive Board / subscription-or-newsletter v1": 6,
+    "Ministry of Health / account-registration v1": 25,
+    "Ministry of Health / account-registration v2": 26,
+    "Ministry of Health / account-registration v3": 28,
+    "Ministry of Health / service-application v1": 26,
+    "Ministry of Health / enquiry-or-contact v1": 35,
+    "New Zealand Security Intelligence Service / account-registration v1": 9
   },
   "candidateSets": [
     {
@@ -46,8 +257,8 @@
       "locked": 1,
       "droppedBeyondBound": 0,
       "lockedAt": "2026-09-24T09:05:31Z",
-      "approval": "pending",
-      "approvedAt": null,
+      "approval": "approved",
+      "approvedAt": "2026-09-24T09:17:33Z",
       "supportedByDiscoveryRecords": [
         "d-0016",
         "d-0017",
@@ -67,6 +278,356 @@
       ],
       "discoveryMethods": [
         "internal-search",
+        "navigation",
+        "robots",
+        "sitemap"
+      ]
+    },
+    {
+      "agency": "Te Puni Kōkiri",
+      "category": "enquiry-or-contact",
+      "version": 1,
+      "discovered": 1,
+      "locked": 1,
+      "droppedBeyondBound": 0,
+      "lockedAt": "2026-09-24T09:39:39Z",
+      "approval": "approved",
+      "approvedAt": "2026-09-24T09:40:39Z",
+      "supportedByDiscoveryRecords": [
+        "d-0050",
+        "d-0051",
+        "d-0052",
+        "d-0053",
+        "d-0054",
+        "d-0055",
+        "d-0056",
+        "d-0057",
+        "d-0058",
+        "d-0059",
+        "d-0060",
+        "d-0061",
+        "d-0062",
+        "d-0063",
+        "d-0064",
+        "d-0065",
+        "d-0066",
+        "d-0067",
+        "d-0068"
+      ],
+      "discoveryMethods": [
+        "internal-search",
+        "navigation",
+        "robots",
+        "sitemap"
+      ]
+    },
+    {
+      "agency": "Family Violence and Sexual Violence Executive Board",
+      "category": "account-registration",
+      "version": 1,
+      "discovered": 0,
+      "locked": 0,
+      "droppedBeyondBound": 0,
+      "lockedAt": "2026-09-24T10:16:12Z",
+      "approval": "approved",
+      "approvedAt": "2026-09-25T03:14:12Z",
+      "supportedByDiscoveryRecords": [
+        "d-0071",
+        "d-0072",
+        "d-0073",
+        "d-0074",
+        "d-0075"
+      ],
+      "discoveryMethods": [
+        "internal-search",
+        "navigation",
+        "robots",
+        "sitemap"
+      ]
+    },
+    {
+      "agency": "Family Violence and Sexual Violence Executive Board",
+      "category": "service-application",
+      "version": 2,
+      "discovered": 4,
+      "locked": 4,
+      "droppedBeyondBound": 0,
+      "lockedAt": "2026-09-25T03:26:42Z",
+      "approval": "approved",
+      "approvedAt": "2026-09-25T03:48:21Z",
+      "supportedByDiscoveryRecords": [
+        "d-0084",
+        "d-0085",
+        "d-0086",
+        "d-0087",
+        "d-0088",
+        "d-0089",
+        "d-0090",
+        "d-0091"
+      ],
+      "discoveryMethods": [
+        "internal-search",
+        "navigation",
+        "robots",
+        "sitemap"
+      ]
+    },
+    {
+      "agency": "Te Puni Kōkiri",
+      "category": "service-application",
+      "version": 3,
+      "discovered": 5,
+      "locked": 5,
+      "droppedBeyondBound": 0,
+      "lockedAt": "2026-09-25T03:45:43Z",
+      "approval": "approved",
+      "approvedAt": "2026-09-25T03:48:12Z",
+      "supportedByDiscoveryRecords": [
+        "d-0101",
+        "d-0102",
+        "d-0103",
+        "d-0104",
+        "d-0105",
+        "d-0106",
+        "d-0107",
+        "d-0108",
+        "d-0109",
+        "d-0110",
+        "d-0111",
+        "d-0112",
+        "d-0113",
+        "d-0114",
+        "d-0115",
+        "d-0116",
+        "d-0117",
+        "d-0118",
+        "d-0119",
+        "d-0120",
+        "d-0121",
+        "d-0122",
+        "d-0123",
+        "d-0124"
+      ],
+      "discoveryMethods": [
+        "internal-search",
+        "navigation",
+        "robots",
+        "sitemap"
+      ]
+    },
+    {
+      "agency": "Family Violence and Sexual Violence Executive Board",
+      "category": "enquiry-or-contact",
+      "version": 1,
+      "discovered": 0,
+      "locked": 0,
+      "droppedBeyondBound": 0,
+      "lockedAt": "2026-09-25T03:55:28Z",
+      "approval": "approved",
+      "approvedAt": "2026-09-25T04:03:08Z",
+      "supportedByDiscoveryRecords": [
+        "d-0134",
+        "d-0135",
+        "d-0136",
+        "d-0137",
+        "d-0138",
+        "d-0139",
+        "d-0140"
+      ],
+      "discoveryMethods": [
+        "internal-search",
+        "navigation",
+        "robots",
+        "sitemap"
+      ]
+    },
+    {
+      "agency": "Family Violence and Sexual Violence Executive Board",
+      "category": "subscription-or-newsletter",
+      "version": 1,
+      "discovered": 0,
+      "locked": 0,
+      "droppedBeyondBound": 0,
+      "lockedAt": "2026-09-25T04:04:52Z",
+      "approval": "approved",
+      "approvedAt": "2026-09-25T04:06:33Z",
+      "supportedByDiscoveryRecords": [
+        "d-0141",
+        "d-0142",
+        "d-0143",
+        "d-0144",
+        "d-0145",
+        "d-0146"
+      ],
+      "discoveryMethods": [
+        "internal-search",
+        "navigation",
+        "robots",
+        "sitemap"
+      ]
+    },
+    {
+      "agency": "Ministry of Health",
+      "category": "account-registration",
+      "version": 3,
+      "discovered": 0,
+      "locked": 0,
+      "droppedBeyondBound": 0,
+      "lockedAt": "2026-09-25T06:03:08Z",
+      "approval": "approved",
+      "approvedAt": "2026-09-25T07:15:36Z",
+      "supportedByDiscoveryRecords": [
+        "d-0198",
+        "d-0199",
+        "d-0200",
+        "d-0201",
+        "d-0202",
+        "d-0203",
+        "d-0204",
+        "d-0205",
+        "d-0206",
+        "d-0207",
+        "d-0208",
+        "d-0209",
+        "d-0210",
+        "d-0211",
+        "d-0212",
+        "d-0213",
+        "d-0214",
+        "d-0215",
+        "d-0216",
+        "d-0217",
+        "d-0218",
+        "d-0219",
+        "d-0220",
+        "d-0221",
+        "d-0223",
+        "d-0225"
+      ],
+      "discoveryMethods": [
+        "internal-search",
+        "navigation",
+        "robots",
+        "sitemap"
+      ]
+    },
+    {
+      "agency": "Ministry of Health",
+      "category": "service-application",
+      "version": 1,
+      "discovered": 4,
+      "locked": 4,
+      "droppedBeyondBound": 0,
+      "lockedAt": "2026-09-25T07:20:36Z",
+      "approval": "approved",
+      "approvedAt": "2026-09-26T02:17:56Z",
+      "supportedByDiscoveryRecords": [
+        "d-0226",
+        "d-0227",
+        "d-0228",
+        "d-0229",
+        "d-0230",
+        "d-0231",
+        "d-0232",
+        "d-0233",
+        "d-0234",
+        "d-0235",
+        "d-0236",
+        "d-0237",
+        "d-0238",
+        "d-0239",
+        "d-0240",
+        "d-0241",
+        "d-0242",
+        "d-0243",
+        "d-0244",
+        "d-0245",
+        "d-0246",
+        "d-0247",
+        "d-0248",
+        "d-0249",
+        "d-0250",
+        "d-0251"
+      ],
+      "discoveryMethods": [
+        "internal-search",
+        "navigation",
+        "robots",
+        "sitemap"
+      ]
+    },
+    {
+      "agency": "Ministry of Health",
+      "category": "enquiry-or-contact",
+      "version": 1,
+      "discovered": 1,
+      "locked": 1,
+      "droppedBeyondBound": 0,
+      "lockedAt": "2026-09-26T03:37:47Z",
+      "approval": "approved",
+      "approvedAt": "2026-09-26T04:54:33Z",
+      "supportedByDiscoveryRecords": [
+        "d-0256",
+        "d-0257",
+        "d-0258",
+        "d-0259",
+        "d-0260",
+        "d-0261",
+        "d-0262",
+        "d-0263",
+        "d-0264",
+        "d-0265",
+        "d-0266",
+        "d-0267",
+        "d-0268",
+        "d-0269",
+        "d-0270",
+        "d-0271",
+        "d-0272",
+        "d-0273",
+        "d-0274",
+        "d-0275",
+        "d-0277",
+        "d-0279",
+        "d-0281",
+        "d-0283",
+        "d-0284",
+        "d-0285",
+        "d-0286",
+        "d-0287",
+        "d-0288",
+        "d-0289",
+        "d-0290"
+      ],
+      "discoveryMethods": [
+        "internal-search",
+        "navigation",
+        "robots",
+        "sitemap"
+      ]
+    },
+    {
+      "agency": "New Zealand Security Intelligence Service",
+      "category": "account-registration",
+      "version": 1,
+      "discovered": 0,
+      "locked": 0,
+      "droppedBeyondBound": 0,
+      "lockedAt": "2026-09-26T20:28:52Z",
+      "approval": "approved",
+      "approvedAt": "2026-09-26T21:18:30Z",
+      "supportedByDiscoveryRecords": [
+        "d-0293",
+        "d-0294",
+        "d-0295",
+        "d-0296",
+        "d-0297",
+        "d-0298",
+        "d-0299",
+        "d-0300",
+        "d-0301"
+      ],
+      "discoveryMethods": [
         "navigation",
         "robots",
         "sitemap"
@@ -91,6 +652,51 @@
       "approvalNote": "discovery records carry no category, set version, method or outcome, so this round is not separately identifiable from round 1; it is round 1 plus additions",
       "supersededAt": "2026-09-24T09:03:31Z",
       "supersededReason": "rerun as an independently identifiable round 3, with every inspection attributed to its category, version, method and outcome"
+    },
+    {
+      "agency": "Family Violence and Sexual Violence Executive Board",
+      "category": "service-application",
+      "version": 1,
+      "approval": "rejected",
+      "approvalNote": "Discovery filtered four published DOCX application forms out of the candidate set instead of recording them as candidates and excluding them under criterion five. A nil set conflates 'no form found' with 'forms found, all ineligible', which are different findings; the exclude stage exists to keep them apart. The note on the workforce-survey record also gave the wrong reason: criterion two requires a form to be REACHED FROM a frame website, not hosted on one, and a directly linked third-party form is explicitly in scope.",
+      "supersededAt": "2026-09-25T03:25:25Z",
+      "supersededReason": "Redo with document application forms recorded as candidates and excluded under criterion five, and with the survey's category mismatch recorded as the reason rather than its host."
+    },
+    {
+      "agency": "Te Puni Kōkiri",
+      "category": "service-application",
+      "version": 1,
+      "approval": "rejected",
+      "approvalNote": "The round-1 discovery note on the Māori Development Fund page was inaccurate: it stated that applications are eight PDFs excluded by criterion five. Re-inspection finds four supporting PDFs, none of which is an application form, and no published application form in any format anywhere on the site. The nil result is substantively correct but its stated evidence was wrong, and the selection trail must say what is true before the corpus is sealed.",
+      "supersededAt": "2026-09-25T03:27:39Z",
+      "supersededReason": "Redo with an accurate account of the Māori Development Fund page and of what the site publishes, replacing the round-1 claim of eight PDF application forms."
+    },
+    {
+      "agency": "Te Puni Kōkiri",
+      "category": "service-application",
+      "version": 2,
+      "approval": "rejected",
+      "approvalNote": "Round 2 is incomplete. It inspected only www.tpk.govt.nz because it was written to correct one page's note rather than to replace a whole round, while round 1 covered all four of this agency's frame websites. Under the binding rule at selection-v1.0.6 a set stands only on the records it is bound to, so round 2 cannot inherit the still-valid Te Haeata, Te Kahui Mangai and Tupu records from superseded round 1.",
+      "supersededAt": "2026-09-25T03:39:42Z",
+      "supersededReason": "Round 3 covers all four frame websites, with the corrected Maori Development Fund note carried forward."
+    },
+    {
+      "agency": "Ministry of Health",
+      "category": "account-registration",
+      "version": 1,
+      "approval": "rejected",
+      "approvalNote": "Round 1 accessed internal-search URLs disallowed by /search? in www.health.govt.nz/robots.txt, and the separately inspected Tātai sitemap was not independently recorded. Four distinct disallowed URLs were fetched, not two: the two recorded ?query= searches, and an earlier pair using ?keywords= that were fetched during a wrong-parameter attempt and never recorded. Neither the browser navigations nor the recording script consulted robots.txt, because the check existed only in the capture command.",
+      "supersededAt": "2026-09-25T04:55:54Z",
+      "supersededReason": "Redo discovery without fetching robots-disallowed search paths and with every Tātai inspection recorded separately. Internal search on www.health.govt.nz is recorded as disallowed by robots rather than performed."
+    },
+    {
+      "agency": "Ministry of Health",
+      "category": "account-registration",
+      "version": 2,
+      "approval": "rejected",
+      "approvalNote": "Round 2's two NOT NAVIGATED internal-search records carry navigatedAt timestamps and were counted in the five-second navigation pacing, so the raw data asserts a navigation the notes deny. Round 2 also predated persisted robots policy, so its twenty-six discovery invocations each re-fetched robots.txt into a per-process cache, producing robots requests that no record describes. Both are fixed at selection-v1.0.11; round 3 is recorded through preflight-discovery.",
+      "supersededAt": "2026-09-25T05:15:57Z",
+      "supersededReason": "Redo through preflight-discovery so the robots check precedes every request, not-navigated records carry checkedAt with no navigatedAt, and the robots policy is fetched once per origin and persisted."
     }
   ]
 }

@@ -2252,3 +2252,99 @@ Nothing here says anything about whether NZSIS publishes forms with name-field c
 whether a member of the public can reach them. Two of its three origins could not be searched by
 this method at all, and the third's home page could not be read without executing its application.
 That is attrition in the instrument, and it is reported as attrition.
+
+## Amendment 27: attempted is not searched
+
+**Dated 27 September 2026.** `selection-v1.0.23` and `solo-protocol-v1.0.4`. Moves no earlier tag;
+`capture-v1.0.7` is unchanged.
+
+**Recorded before the first agency could reach exhaustion under it.** Amendment 26 gave individual
+discovery records three attrition outcomes, because `no-candidates` would have said a page was read
+and empty when nobody could read it. The same collapse sat one level up, in the agency-level
+outcome, and it was still there:
+
+```
+EXHAUSTION_REASON =
+  'all four categories in the frozen priority order were searched and none yielded an eligible form'
+```
+
+One frozen string, asserting a completed search. For the New Zealand Security Intelligence Service
+that is false. Two of its three frame websites answer every request with an Imperva/Incapsula
+challenge; those categories were **attempted**, not searched. Filing the agency under that reason
+would have put a completed search into the denominator of every prevalence figure in the study, on
+the strength of requests that returned no agency content — and the exhaustion record is precisely
+what makes the denominator "agencies searched" rather than "agencies with a form".
+
+### Two frozen resolutions
+
+| resolution | reason |
+| --- | --- |
+| `searched-in-full` | all four categories in the frozen priority order were searched and none yielded an eligible form |
+| `technical-discovery-attrition` | all four categories in the frozen priority order were attempted, but technical retrieval barriers prevented complete discovery and no eligible form was located |
+
+`searched-in-full` keeps the existing reason, unchanged, and is now the narrower claim it always
+purported to be: it may be used **only** where every category was conclusively searched.
+
+### Derived, never typed
+
+The resolution is computed from the discovery records **bound to the agency's four locked sets**,
+excluding superseded ones. A withdrawn finding is not evidence; a record no set claims is not part
+of the round the exhaustion rests on. If one bound active record carries `robots-unestablished`,
+`retrieval-blocked` or `retrieval-inconclusive`, the resolution is `technical-discovery-attrition`.
+One is enough: an agency whose discovery was blocked anywhere was not searched in full, and where
+the two readings differ the honest one is the weaker.
+
+`unavailable` and `disallowed` are **not** attrition. A 404 says the resource is not there; a
+`Disallow` says the host forbids it. Both were read, and both are findings.
+
+`exhaustAgency` takes no reason and no resolution from its caller, and `exhaust` **refuses**
+`--reason` and `--resolution` outright rather than merely not offering them. A reason an operator
+can choose is a reason an operator can choose wrongly, and this one decides what an agency's
+absence from the corpus means. A `technical-discovery-attrition` record must name the supporting
+records; a `searched-in-full` record must name none.
+
+### Checked where it is written and where it is trusted
+
+Four gates, because the failure this guards against is not a bad write — `exhaustAgency` derives,
+so it cannot write a wrong resolution — but a **round corrected after the exhaustion**, which can
+turn a true record false:
+
+1. `corpusBlockers` reports any exhaustion whose stored resolution its bound evidence no longer
+   supports, and withholds the draft.
+2. `deriveDraft` normalises a legacy record with no `resolution` to `searched-in-full`, which is
+   exactly what it asserted — and gate 1 refuses the draft if that claim is now untrue, so the
+   normalisation cannot quietly promote an attrition round into a completed search.
+3. The seal validates the resolution, requires the frozen reason **for that resolution**, and
+   requires attrition evidence for the weaker one.
+4. The seal then **re-derives** the resolution from the capture log's own bound records and refuses
+   a mismatch. Matching the log's exhaustion entry is not enough: a record can agree with the log
+   and still be false about the world.
+
+### Counted apart
+
+`status`, `next`, the corpus draft, the sealed manifest and the published provenance all report the
+two separately. Nothing sums them into one "agencies searched" figure, because they are not the same
+kind of fact: one is evidence about an agency, the other is evidence about the instrument.
+
+`next` also states which resolution *will* be recorded before `exhaust` is run, rather than after.
+
+### Two duplications, both checked
+
+`evaluation/` is dependency-free by design, so the reason strings, the resolutions and the attrition
+outcomes are restated there and a test asserts the two packages' constants are identical. The same
+test now also asserts `SOLO_PROTOCOL_TAG` equals `SOLO_SEALER_TAG`, which is how the sealer came to
+declare a protocol version it did not implement once before.
+
+### One wording fix in the packet
+
+The approval packet's heading read "9 inspections". Six of those nine records inspected no agency
+content — they record that a request was refused. It now reads "discovery records", and where any
+yielded nothing to judge it says so per outcome. The count excludes `unavailable`: that resource was
+read, and was simply not there.
+
+### What this does not establish
+
+NZSIS has not yet reached exhaustion; only its `account-registration` round is settled, approved
+with zero candidates under a technically incomplete search. When and if it does reach exhaustion, it
+will resolve as `technical-discovery-attrition` and will sit outside the searched denominator. That
+is a limitation of the instrument against bot-managed hosts, not a finding about the agency.

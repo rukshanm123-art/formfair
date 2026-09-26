@@ -168,10 +168,40 @@ const FRAME_FILES = [
  * exhaustion records at all. A manifest that misnames its own protocol is worse than one that
  * omits it: a reader checking which rules a corpus was sealed under would be told the wrong ones.
  */
-export const SOLO_PROTOCOL_TAG = 'solo-protocol-v1.0.3';
+export const SOLO_PROTOCOL_TAG = 'solo-protocol-v1.0.4';
+
+/**
+ * Two resolutions, mirrored from the capture package and checked equal by a test.
+ *
+ * solo-protocol-v1.0.4. One frozen reason asserted that all four categories "were searched". For
+ * an agency whose websites answer every request with a bot-management challenge that is false:
+ * the categories were attempted. Sealing it under the searched-in-full reason would put a
+ * completed search into the denominator of every prevalence figure on the strength of requests
+ * that returned no agency content.
+ */
+export const AGENCY_RESOLUTIONS = Object.freeze({
+  SEARCHED_IN_FULL: 'searched-in-full',
+  TECHNICAL_ATTRITION: 'technical-discovery-attrition',
+});
 
 export const EXHAUSTION_REASON =
   'all four categories in the frozen priority order were searched and none yielded an eligible form';
+
+export const ATTRITION_REASON =
+  'all four categories in the frozen priority order were attempted, but technical retrieval ' +
+  'barriers prevented complete discovery and no eligible form was located';
+
+export const RESOLUTION_REASONS = Object.freeze({
+  [AGENCY_RESOLUTIONS.SEARCHED_IN_FULL]: EXHAUSTION_REASON,
+  [AGENCY_RESOLUTIONS.TECHNICAL_ATTRITION]: ATTRITION_REASON,
+});
+
+/** The discovery outcomes that mean a page could not be read. Mirrored, and checked equal. */
+export const TECHNICAL_ATTRITION_OUTCOMES = Object.freeze([
+  'robots-unestablished',
+  'retrieval-blocked',
+  'retrieval-inconclusive',
+]);
 export const MAX_QUALIFIED_AGENCIES = 40;
 export const EXHAUSTION_CATEGORIES = Object.freeze([
   'account-registration',
@@ -336,11 +366,33 @@ export function sealCorpus({
           'the exhaustion operation and must be re-recorded rather than sealed.'
       );
     }
-    if (record?.reason !== EXHAUSTION_REASON) {
+    // solo-protocol-v1.0.4. The resolution, and the one frozen reason it may carry. A record with
+    // no resolution predates the distinction and asserted a completed search, so it reads as
+    // `searched-in-full` - and is then held to that claim against the log below.
+    const resolution = record?.resolution ?? AGENCY_RESOLUTIONS.SEARCHED_IN_FULL;
+    if (!Object.values(AGENCY_RESOLUTIONS).includes(resolution)) {
       problems.push(
-        `${where}.reason must be the frozen exhaustion reason. Five agencies that did not ` +
-          'qualify are interpretable only if every one left for the same stated reason.'
+        `${where}.resolution must be ${Object.values(AGENCY_RESOLUTIONS).join(' or ')}, not ` +
+          JSON.stringify(record?.resolution)
       );
+    } else if (record?.reason !== RESOLUTION_REASONS[resolution]) {
+      problems.push(
+        `${where}.reason must be the frozen reason for ${resolution}. Agencies that did not ` +
+          'qualify are interpretable only if each left for one of two stated reasons, and only ' +
+          'if the reason matches the resolution it is filed under.'
+      );
+    }
+    if (resolution === AGENCY_RESOLUTIONS.TECHNICAL_ATTRITION) {
+      const ids = record?.attritionRecordIds;
+      if (!Array.isArray(ids) || ids.length === 0) {
+        problems.push(
+          `${where} is technical-discovery-attrition but names no supporting record. The weaker ` +
+            'resolution is the one that must show its evidence, because it removes an agency from ' +
+            'the searched denominator.'
+        );
+      }
+    } else if (record?.attritionRecordIds !== undefined) {
+      problems.push(`${where} is ${resolution} but names attrition records`);
     }
     const versions = record?.categorySetVersions;
     if (versions === null || typeof versions !== 'object') {
@@ -358,8 +410,12 @@ export function sealCorpus({
     exhausted.push({
       agency: record.agency,
       exhaustedAt: record.exhaustedAt,
+      resolution,
       reason: record.reason,
       categorySetVersions: record.categorySetVersions,
+      ...(resolution === AGENCY_RESOLUTIONS.TECHNICAL_ATTRITION
+        ? { attritionRecordIds: [...(record.attritionRecordIds ?? [])] }
+        : {}),
     });
   }
 
@@ -498,6 +554,65 @@ export function sealCorpus({
           if (inLog.exhaustedAt !== record.exhaustedAt || inLog.reason !== record.reason) {
             problems.push(`${where} does not match the capture log's record of it`);
           }
+          // solo-protocol-v1.0.4. The resolution must match the log, AND the log's own bound
+          // evidence must support it. Matching the log alone would let an exhaustion written
+          // before a round was corrected go on claiming a completed search after attrition
+          // records were bound into it - the claim would be consistent with the log and false
+          // about the world. Re-derived here rather than trusted, for the same reason the
+          // exhaustion contract is duplicated at all: the seal is the authority.
+          const loggedResolution = inLog.resolution ?? AGENCY_RESOLUTIONS.SEARCHED_IN_FULL;
+          if (loggedResolution !== record.resolution) {
+            problems.push(
+              `${where}.resolution is ${record.resolution} but the capture log records ` +
+                `${loggedResolution}`
+            );
+          }
+          const bound = new Set();
+          for (const category of EXHAUSTION_CATEGORIES) {
+            for (const id of sets[`${record.agency}\u0000${category}`]?.discoveryRecordIds ?? []) {
+              bound.add(id);
+            }
+          }
+          const superseded = new Set(
+            attempts.map((a) => a.supersedesDiscoveryId).filter((id) => id !== undefined && id !== null)
+          );
+          const attritionInLog = attempts.filter(
+            (a) => bound.has(a.id) && a.status === 'discovery' && !superseded.has(a.id) &&
+              TECHNICAL_ATTRITION_OUTCOMES.includes(a.outcome)
+          );
+          // With nothing bound, `searched-in-full` would be vacuously derivable - the stronger
+          // claim, on no evidence. The absence of attrition only means something where there is
+          // evidence in which attrition could have shown up.
+          const boundInLog = attempts.filter((a) => bound.has(a.id) && a.status === 'discovery' && !superseded.has(a.id));
+          if (boundInLog.length === 0) {
+            problems.push(
+              `${where} has no discovery records bound to its four sets in the capture log, so ` +
+                'nothing supports either resolution'
+            );
+          }
+          const derived = attritionInLog.length > 0
+            ? AGENCY_RESOLUTIONS.TECHNICAL_ATTRITION
+            : AGENCY_RESOLUTIONS.SEARCHED_IN_FULL;
+          if (derived !== record.resolution) {
+            problems.push(
+              `${where} is sealed as ${record.resolution}, but the capture log's bound discovery ` +
+                `records support ${derived}` +
+                (attritionInLog.length
+                  ? ` (${attritionInLog.length} record(s) could not be read: ` +
+                    `${attritionInLog.slice(0, 4).map((a) => `${a.id} ${a.outcome}`).join(', ')})`
+                  : '')
+            );
+          }
+          if (record.resolution === AGENCY_RESOLUTIONS.TECHNICAL_ATTRITION) {
+            const supporting = new Set(attritionInLog.map((a) => a.id));
+            const unsupported = (record.attritionRecordIds ?? []).filter((id) => !supporting.has(id));
+            if (unsupported.length) {
+              problems.push(
+                `${where} names ${unsupported.join(', ')} as attrition evidence, but the capture ` +
+                  'log has no such bound, active, unreadable record'
+              );
+            }
+          }
           for (const category of EXHAUSTION_CATEGORIES) {
             if (inLog.categorySetVersions?.[category] !== record.categorySetVersions?.[category]) {
               problems.push(`${where}.categorySetVersions.${category} disagrees with the capture log`);
@@ -580,6 +695,14 @@ export function sealCorpus({
       },
       pages,
       exhaustedAgencies: exhausted,
+      // solo-protocol-v1.0.4. Counted apart in the manifest itself, so a reader does not have to
+      // tally the array to learn how much of the frame was actually read. An agency whose
+      // discovery was blocked belongs in neither the numerator nor the searched denominator.
+      agencyResolutions: {
+        searchedInFull: exhausted.filter((e) => e.resolution === AGENCY_RESOLUTIONS.SEARCHED_IN_FULL).length,
+        technicalDiscoveryAttrition:
+          exhausted.filter((e) => e.resolution === AGENCY_RESOLUTIONS.TECHNICAL_ATTRITION).length,
+      },
       // The sealer attests itself, separately from the analyser it will later run. They are
       // different artefacts under different tags, and a manifest that named only the analyser
       // could not say which sealing rules produced it.

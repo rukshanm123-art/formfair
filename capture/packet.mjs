@@ -133,12 +133,18 @@ export function buildPacket(log, { agency, category }) {
       outcomes: [...counts].map(([outcome, n]) => ({ outcome, n })),
     }));
 
+  const unreadableRecords = active.filter((r) => TECHNICAL_ATTRITION_OUTCOMES.includes(r.outcome));
+  const unreadableByOutcome = [...unreadableRecords.reduce(
+    (acc, r) => acc.set(r.outcome, (acc.get(r.outcome) ?? 0) + 1), new Map()
+  )].map(([outcome, n]) => ({ outcome, n }));
+
   return {
     agency, category, version: set.version,
     approval: set.approval, lockedAt: set.lockedAt,
     terms: SEARCH_TERMS[category] ?? [],
     websites: byWebsite,
     inspections: active.length,
+    unreadable: { total: unreadableRecords.length, byOutcome: unreadableByOutcome },
     attritionByOrigin,
     supersededRecords: supersededIds.size,
     candidates: set.locked,
@@ -156,10 +162,23 @@ export function renderPacket(p) {
   out.push(`category          ${p.category} (round ${p.version})`);
   out.push(`locked at         ${p.lockedAt}`);
   out.push(`search terms      ${p.terms.join(', ')}`);
+  // selection-v1.0.23: "discovery records", not "inspections". Six of the nine records in the
+  // NZSIS round inspected no agency content at all - they record that a request was refused. A
+  // heading that counts them as inspections overstates what the round looked at, in the one line
+  // a reviewer is most likely to read and least likely to question.
   out.push(
-    `inspections       ${p.inspections} active across ${p.websites.length} website(s)` +
+    `discovery records ${p.inspections} active across ${p.websites.length} website(s)` +
       (p.supersededRecords ? `, ${p.supersededRecords} superseded record(s) shown but not evidence` : '')
   );
+  // Per outcome, because "retrieved no agency content" is not true of all of them: a
+  // retrieval-inconclusive record DID receive the agency's own document, it just held nothing to
+  // judge. What every one of these shares is that no candidate judgement came out of it.
+  if (p.unreadable?.total) {
+    out.push(
+      `of which          ${p.unreadable.total} yielded no candidate judgement: ` +
+        p.unreadable.byOutcome.map(({ outcome, n }) => `${outcome} x${n}`).join(', ')
+    );
+  }
   out.push('');
   for (const w of p.websites) {
     out.push(`  ${w.website}`);

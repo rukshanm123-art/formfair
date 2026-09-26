@@ -32,7 +32,7 @@ import {
   issueDiscoveryPermit, consumeDiscoveryPermit, findOpenPermit,
   unresolvedDiscoveryRounds, openDiscoveryPermits, robotsCheckIsFresh, isDiscoverySuperseded,
   reopenCandidateSet, closeDiscoveryPermit, permitAudit, PERMIT_DISPOSITIONS, corpusBlockers,
-  quarantineCapture, recordDeviation,
+  quarantineCapture, recordDeviation, agencyResolutions, agencyResolution,
 } from './run.mjs';
 import { fetchRobotsPolicy, evaluatePolicy, DISPOSITION } from './robots-policy.mjs';
 import {
@@ -469,6 +469,14 @@ function doStatus() {
     for (const a of attrition) byOutcome[a.outcome] = (byOutcome[a.outcome] ?? 0) + 1;
     for (const [outcome, n] of Object.entries(byOutcome)) console.log(`  ${outcome}: ${n}`);
   }
+  const res = agencyResolutions(log);
+  if (res.records.length) {
+    console.log(
+      `agencies resolved: ${res.counts['searched-in-full'] ?? 0} searched in full, ` +
+        `${res.counts['technical-discovery-attrition'] ?? 0} technical discovery attrition`
+    );
+    for (const r of res.records) console.log(`  ${r.resolution.padEnd(30)} ${r.agency}`);
+  }
   if ((log.deviations ?? []).length) {
     console.log(`recorded deviations: ${log.deviations.length}`);
     for (const d of log.deviations) console.log(`  ${d.id} ${d.kind}: ${d.summary}`);
@@ -652,7 +660,17 @@ function doNext() {
   const work = nextWork(log, drawOrder());
   if (work.done) return console.log(`nothing further: ${work.reason}`);
   if (work.exhaustedAgency) {
-    return console.log(`${work.agency}: every category is settled with no eligible form. Record it as exhausted.`);
+    // selection-v1.0.23. `next` says WHICH resolution will be recorded, because the two mean
+    // different things and the operator should see it before running `exhaust` rather than after.
+    const r = agencyResolution(log, work.agency);
+    if (r.resolution === 'technical-discovery-attrition') {
+      console.log(`${work.agency}: every category was attempted, but ${r.attritionRecordIds.length} bound record(s) could not be read.`);
+      for (const [outcome, n] of Object.entries(r.attritionByOutcome)) console.log(`  ${outcome}: ${n}`);
+      console.log('Recording it as exhausted will resolve it as technical-discovery-attrition,');
+      console.log('NOT as an agency searched in full with no eligible form.');
+      return;
+    }
+    return console.log(`${work.agency}: every category is settled with no eligible form. Record it as exhausted (searched-in-full).`);
   }
   console.log(`agency:   ${work.agency}`);
   console.log(`category: ${work.category}`);
@@ -693,11 +711,30 @@ function doExhaust() {
   const drawOrder = parseDrawOrder(
     readFile(new URL('../evaluation/frame/draw-order.csv', import.meta.url), 'utf8')
   );
+  // selection-v1.0.23. Neither the reason nor the resolution may be supplied. They were never
+  // accepted, but an omission is not a rule: refusing the flags outright says so, and says it at
+  // the point where an operator would try.
+  for (const forbidden of ['reason', 'resolution']) {
+    if (flag(forbidden) !== null) {
+      die(
+        `--${forbidden} cannot be given. The agency resolution is derived from the discovery ` +
+          'records bound to its four sets, because it decides what the agency\'s absence from the ' +
+          'corpus means. Correct the records if it is wrong.'
+      );
+    }
+  }
   const record = exhaustAgency(log, drawOrder, { agency: flag('agency') });
   writeLog(logPath, log);
   writeDerived({ log, dir, frameSha256: flag('frame-sha256'), drawOrderSha256: flag('draw-order-sha256'), synthetic: has('synthetic') });
   console.log(`exhausted: ${record.agency} at ${record.exhaustedAt}`);
+  console.log(`resolution: ${record.resolution}`);
   console.log(`reason:    ${record.reason}`);
+  if (record.attritionRecordIds?.length) {
+    console.log(`supported by ${record.attritionRecordIds.length} attrition record(s): ${record.attritionRecordIds.join(', ')}`);
+    for (const [outcome, n] of Object.entries(record.attritionByOutcome ?? {})) {
+      console.log(`  ${outcome}: ${n}`);
+    }
+  }
   for (const [category, version] of Object.entries(record.categorySetVersions)) {
     console.log(`  ${category.padEnd(28)} set v${version}`);
   }

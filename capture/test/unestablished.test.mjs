@@ -10,9 +10,10 @@
 
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, readdirSync, existsSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, readdirSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
 import {
   DISPOSITION, dispositionForStatus, classifyResponse, classifyRepresentation, evaluatePolicy,
   fetchRobotsPolicy,
@@ -21,9 +22,12 @@ import {
   emptyLog, recordRobotsCheck, robotsCheckIsFresh, ROBOTS_MAX_AGE_MS, issueDiscoveryPermit,
   consumeDiscoveryPermit, appendAttempt, permitAudit, recordCandidates, lockCandidateSet,
   recordDeviation, checkDeviations, corpusBlockers, checkCaptureFiles, quarantineCapture,
-  PERMIT_TTL_MS, sha256,
+  PERMIT_TTL_MS, sha256, approveCandidateSet, exhaustAgency, agencyResolution, agencyResolutions,
+  AGENCY_RESOLUTIONS, EXHAUSTION_REASON, ATTRITION_REASON,
 } from '../run.mjs';
-import { DISCOVERY_OUTCOMES, TECHNICAL_ATTRITION_OUTCOMES } from '../selection.mjs';
+import {
+  DISCOVERY_OUTCOMES, TECHNICAL_ATTRITION_OUTCOMES, CATEGORY_ORDER, parseDrawOrder,
+} from '../selection.mjs';
 import { captureDisposition, needsHeadedFallback } from '../capture.mjs';
 import { buildPacket, renderPacket } from '../packet.mjs';
 
@@ -544,4 +548,218 @@ describe('the packet must not call an unreadable origin an empty one', () => {
     const text = roundWith([['https://a.govt.nz/', 'retrieval-blocked']]);
     assert.match(text, /NOT READ \(retrieval-blocked\): navigation https:\/\/a\.govt\.nz\//);
   });
+});
+
+describe('an agency leaves the scan under one of two resolutions', () => {
+  // selection-v1.0.23. `EXHAUSTION_REASON` asserted that all four categories "were searched".
+  // For NZSIS that is false: two of three websites answer every request with an Incapsula
+  // challenge, so the categories were ATTEMPTED. Filing that as a completed search would put it
+  // in the denominator of every prevalence figure.
+  const order = parseDrawOrder(
+    readFileSync(new URL('../../evaluation/frame/draw-order.csv', import.meta.url), 'utf8')
+  );
+  const AGENCY = order[0].agency;
+  const iso = (n) => `2026-09-26T0${Math.floor(n / 6)}:${String((n % 6) * 10).padStart(2, '0')}:00Z`;
+
+  /** Four settled, approved sets for one agency, each bound to its own discovery record. */
+  const settledAgency = (log, outcomes) => {
+    let n = 0;
+    for (const category of CATEGORY_ORDER) {
+      appendAttempt(log, {
+        examinedAt: iso(n), agency: AGENCY, website: 'https://a.govt.nz/',
+        url: `https://a.govt.nz/${category}`, status: 'discovery', discoveryKind: 'navigation',
+        outcome: outcomes[category] ?? 'no-candidates', category, candidateSetVersion: 1,
+        navigatedAt: iso(n), approval: 'approved',
+      });
+      n += 1;
+      recordCandidates(log, { agency: AGENCY, category, urls: [], declaration: 'none' });
+      lockCandidateSet(log, { agency: AGENCY, category });
+      approveCandidateSet(log, { agency: AGENCY, category, approved: true });
+    }
+    return log;
+  };
+
+  test('every category read means searched-in-full', () => {
+    const log = settledAgency(emptyLog(), {});
+    const r = agencyResolution(log, AGENCY);
+    assert.equal(r.resolution, AGENCY_RESOLUTIONS.SEARCHED_IN_FULL);
+    assert.equal(r.reason, EXHAUSTION_REASON);
+    assert.deepEqual(r.attritionRecordIds, []);
+  });
+
+  test('one bound unreadable record is enough to mean technical attrition', () => {
+    for (const outcome of TECHNICAL_ATTRITION_OUTCOMES) {
+      const log = settledAgency(emptyLog(), { 'account-registration': outcome });
+      const r = agencyResolution(log, AGENCY);
+      assert.equal(r.resolution, AGENCY_RESOLUTIONS.TECHNICAL_ATTRITION, outcome);
+      assert.equal(r.reason, ATTRITION_REASON);
+      assert.equal(r.attritionRecordIds.length, 1);
+      assert.deepEqual(r.attritionByOutcome, { [outcome]: 1 });
+      assert.notEqual(r.reason, EXHAUSTION_REASON);
+    }
+  });
+
+  test('`unavailable` and `disallowed` are findings, not attrition', () => {
+    // A 404 says the resource is not there; a Disallow says the host forbids it. Both were read.
+    for (const outcome of ['unavailable', 'disallowed', 'no-candidates']) {
+      const log = settledAgency(emptyLog(), { 'service-application': outcome });
+      assert.equal(agencyResolution(log, AGENCY).resolution, AGENCY_RESOLUTIONS.SEARCHED_IN_FULL, outcome);
+    }
+  });
+
+  test('exhaust writes the derived resolution and its evidence, and nothing else', () => {
+    const log = settledAgency(emptyLog(), { 'enquiry-or-contact': 'retrieval-blocked' });
+    const record = exhaustAgency(log, order);
+    assert.equal(record.agency, AGENCY);
+    assert.equal(record.resolution, AGENCY_RESOLUTIONS.TECHNICAL_ATTRITION);
+    assert.equal(record.reason, ATTRITION_REASON);
+    assert.equal(record.attritionRecordIds.length, 1);
+    assert.deepEqual(record.attritionByOutcome, { 'retrieval-blocked': 1 });
+
+    const clean = exhaustAgency(settledAgency(emptyLog(), {}), order);
+    assert.equal(clean.resolution, AGENCY_RESOLUTIONS.SEARCHED_IN_FULL);
+    assert.equal(clean.reason, EXHAUSTION_REASON);
+    assert.equal(clean.attritionRecordIds, undefined, 'a full search names no attrition evidence');
+  });
+
+  test('the counts are kept apart, never summed into "agencies searched"', () => {
+    const log = settledAgency(emptyLog(), { 'account-registration': 'retrieval-blocked' });
+    exhaustAgency(log, order);
+    const { counts, records, disagreements } = agencyResolutions(log);
+    assert.equal(counts[AGENCY_RESOLUTIONS.TECHNICAL_ATTRITION], 1);
+    assert.equal(counts[AGENCY_RESOLUTIONS.SEARCHED_IN_FULL], 0);
+    assert.equal(records[0].agency, AGENCY);
+    assert.deepEqual(disagreements, []);
+  });
+
+  test('a legacy record with no resolution reads as searched-in-full', () => {
+    const log = settledAgency(emptyLog(), {});
+    log.exhausted = [{ agency: AGENCY, exhaustedAt: iso(9), reason: EXHAUSTION_REASON, categorySetVersions: {} }];
+    const { counts, disagreements } = agencyResolutions(log);
+    assert.equal(counts[AGENCY_RESOLUTIONS.SEARCHED_IN_FULL], 1);
+    assert.deepEqual(disagreements, [], 'and its claim is still true, so nothing is reported');
+  });
+
+  test('THE DRIFT: a stored full search contradicted by later evidence is reported at the gate', () => {
+    // An exhaustion cannot be written wrongly by `exhaustAgency` - it derives. But a round
+    // corrected afterwards can make a true record false, and the resolution is what the
+    // denominator means, so the gate re-checks it rather than trusting what was written.
+    const log = settledAgency(emptyLog(), {});
+    exhaustAgency(log, order);
+    assert.deepEqual(agencyResolutions(log).disagreements, []);
+
+    const bound = log.candidateSets[`${AGENCY}\u0000account-registration`].discoveryRecordIds[0];
+    log.attempts.find((a) => a.id === bound).outcome = 'retrieval-blocked';
+
+    const { disagreements } = agencyResolutions(log);
+    assert.equal(disagreements.length, 1);
+    assert.match(disagreements[0], /recorded as searched-in-full but its bound evidence supports technical-discovery-attrition/);
+    const blocker = corpusBlockers(log).find((b) => b.kind === 'resolution-disagreements');
+    assert.ok(blocker, 'and the corpus gate withholds the draft for it');
+  });
+
+  test('an unreadable record no set is bound to does not change the resolution', () => {
+    // Evidence a set does not claim is not part of the round the exhaustion rests on.
+    const log = settledAgency(emptyLog(), {});
+    appendAttempt(log, {
+      examinedAt: iso(10), agency: AGENCY, website: 'https://a.govt.nz/',
+      url: 'https://a.govt.nz/stray', status: 'discovery', discoveryKind: 'navigation',
+      outcome: 'retrieval-blocked', category: 'account-registration', candidateSetVersion: 1,
+      navigatedAt: iso(10), approval: 'approved',
+    });
+    assert.equal(agencyResolution(log, AGENCY).resolution, AGENCY_RESOLUTIONS.SEARCHED_IN_FULL);
+  });
+});
+
+describe('the packet heading counts records, not inspections', () => {
+  test('a round of refusals is not described as nine inspections', () => {
+    // Six of the nine NZSIS records inspected no agency content; they record a refusal. The
+    // heading is the line a reviewer is most likely to read and least likely to question.
+    const log = emptyLog();
+    const agency = 'NZSIS';
+    const rows = [
+      ['https://a.govt.nz/robots.txt', 'retrieval-blocked', 'robots'],
+      ['https://a.govt.nz/', 'retrieval-blocked', 'navigation'],
+      ['https://b.govt.nz/', 'retrieval-inconclusive', 'navigation'],
+      ['https://b.govt.nz/sitemap.xml', 'unavailable', 'sitemap'],
+    ];
+    rows.forEach(([url, outcome, method], i) => {
+      appendAttempt(log, {
+        examinedAt: `2026-09-26T19:0${i}:00Z`, agency, website: `${new URL(url).origin}/`,
+        url, status: 'discovery', discoveryKind: method, outcome,
+        category: 'account-registration', candidateSetVersion: 1,
+        navigatedAt: `2026-09-26T19:0${i}:00Z`, approval: 'approved',
+      });
+    });
+    recordCandidates(log, { agency, category: 'account-registration', urls: [], declaration: 'none' });
+    lockCandidateSet(log, { agency, category: 'account-registration' });
+    const text = renderPacket(buildPacket(log, { agency, category: 'account-registration' }));
+
+    assert.doesNotMatch(text, /^inspections/m, 'the heading must not call a refusal an inspection');
+    assert.match(text, /discovery records 4 active/);
+    // Three of the four yielded nothing to judge - and the 404 is not one of them, because that
+    // resource was read and was simply not there.
+    assert.match(text, /3 yielded no candidate judgement: retrieval-blocked x2, retrieval-inconclusive x1/);
+  });
+
+  test('a fully readable round carries no such line', () => {
+    const log = emptyLog();
+    const agency = 'Readable';
+    appendAttempt(log, {
+      examinedAt: '2026-09-26T19:00:00Z', agency, website: 'https://a.govt.nz/',
+      url: 'https://a.govt.nz/', status: 'discovery', discoveryKind: 'navigation',
+      outcome: 'no-candidates', category: 'account-registration', candidateSetVersion: 1,
+      navigatedAt: '2026-09-26T19:00:00Z', approval: 'approved',
+    });
+    recordCandidates(log, { agency, category: 'account-registration', urls: [], declaration: 'none' });
+    lockCandidateSet(log, { agency, category: 'account-registration' });
+    const text = renderPacket(buildPacket(log, { agency, category: 'account-registration' }));
+    assert.doesNotMatch(text, /yielded no candidate judgement/);
+  });
+});
+
+describe('the agency resolution cannot be typed by an operator', () => {
+  const cli = new URL('../cli-capture.mjs', import.meta.url).pathname;
+  const runCli = (args) => spawnSync('node', [cli, ...args], { encoding: 'utf8' });
+
+  for (const forbidden of ['reason', 'resolution']) {
+    test(`exhaust refuses --${forbidden}`, () => {
+      const dir = mkdtempSync(join(tmpdir(), 'ff-exh-'));
+      mkdirSync(join(dir, 'captures'), { recursive: true });
+      writeFileSync(join(dir, 'capture-log.json'), JSON.stringify(emptyLog()));
+      const r = runCli(['exhaust', '--out', dir, `--${forbidden}`, 'anything at all']);
+      assert.notEqual(r.status, 0);
+      assert.match(r.stderr, new RegExp(`--${forbidden} cannot be given`));
+      assert.match(r.stderr, /derived from the discovery records/);
+    });
+  }
+});
+
+test('an exhaustion bound to no evidence is refused, not resolved as a full search', () => {
+  // The vacuity: with nothing bound, the derivation returns `searched-in-full` by default - the
+  // stronger claim, from no evidence. Found while checking the real log, where fifteen legacy
+  // Te Puni Kokiri records carry neither an id nor an outcome and so can never be bound.
+  const order = parseDrawOrder(
+    readFileSync(new URL('../../evaluation/frame/draw-order.csv', import.meta.url), 'utf8')
+  );
+  const AGENCY = order[0].agency;
+  const log = emptyLog();
+  let n = 0;
+  for (const category of CATEGORY_ORDER) {
+    const at = `2026-09-26T0${Math.floor(n / 6)}:${String((n % 6) * 10).padStart(2, '0')}:00Z`;
+    appendAttempt(log, {
+      examinedAt: at, agency: AGENCY, website: 'https://a.govt.nz/',
+      url: `https://a.govt.nz/${category}`, status: 'discovery', discoveryKind: 'navigation',
+      outcome: 'no-candidates', category, candidateSetVersion: 1, navigatedAt: at,
+      approval: 'approved',
+    });
+    n += 1;
+    recordCandidates(log, { agency: AGENCY, category, urls: [], declaration: 'none' });
+    lockCandidateSet(log, { agency: AGENCY, category });
+    approveCandidateSet(log, { agency: AGENCY, category, approved: true });
+    log.candidateSets[`${AGENCY}\u0000${category}`].discoveryRecordIds = [];
+  }
+  assert.equal(agencyResolution(log, AGENCY).boundRecords, 0);
+  assert.throws(() => exhaustAgency(log, order), /nothing supports either resolution/);
+  assert.equal((log.exhausted ?? []).length, 0, 'and nothing is written');
 });
