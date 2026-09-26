@@ -272,6 +272,11 @@ export async function capturePage({
   // Injectable so the hanging-subresource path can be exercised in a second rather than
   // in fifteen. Real captures always use the constant.
   loadEventTimeoutMs = LOAD_EVENT_TIMEOUT_MS,
+  // capture-v1.0.6. Which browser mode produced this attempt, recorded on the result. The protocol
+  // says "the normal Chromium user agent, unmodified and recorded", and the implementation launched
+  // default headless Chromium, whose unmodified user agent says HeadlessChrome. That mismatch was
+  // invisible until a host served a challenge to it.
+  browserMode = 'headless',
 }) {
   validateUrl(url);
   validatePageId(pageId);
@@ -340,11 +345,20 @@ export async function capturePage({
     const blocking = await detectBlocking(page, httpStatus);
     const userAgent = await page.evaluate(() => navigator.userAgent);
 
-    const html = await page.evaluate(() => document.documentElement.outerHTML);
-    writeFileSync(target, html, 'utf8');
+    // capture-v1.0.6. The markup is written only for a page that is not access-barred.
+    //
+    // It used to be written before the CLI decided whether to exclude, so a blocked response left
+    // an official .html file in the captures directory that no attempt record owned - a Cloudflare
+    // interstitial among the corpus material, indistinguishable by filename from a real capture.
+    // The decision now precedes the write.
+    const blocked = blocking.accessBarriers.length > 0;
+    const html = blocked ? null : await page.evaluate(() => document.documentElement.outerHTML);
+    if (!blocked) writeFileSync(target, html, 'utf8');
 
     const version = browser.version?.() ?? 'unknown';
     return {
+      blocked,
+      browserMode,
       httpStatus,
       // capture-v1.0.5: three fields, not one flat list. Only accessBarriers excludes.
       accessBarriers: blocking.accessBarriers,
@@ -369,8 +383,8 @@ export async function capturePage({
       locale: LOCALE,
       redirects,
       category,
-      file,
-      htmlSha256: sha256(html),
+      file: blocked ? null : file,
+      htmlSha256: blocked ? null : sha256(html),
     };
   } finally {
     await context.close();

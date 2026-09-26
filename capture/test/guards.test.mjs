@@ -9,10 +9,11 @@
 
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { readFileSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   emptyLog, appendAttempt, ELIGIBILITY_CRITERIA, recordCandidates, lockCandidateSet,
   categorySettled, deriveDraft, APPROVAL, approveCandidateSet,
@@ -22,10 +23,11 @@ import {
   consumeDiscoveryPermit, closeDiscoveryPermit, permitAudit, openDiscoveryPermits,
   checkPermitLedger,
   corpusBlockers,
+  checkCaptureFiles, writeDerived,
 } from '../run.mjs';
 import { prepareSet, addDiscovery } from './helpers.mjs';
 import {
-  parseDrawOrder, nextWork, CATEGORY_ORDER, MAX_CANDIDATES_PER_CATEGORY, MAX_QUALIFIED_AGENCIES,
+  parseDrawOrder, nextWork, CATEGORY_ORDER, MAX_CANDIDATES_PER_CATEGORY, MAX_QUALIFIED_AGENCIES, isSuperseded,
 } from '../selection.mjs';
 
 const el = () => Object.fromEntries(ELIGIBILITY_CRITERIA.map((c) => [c, null]));
@@ -1811,5 +1813,222 @@ describe('only four permit states are valid', () => {
     // The specific confusion that produced this amendment.
     assert.equal(ok({ closureId: '', closureReason: '', disposition: '' }), false);
     assert.equal(ok({ consumedAt: T(9, 3), accountedBy: 'd-0001' }), false);
+  });
+});
+
+/**
+ * Official capture files and logged captures correspond one to one.
+ *
+ * capture-v1.0.6. A blocked response left a Cloudflare interstitial in the captures directory that
+ * no attempt record owned, because the markup was written before the CLI decided whether to
+ * exclude. The corpus seal hashes only files the draft names, so it would not have been sealed -
+ * but an orphan in that directory looks like corpus material, and nothing detected it.
+ */
+describe('the captures directory matches the log', () => {
+  const captured = (pageId, file) => ({
+    agency: 'TPK', category: 'enquiry-or-contact', status: 'captured', approval: APPROVAL.APPROVED,
+    url: `https://w.govt.nz/${pageId}`, finalUrl: `https://w.govt.nz/${pageId}`,
+    pageId, file, htmlSha256: 'x', inclusionEvidence: 'has a name field',
+    capturedAt: '2026-09-26T00:00:00Z', browser: 'Chromium 1', automationTool: 'playwright 1',
+    viewport: { width: 1280, height: 800 }, locale: 'en-NZ', redirects: [],
+  });
+
+  const inDir = (fn) => {
+    const dir = mkdtempSync(join(tmpdir(), 'formfair-files-'));
+    try {
+      mkdirSync(join(dir, 'captures'), { recursive: true });
+      return fn(dir);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  };
+
+  test('THE ORPHAN: an html file no attempt owns is a problem', () => {
+    inDir((dir) => {
+      const log = emptyLog();
+      writeFileSync(join(dir, 'captures', 'stray.html'), '<html>Just a moment...</html>');
+      const problems = checkCaptureFiles(log, join(dir, 'captures'));
+      assert.equal(problems.length, 1);
+      assert.match(problems[0], /no captured attempt owns it/);
+    });
+  });
+
+  test('THE ORPHAN: it makes draft generation fail, not merely hold the draft', () => {
+    inDir((dir) => {
+      const log = emptyLog();
+      writeFileSync(join(dir, 'captures', 'stray.html'), '<html>Just a moment...</html>');
+      assert.throws(
+        () => writeDerived({ log, dir, frameSha256: 'a'.repeat(64), drawOrderSha256: 'b'.repeat(64) }),
+        /the captures directory does not match the log/
+      );
+    });
+  });
+
+  test('a captured attempt whose file is missing is a problem', () => {
+    inDir((dir) => {
+      const log = emptyLog();
+      log.attempts.push(captured('gone', 'gone.html'));
+      const problems = checkCaptureFiles(log, join(dir, 'captures'));
+      assert.ok(problems.some((p) => /recorded as captured but gone.html is not on disk/.test(p)));
+    });
+  });
+
+  test('two captured attempts naming one file is a problem', () => {
+    inDir((dir) => {
+      const log = emptyLog();
+      writeFileSync(join(dir, 'captures', 'shared.html'), '<html></html>');
+      log.attempts.push(captured('one', 'shared.html'), captured('two', 'shared.html'));
+      assert.ok(checkCaptureFiles(log, join(dir, 'captures')).some((p) => /two captured attempts name/.test(p)));
+    });
+  });
+
+  test('a matching directory and log pass', () => {
+    inDir((dir) => {
+      const log = emptyLog();
+      writeFileSync(join(dir, 'captures', 'real.html'), '<html></html>');
+      log.attempts.push(captured('real', 'real.html'));
+      assert.deepEqual(checkCaptureFiles(log, join(dir, 'captures')), []);
+    });
+  });
+
+  test('a capture-blocked attempt owns no file, and that is not an orphan', () => {
+    inDir((dir) => {
+      const log = emptyLog();
+      log.attempts.push({
+        agency: 'TPK', category: 'enquiry-or-contact', status: 'capture-blocked',
+        approval: APPROVAL.PENDING, url: 'https://w.govt.nz/blocked',
+        exclusionReason: 'the capture harness could not retrieve the page',
+        eligibility: Object.fromEntries(ELIGIBILITY_CRITERIA.map((c) => [c, null])),
+        attemptedModes: [{ browserMode: 'headless' }, { browserMode: 'headed' }],
+      });
+      assert.deepEqual(checkCaptureFiles(log, join(dir, 'captures')), []);
+    });
+  });
+});
+
+/**
+ * A capture-blocked attempt makes no eligibility claim, and a rejected one is superseded by id.
+ *
+ * capture-v1.0.6. `c-0291` asserted `publiclyReachableWithoutSigningIn: false` on the strength of
+ * an automated 403. It is preserved, rejected, and its replacement must name it.
+ */
+describe('capture-blocked leaves eligibility unknown', () => {
+  /** Candidate attempts only; discovery records share the attempts array. */
+  const candidates = (log) => log.attempts.filter((a) => a.status !== 'discovery');
+  const blocked = (over = {}) => ({
+    examinedAt: '2026-09-26T00:00:00Z', agency: 'TPK', website: 'https://w.govt.nz/',
+    url: 'https://w.govt.nz/feedback', status: 'capture-blocked',
+    category: 'enquiry-or-contact',
+    exclusionReason: 'the capture harness could not retrieve the page: http 403',
+    eligibility: Object.fromEntries(ELIGIBILITY_CRITERIA.map((c) => [c, null])),
+    attemptedModes: [{ browserMode: 'headless' }, { browserMode: 'headed' }],
+    ...over,
+  });
+
+  test('a capture-blocked attempt asserting eligibility is refused', () => {
+    const log = emptyLog();
+    prepareSet(log, 'TPK', 'enquiry-or-contact', ['https://w.govt.nz/feedback']);
+    assert.throws(
+      () => appendAttempt(log, blocked({
+        eligibility: {
+          ...Object.fromEntries(ELIGIBILITY_CRITERIA.map((c) => [c, null])),
+          publiclyReachableWithoutSigningIn: false,
+        },
+      })),
+      /must leave eligibility.publiclyReachableWithoutSigningIn null/
+    );
+  });
+
+  test('a capture-blocked attempt must say which modes were attempted', () => {
+    const log = emptyLog();
+    prepareSet(log, 'TPK', 'enquiry-or-contact', ['https://w.govt.nz/feedback']);
+    assert.throws(
+      () => appendAttempt(log, blocked({ attemptedModes: [] })),
+      /must record which browser modes were attempted/
+    );
+  });
+
+  test('a rejected attempt is preserved, and its replacement must name it', () => {
+    const log = emptyLog();
+    prepareSet(log, 'TPK', 'enquiry-or-contact', ['https://w.govt.nz/feedback']);
+    appendAttempt(log, blocked());
+    const first = candidates(log).at(-1);
+    first.approval = APPROVAL.REJECTED;
+    first.approvalNote = 'the eligibility claim was unsupported';
+
+    // A replacement that does not name it is refused, and the refusal says which id to use.
+    assert.throws(
+      () => appendAttempt(log, blocked({ examinedAt: '2026-09-26T01:00:00Z' })),
+      new RegExp(`supersedesAttemptId set to ${first.id}`)
+    );
+
+    appendAttempt(log, blocked({
+      examinedAt: '2026-09-26T01:00:00Z', supersedesAttemptId: first.id,
+    }));
+    assert.equal(log.attempts.find((a) => a.id === first.id).approval, APPROVAL.REJECTED);
+    assert.equal(log.attempts.find((a) => a.id === first.id).status, 'capture-blocked');
+    assert.equal(isSuperseded(log, first), true);
+  });
+});
+
+/**
+ * The headed fallback may not become evasion.
+ *
+ * capture-v1.0.6. Retrying once in headed Chromium is defensible only because it changes nothing
+ * about how the harness presents itself: same browser, fresh context, no stored state, no invented
+ * user agent, no fingerprint patching, and no interaction with any challenge. A challenge that
+ * never appears is not a challenge that was answered.
+ *
+ * That distinction lives in what the code does NOT do, which no behavioural test can observe. So it
+ * is asserted against the source, in the same spirit as the guard that refuses analyser imports.
+ */
+describe('the capture path cannot evade a challenge', () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const sources = ['capture.mjs', 'cli-capture.mjs'].map((f) => ({
+    file: f,
+    text: readFileSync(join(here, '..', f), 'utf8'),
+  }));
+
+  /** Strip comments, so prose about what is forbidden does not trip the checks. */
+  const code = (text) =>
+    text.replace(/\/\*[\s\S]*?\*\//g, '').split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
+
+  const FORBIDDEN = [
+    [/storageState/, 'a saved cookie or storage state'],
+    // Setting a user agent, not recording one: `userAgent: record.userAgent` in a provenance
+    // record is exactly what the protocol requires.
+    [/newContext\(\{[^}]*userAgent/s, 'a custom user agent on the browser context'],
+    [/launch\(\{[^}]*userAgent/s, 'a custom user agent at launch'],
+    [/setUserAgent|--user-agent/, 'a user agent override'],
+    [/puppeteer-extra|playwright-extra|stealth/i, 'a stealth or fingerprint plugin'],
+    [/addInitScript/, 'an init script, which could patch the fingerprint'],
+    [/--disable-blink-features=AutomationControlled/, 'an automation-flag workaround'],
+    [/\.type\(|\.fill\(|keyboard\.|\.press\(/, 'typing'],
+    [/\.click\(|\.tap\(|\.check\(|\.selectOption\(/, 'clicking, which could answer a challenge'],
+    [/recaptcha.*solve|solveCaptcha|2captcha|anticaptcha/i, 'a captcha-solving service'],
+  ];
+
+  for (const { file, text } of sources) {
+    test(`${file} does none of the forbidden things`, () => {
+      const body = code(text);
+      for (const [pattern, what] of FORBIDDEN) {
+        assert.ok(!pattern.test(body), `${file} appears to use ${what}: ${pattern}`);
+      }
+    });
+  }
+
+  test('the fallback launches the same browser, only not headless', () => {
+    const cli = code(sources.find((s) => s.file === 'cli-capture.mjs').text);
+    // Both modes are plain chromium.launch with nothing but the headless flag.
+    assert.match(cli, /chromium\.launch\(\{\s*headless:\s*true\s*\}\)/);
+    assert.match(cli, /chromium\.launch\(\{\s*headless:\s*false\s*\}\)/);
+    // And exactly one headed attempt, so a barred page is not retried indefinitely.
+    assert.equal((cli.match(/headless:\s*false/g) ?? []).length, 1);
+  });
+
+  test('each capture gets a fresh context with no persistent profile', () => {
+    const capture = code(sources.find((s) => s.file === 'capture.mjs').text);
+    assert.match(capture, /browser\.newContext\(\{\s*viewport/);
+    assert.ok(!/launchPersistentContext/.test(capture), 'no persistent profile');
   });
 });

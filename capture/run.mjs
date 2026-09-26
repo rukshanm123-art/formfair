@@ -15,7 +15,7 @@
  */
 
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync, writeFileSync, renameSync, unlinkSync, mkdirSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, renameSync, unlinkSync, mkdirSync, readdirSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { LEDGER_HEADER, recordExamination, CATEGORIES } from './capture.mjs';
 import { POLICY } from './politeness.mjs';
@@ -83,8 +83,24 @@ function checkAttempt(attempt) {
   if (!attempt.agency) problems.push('agency is required');
   if (!attempt.website) problems.push('website is required');
   if (!attempt.url) problems.push('url is required');
-  if (!['captured', 'excluded', 'failed', 'discovery'].includes(attempt.status)) {
-    problems.push('status must be captured, excluded, failed or discovery');
+  if (!['captured', 'excluded', 'failed', 'capture-blocked', 'discovery'].includes(attempt.status)) {
+    problems.push('status must be captured, excluded, failed, capture-blocked or discovery');
+  }
+  // capture-v1.0.6. `capture-blocked` says the harness could not retrieve the page, and says
+  // nothing about whether the public can. Conflating the two produced an eligibility claim the
+  // evidence did not support, so this status must leave every criterion unknown.
+  if (attempt.status === 'capture-blocked') {
+    for (const c of ELIGIBILITY_CRITERIA) {
+      if (attempt.eligibility?.[c] !== null) {
+        problems.push(
+          `a capture-blocked attempt must leave eligibility.${c} null: automated retrievability ` +
+            'and public eligibility are different facts'
+        );
+      }
+    }
+    if (!Array.isArray(attempt.attemptedModes) || attempt.attemptedModes.length === 0) {
+      problems.push('a capture-blocked attempt must record which browser modes were attempted');
+    }
   }
   if (attempt.status === 'discovery') {
     if (!DISCOVERY_METHODS.includes(attempt.discoveryKind)) {
@@ -993,6 +1009,13 @@ export function writeDerived({ log, dir, frameSha256, drawOrderSha256, synthetic
   mkdirSync(capturesDir, { recursive: true });
   const ledgerPath = join(capturesDir, 'selection-ledger.csv');
   writeFileSync(ledgerPath, deriveLedger(log), 'utf8');
+
+  // capture-v1.0.6: a hard failure, not a held draft. An orphaned capture file means the
+  // directory contains something the log does not account for.
+  const fileProblems = checkCaptureFiles(log, capturesDir);
+  if (fileProblems.length) {
+    throw new Error(`the captures directory does not match the log:\n  ${fileProblems.join('\n  ')}`);
+  }
   let draftPath = null;
   try {
     const draft = deriveDraft(log, { frameSha256, drawOrderSha256, synthetic });
@@ -1739,4 +1762,43 @@ export function corpusBlockers(log) {
   }
 
   return blockers;
+}
+
+/**
+ * Official capture files and logged captures must correspond one to one.
+ *
+ * capture-v1.0.6. A blocked response left a Cloudflare interstitial in the captures directory
+ * that no attempt record owned. The seal hashes only files the draft names, so it would not have
+ * been sealed - but an orphan in that directory looks like corpus material, and nothing detected
+ * it. The reverse is equally wrong: a `captured` attempt whose file is missing.
+ */
+export function checkCaptureFiles(log, capturesDir) {
+  const problems = [];
+  const root = resolve(capturesDir);
+  let present;
+  try {
+    present = readdirSync(root).filter((f) => f.endsWith('.html'));
+  } catch {
+    return problems; // no captures directory yet
+  }
+  const owned = new Map();
+  for (const a of log.attempts) {
+    if (a.status !== 'captured' || !a.file) continue;
+    if (owned.has(a.file)) problems.push(`two captured attempts name ${a.file}`);
+    owned.set(a.file, a);
+  }
+  for (const file of present) {
+    if (!owned.has(file)) {
+      problems.push(
+        `${file} is in the captures directory but no captured attempt owns it. A file that looks ` +
+          'like corpus material and is not must be quarantined, not left beside the real captures.'
+      );
+    }
+  }
+  for (const [file, attempt] of owned) {
+    if (!present.includes(file)) {
+      problems.push(`${attempt.id} is recorded as captured but ${file} is not on disk`);
+    }
+  }
+  return problems;
 }

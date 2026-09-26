@@ -14,7 +14,7 @@ import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, readFileSync, readdirSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -294,6 +294,113 @@ describe('capture CLI', () => {
       assert.equal((await run(args)).status, 0);
       const again = await run([...args.slice(0, -1), '--page-id', 'dup-002', '--synthetic']);
       assert.notEqual(again.status, 0, 'a second attempt at the same URL for one agency must be refused');
+    });
+  });
+});
+
+/**
+ * Automated retrievability is not public eligibility.
+ *
+ * capture-v1.0.6, triggered by the first held-out automated-retrieval block. The Ministry of
+ * Health feedback page returned HTTP 403 with a Cloudflare interstitial to headless Chromium, and
+ * the CLI recorded `publiclyReachableWithoutSigningIn: false` - an assertion about the public that
+ * the evidence did not support. In a fresh context with no stored site data, headed Chromium
+ * received HTTP 200 and the form.
+ *
+ * Three separate faults sat behind that one record: the eligibility inference, the protocol saying
+ * "normal Chromium user agent" while the implementation launched headless (whose unmodified agent
+ * says HeadlessChrome), and the markup being written before the exclusion decision, which left an
+ * interstitial in the captures directory that no attempt owned.
+ */
+describe('a blocked capture is not an eligibility finding', () => {
+  let barrier;
+  let barrierOrigin;
+  /** Which modes the server should serve a challenge to, set per test. */
+  let blockModes = new Set();
+
+  const CHALLENGE = `<!doctype html><html><head><title>Just a moment...</title></head><body>
+    <h1>Checking your browser</h1>
+    <script src="https://challenges.cloudflare.com/turnstile/v0/api.js"></script>
+    </body></html>`;
+  const REAL_FORM = `<!doctype html><html><body><form action="/submit" method="post">
+    <label for="n">Name</label><input id="n" name="name" type="text" maxlength="255" required>
+    <label for="f">Feedback</label><textarea id="f" name="feedback" required></textarea>
+    </form></body></html>`;
+
+  before(async () => {
+    barrier = createServer((req, res) => {
+      const headless = /HeadlessChrome/.test(req.headers['user-agent'] ?? '');
+      const mode = headless ? 'headless' : 'headed';
+      if (blockModes.has(mode)) {
+        res.writeHead(403, { 'content-type': 'text/html' });
+        return res.end(CHALLENGE);
+      }
+      res.writeHead(200, { 'content-type': 'text/html' });
+      res.end(REAL_FORM);
+    });
+    await new Promise((r) => barrier.listen(0, '127.0.0.1', r));
+    barrierOrigin = `http://127.0.0.1:${barrier.address().port}`;
+  });
+  after(() => { barrier?.closeAllConnections?.(); barrier?.close(); });
+
+  const attemptCapture = async (dir, pageId) => {
+    await lockSet(dir, 'A', 'enquiry-or-contact', [`${barrierOrigin}/feedback`]);
+    return run(['capture', '--out', dir, '--agency', 'A', '--website', barrierOrigin,
+      '--url', `${barrierOrigin}/feedback`, '--page-id', pageId,
+      '--category', 'enquiry-or-contact', '--evidence', 'has a visible name field', '--synthetic']);
+  };
+
+  test('headless blocked and headed succeeding yields one official capture', async () => {
+    blockModes = new Set(['headless']);
+    await inTemp(async (dir) => {
+      const r = await attemptCapture(dir, 'headed-rescue');
+      assert.equal(r.status, 0, r.stderr);
+      assert.match(r.stderr, /headless Chromium was access-barred/);
+
+      const log = JSON.parse(readFileSync(join(dir, 'capture-log.json'), 'utf8'));
+      const captured = log.attempts.filter((a) => a.status === 'captured');
+      assert.equal(captured.length, 1, 'exactly one official capture');
+      assert.equal(captured[0].browserMode, 'headed');
+      // Both attempts are recorded, so the record says which mode produced the page.
+      assert.equal(captured[0].attemptedModes.length, 2);
+      assert.deepEqual(captured[0].attemptedModes.map((m) => m.browserMode), ['headless', 'headed']);
+      assert.match(captured[0].attemptedModes[0].userAgent, /HeadlessChrome/);
+      assert.doesNotMatch(captured[0].attemptedModes[1].userAgent, /HeadlessChrome/);
+      // One file, and it is the form rather than the challenge.
+      const files = readdirSync(join(dir, 'captures')).filter((f) => f.endsWith('.html'));
+      assert.deepEqual(files, ['headed-rescue.html']);
+      const html = readFileSync(join(dir, 'captures', 'headed-rescue.html'), 'utf8');
+      assert.match(html, /name="name"/);
+      assert.doesNotMatch(html, /Just a moment/);
+    });
+  });
+
+  test('both modes blocked yields capture-blocked, never eligibility false', async () => {
+    blockModes = new Set(['headless', 'headed']);
+    await inTemp(async (dir) => {
+      const r = await attemptCapture(dir, 'both-blocked');
+      assert.notEqual(r.status, 0);
+      assert.match(r.stderr, /capture-blocked/);
+
+      const log = JSON.parse(readFileSync(join(dir, 'capture-log.json'), 'utf8'));
+      const blocked = log.attempts.find((a) => a.status === 'capture-blocked');
+      assert.ok(blocked, 'the outcome is its own status');
+      // The whole point: no claim about the public is made.
+      for (const [criterion, value] of Object.entries(blocked.eligibility)) {
+        assert.equal(value, null, `${criterion} must stay unknown`);
+      }
+      assert.match(blocked.exclusionReason, /makes no claim about public eligibility/);
+      assert.deepEqual(blocked.attemptedModes.map((m) => m.browserMode), ['headless', 'headed']);
+      assert.equal(log.attempts.filter((a) => a.status === 'captured').length, 0);
+    });
+  });
+
+  test('a blocked response leaves no official capture file', async () => {
+    blockModes = new Set(['headless', 'headed']);
+    await inTemp(async (dir) => {
+      await attemptCapture(dir, 'no-orphan');
+      const files = readdirSync(join(dir, 'captures')).filter((f) => f.endsWith('.html'));
+      assert.deepEqual(files, [], `the challenge must not be written: ${files.join(', ')}`);
     });
   });
 });

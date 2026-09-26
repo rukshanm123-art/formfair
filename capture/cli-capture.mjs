@@ -26,7 +26,7 @@ import {
   readLog, writeLog, appendAttempt, writeDerived, ELIGIBILITY_CRITERIA, APPROVAL,
   recordCandidates, lockCandidateSet, categorySettled, approveCandidateSet,
   supersedeCandidateSet, publishProvenance, exhaustAgency, EXHAUSTION_REASON,
-  agenciesAwaitingExhaustion, findRobotsCheck, recordRobotsCheck,
+  agenciesAwaitingExhaustion, findRobotsCheck, recordRobotsCheck, checkCaptureFiles,
   issueDiscoveryPermit, consumeDiscoveryPermit, findOpenPermit,
   unresolvedDiscoveryRounds, openDiscoveryPermits, robotsCheckIsFresh, isDiscoverySuperseded,
   reopenCandidateSet, closeDiscoveryPermit, permitAudit, PERMIT_DISPOSITIONS, corpusBlockers,
@@ -172,13 +172,21 @@ async function doCapture() {
 
   await pacer.beforeNavigation(verdict.crawlDelay ?? null);
 
+  // capture-v1.0.6. One fixed fallback: if headless Chromium is access-barred, the same page is
+  // attempted once with headed Chromium in a fresh context. This is not a bypass - it is the same
+  // browser with no persistent profile, no imported cookies, no custom user agent, no stealth or
+  // fingerprint modification, and no interaction with any challenge. A challenge that never
+  // appears is not a challenge that was answered. If headed is barred too, the outcome is
+  // `capture-blocked`, and no further workaround is attempted.
+  const attemptedModes = [];
   let record = null;
   let lastError = null;
   for (let attemptNo = 1; attemptNo <= 1 + POLICY.transientRetries; attemptNo++) {
     try {
       record = await capturePage({
-        browserFactory: () => chromium.launch(),
+        browserFactory: () => chromium.launch({ headless: true }),
         url, agency, website, pageId, category, outDir: capturesDir, settleMs,
+        browserMode: 'headless',
       });
       break;
     } catch (error) {
@@ -202,27 +210,83 @@ async function doCapture() {
     die(`failed and recorded: ${lastError?.message}`);
   }
 
-  if (record.httpStatus === 429) {
-    die('HTTP 429 received. The run stops here by policy. Respect Retry-After before resuming.');
+  if (record) {
+    attemptedModes.push({
+      browserMode: record.browserMode, httpStatus: record.httpStatus,
+      userAgent: record.userAgent, accessBarriers: record.accessBarriers,
+    });
   }
 
-  // capture-v1.0.5. Only an ACCESS barrier excludes: a page whose form cannot be read without
-  // authenticating or interacting with a challenge. A reCAPTCHA guarding submission, or password
-  // fields on a public registration form, are recorded as properties of the capture - the first
-  // because the protocol never submits, the second because a registration form necessarily has
-  // them and is the protocol's highest-priority category.
-  if (record.accessBarriers.length > 0) {
+  // Two kinds of access barrier, which mean different things.
+  //
+  //   a sign-in wall        the public cannot read the form without an account. A genuine
+  //                         eligibility failure under criterion one.
+  //   a challenge or 4xx    may be bot management rather than a public barrier. Retried once in
+  //                         headed Chromium; if still barred, `capture-blocked`.
+  //
+  // Collapsing them is what produced an eligibility claim the evidence did not support.
+  const isAuthBarrier = (b) => /sign-in wall/.test(b);
+  const authBarriers = (record?.accessBarriers ?? []).filter(isAuthBarrier);
+  const automationBarriers = (record?.accessBarriers ?? []).filter((b) => !isAuthBarrier(b));
+
+  if (record && authBarriers.length > 0) {
     appendAttempt(log, {
       ...base, status: 'excluded', category, finalUrl: record.finalUrl,
-      exclusionReason: `not publicly reachable: ${record.accessBarriers.join(', ')}`,
+      exclusionReason: `not publicly reachable: ${authBarriers.join(', ')}`,
       eligibility: { ...Object.fromEntries(ELIGIBILITY_CRITERIA.map((c) => [c, null])),
         publiclyReachableWithoutSigningIn: false },
+      attemptedModes,
       politeness: { robots: verdict.reason, userAgent: record.userAgent },
     });
     writeLog(logPath, log);
     writeDerived({ log, dir, frameSha256: flag('frame-sha256'), drawOrderSha256: flag('draw-order-sha256'), synthetic: has('synthetic') });
-    console.log(`excluded: ${record.accessBarriers.join(', ')}`);
+    console.log(`excluded: ${authBarriers.join(', ')}`);
     return;
+  }
+
+  if (record && automationBarriers.length > 0) {
+    console.error(
+      `headless Chromium was access-barred (${record.accessBarriers.join(', ')}); ` +
+        'retrying once with headed Chromium in a fresh context'
+    );
+    await pacer.beforeNavigation(verdict.crawlDelay ?? null);
+    try {
+      const headed = await capturePage({
+        browserFactory: () => chromium.launch({ headless: false }),
+        url, agency, website, pageId, category, outDir: capturesDir, settleMs,
+        browserMode: 'headed',
+      });
+      attemptedModes.push({
+        browserMode: headed.browserMode, httpStatus: headed.httpStatus,
+        userAgent: headed.userAgent, accessBarriers: headed.accessBarriers,
+      });
+      record = headed;
+    } catch (error) {
+      attemptedModes.push({ browserMode: 'headed', error: error.message.split('\n')[0] });
+    }
+  }
+
+  // Both modes barred: the harness could not retrieve the page. That is recorded as its own
+  // outcome, with every eligibility criterion left unknown, because nothing here establishes
+  // whether the public can reach it.
+  if (record && record.blocked && record.accessBarriers.some((b) => !isAuthBarrier(b))) {
+    appendAttempt(log, {
+      ...base, status: 'capture-blocked', category, finalUrl: record.finalUrl,
+      exclusionReason:
+        `the capture harness could not retrieve the page: ${record.accessBarriers.join(', ')}. ` +
+        'Attempted in headless and headed Chromium, both access-barred. This records automated ' +
+        'retrievability only and makes no claim about public eligibility.',
+      eligibility: Object.fromEntries(ELIGIBILITY_CRITERIA.map((c) => [c, null])),
+      attemptedModes,
+      politeness: { robots: verdict.reason, userAgent: record.userAgent },
+    });
+    writeLog(logPath, log);
+    writeDerived({ log, dir, frameSha256: flag('frame-sha256'), drawOrderSha256: flag('draw-order-sha256'), synthetic: has('synthetic') });
+    die(`capture-blocked: ${record.accessBarriers.join(', ')} in both browser modes`);
+  }
+
+  if (record.httpStatus === 429) {
+    die('HTTP 429 received. The run stops here by policy. Respect Retry-After before resuming.');
   }
 
   appendAttempt(log, {
@@ -237,6 +301,7 @@ async function doCapture() {
       reachedFromFrameWebsiteForThatAgency: true,
       asksForTheNameOfANaturalPerson: true,
     },
+    attemptedModes,
     politeness: { robots: verdict.reason, userAgent: record.userAgent, settleMs },
   });
   writeLog(logPath, log);

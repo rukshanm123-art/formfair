@@ -1994,3 +1994,77 @@ PDFs for the Ministry of Health. No eligible HTML service-application form has y
 
 That is an interim descriptive observation about three agencies, not a prevalence estimate, and the
 study has measured nothing about how commonly government contact forms carry bot protection.
+
+## Amendment 25: automated retrievability is not public eligibility
+
+**Dated 26 September 2026.** `capture-v1.0.6`. Moves no earlier tag.
+
+**Triggered by the first held-out automated-retrieval block, before any FormFair analysis and
+before the attempt was approved.** The Ministry of Health feedback page — the first eligible-looking
+HTML form with a personal-name field in this scan — was served HTTP 403 and a Cloudflare
+interstitial when the capture harness requested it. The CLI recorded
+`publiclyReachableWithoutSigningIn: false`.
+
+That claim is not supported by the evidence. Probed afterwards in a **fresh context with no stored
+site data**, the two modes differ:
+
+```
+headless: 403  "Just a moment..."               nameField: false  interstitial: true
+headed:   200  "Feedback | Ministry of Health"   nameField: true   maxlength: "255"
+```
+
+Changing the user-agent string alone does not resolve the 403 — a plain `curl` and a `curl` sending
+a headed-Chrome agent both receive it — so the block is not user-agent matching. That is as much as
+the experiment establishes; it does not show what Cloudflare actually detected.
+
+### Three faults behind one record
+
+1. **An unsupported eligibility claim.** An automated client receiving a 403 shows the harness
+   could not retrieve the page. It does not show the public cannot reach it.
+2. **A stated-versus-actual mismatch.** The politeness policy says "the normal Chromium user agent,
+   unmodified and recorded", and the implementation launched default **headless** Chromium, whose
+   unmodified agent reads `HeadlessChrome/153`. The recorded agent is what exposed it.
+3. **An orphaned capture file.** `capturePage` wrote the rendered document *before* the CLI decided
+   whether to exclude, so the interstitial was written to
+   `captures/health-govt-nz-feedback.html` — 28,754 bytes titled "Just a moment...", SHA-256
+   `c6ad4b95…` — owned by no attempt record. The seal hashes only files the draft names, so it
+   would not have been sealed; but a file that looks like corpus material and is not must not sit
+   beside the real captures.
+
+### The corrections
+
+**`capture-blocked` is its own outcome.** It states that the harness could not retrieve the page and
+makes no claim about public access: every eligibility criterion must be left `null`, which is
+enforced, and the attempt must record which browser modes were tried.
+
+**A sign-in wall remains an exclusion.** The two kinds of barrier are now distinguished, because
+they mean different things: credentials required is a genuine failure of criterion one, while a
+challenge or a 4xx may be bot management. Collapsing them is what produced the unsupported claim.
+
+**One fixed headed fallback.** If headless Chromium is access-barred, the page is attempted once
+more with headed Chromium in a fresh context: no persistent profile, no imported cookies, no custom
+user agent, no stealth or fingerprint modification, no interaction with any challenge, and nothing
+typed or submitted. This is not a bypass — a challenge that never appears is not a challenge that
+was answered. If headed is barred too, the outcome is `capture-blocked` and **no further workaround
+is attempted**. `browserMode`, the real user agent and both attempts are recorded.
+
+**Markup is written only for a page that is not access-barred**, and a gate requires official
+`.html` files and logged `captured` attempts to correspond **one to one** — in both directions. An
+orphan makes draft generation fail outright rather than merely withholding the draft.
+
+### The record as it stands
+
+`c-0291` is **rejected and preserved unchanged**, its reason stating that automated retrievability
+and public eligibility are different facts. The interstitial is **quarantined**, not deleted, at
+`quarantine/health-govt-nz-feedback.cloudflare-interstitial.html` with its original path, hash, byte
+count and relationship to `c-0291` recorded beside it. Any replacement attempt must name `c-0291`
+via `supersedesAttemptId`.
+
+Sixteen tests: headless blocked with headed succeeding yields exactly one official capture recording
+both modes; both modes blocked yields `capture-blocked` with eligibility unknown; a blocked response
+leaves no file; an orphan is detected in both directions and fails draft generation; a
+`capture-blocked` attempt asserting eligibility is refused, as is one not naming its modes; a
+rejected attempt is preserved and its replacement must name it; and the capture path is asserted
+against its own source to use no stored state, no invented user agent, no stealth plugin, no init
+script, no typing and no clicking — because that distinction lives in what the code does *not* do,
+which no behavioural test can observe. The capture package has 279 tests.
