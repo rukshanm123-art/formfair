@@ -871,6 +871,12 @@ export function deriveDraft(log, { frameSha256, drawOrderSha256, selectionLedger
       // captured twice, could legitimately differ.
       loadState: a.loadState ?? 'load',
       outstandingRequests: a.outstandingRequests ?? [],
+      // capture-v1.0.5. Carried into the sealed corpus: a reader comparing two pages needs to
+      // know which carried submission protection and which had credential fields, because those
+      // are properties of the form being measured, not reasons it was excluded.
+      accessBarriers: a.accessBarriers ?? [],
+      submissionProtection: a.submissionProtection ?? [],
+      authenticationSignals: a.authenticationSignals ?? [],
     }));
   // A draft carrying null hashes would be refused by the seal anyway, but writing one at
   // all invites it being read as a real artefact.

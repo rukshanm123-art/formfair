@@ -523,3 +523,186 @@ describe('the load deviation is carried, not just recorded', () => {
     });
   });
 });
+
+/**
+ * A challenge or a password field is not an access barrier.
+ *
+ * capture-v1.0.5, triggered by a held-out observation. The Ministry of Health's feedback form is
+ * ordinary HTML with a required `name` field, readable without interacting with anything - and
+ * the detector would have excluded it as "not publicly reachable" because the page loads Google
+ * reCAPTCHA. The same flat list treated any password field as blocking, which would have excluded
+ * every public registration form, the protocol's highest-priority category.
+ *
+ * What makes a page ineligible is the intended form being unreadable without authenticating or
+ * answering a challenge. Submission protection and credential fields are properties of the form
+ * being measured, not reasons to discard it, and the protocol never types or submits.
+ */
+describe('access barriers, submission protection and authentication signals', () => {
+  let server;
+  let origin;
+  const PAGES = {
+    '/contact-with-recaptcha': `<!doctype html><html><body>
+      <form action="/search"><input type="search" name="query"></form>
+      <form action="/submit" method="post">
+        <label for="n">Name</label><input id="n" name="name" type="text" maxlength="255" required>
+        <label for="e">Email</label><input id="e" name="email" type="email" required>
+        <label for="f">Feedback</label><textarea id="f" name="feedback" required></textarea>
+        <script src="https://www.google.com/recaptcha/api.js"></script>
+      </form></body></html>`,
+    '/register': `<!doctype html><html><body><form action="/create" method="post">
+      <label for="fn">Full name</label><input id="fn" name="fullName" type="text" pattern="[A-Za-z]+">
+      <label for="e">Email</label><input id="e" name="email" type="email">
+      <label for="p">Password</label><input id="p" name="password" type="password">
+      <label for="p2">Confirm password</label><input id="p2" name="confirm" type="password">
+      </form></body></html>`,
+    '/challenge-wall': `<!doctype html><html><body><h1>Checking your browser</h1>
+      <script src="https://challenges.cloudflare.com/turnstile/v0/api.js"></script>
+      </body></html>`,
+    '/signin-wall': `<!doctype html><html><body><h1>Please sign in</h1>
+      <form action="/login" method="post"><input name="user" type="text"><input name="pw" type="password"></form>
+      </body></html>`,
+  };
+
+  before(async () => {
+    server = createServer((req, res) => {
+      const path = req.url.split('?')[0];
+      if (path === '/forbidden') { res.writeHead(403, { 'content-type': 'text/html' }); return res.end('<html><body>no</body></html>'); }
+      if (path === '/unauthorized') { res.writeHead(401, { 'content-type': 'text/html' }); return res.end('<html><body>no</body></html>'); }
+      res.writeHead(200, { 'content-type': 'text/html' });
+      res.end(PAGES[path] ?? '<html><body>ok</body></html>');
+    });
+    await new Promise((r) => server.listen(0, '127.0.0.1', r));
+    origin = `http://127.0.0.1:${server.address().port}`;
+  });
+  after(() => { server?.closeAllConnections?.(); server?.close(); });
+
+  const capture = (dir, path, pageId) => capturePage({
+    browserFactory, url: `${origin}${path}`, agency: 'Synthetic Agency', website: origin,
+    pageId, category: 'enquiry-or-contact', outDir: join(dir, 'captures'), settleMs: 50,
+    loadEventTimeoutMs: 2000,
+  });
+
+  test('a visible contact form with reCAPTCHA is captured, and the protection recorded', async () => {
+    await inTemp(async (dir) => {
+      const record = await capture(dir, '/contact-with-recaptcha', 'contact-recaptcha');
+      assert.deepEqual(record.accessBarriers, [], 'a readable form is not behind a barrier');
+      assert.deepEqual(record.submissionProtection, ['recaptcha']);
+      assert.deepEqual(record.authenticationSignals, []);
+      // The name field survived into the saved markup, which is the point of not excluding it.
+      const html = readFileSync(join(dir, 'captures', 'contact-recaptcha.html'), 'utf8');
+      assert.match(html, /name="name"/);
+      assert.match(html, /maxlength="255"/);
+    });
+  });
+
+  test('a public registration form with password fields is not blocked', async () => {
+    await inTemp(async (dir) => {
+      const record = await capture(dir, '/register', 'register-public');
+      assert.deepEqual(record.accessBarriers, [], 'account registration is the highest-priority category');
+      assert.equal(record.authenticationSignals.length, 1);
+      assert.match(record.authenticationSignals[0], /2 password field\(s\)/);
+      assert.match(record.authenticationSignals[0], /password, confirm/);
+    });
+  });
+
+  test('a challenge interstitial with nothing behind it is an access barrier', async () => {
+    await inTemp(async (dir) => {
+      const record = await capture(dir, '/challenge-wall', 'challenge-wall');
+      assert.ok(record.accessBarriers.some((b) => /interstitial/.test(b)), JSON.stringify(record.accessBarriers));
+      assert.deepEqual(record.submissionProtection, [], 'it protects nothing; it replaces everything');
+    });
+  });
+
+  test('a real sign-in wall is an access barrier', async () => {
+    await inTemp(async (dir) => {
+      const record = await capture(dir, '/signin-wall', 'signin-wall');
+      assert.ok(record.accessBarriers.includes('sign-in wall'), JSON.stringify(record.accessBarriers));
+      // And the credential fields are still recorded, as a property rather than the reason.
+      assert.equal(record.authenticationSignals.length, 1);
+    });
+  });
+
+  test('an HTTP 401 or 403 is an access barrier', async () => {
+    await inTemp(async (dir) => {
+      const forbidden = await capture(dir, '/forbidden', 'forbidden-403');
+      assert.ok(forbidden.accessBarriers.includes('http 403'));
+      const unauthorized = await capture(dir, '/unauthorized', 'unauthorized-401');
+      assert.ok(unauthorized.accessBarriers.includes('http 401'));
+    });
+  });
+
+  test('nothing is typed and nothing is submitted, on a form the harness now keeps', async () => {
+    await inTemp(async (dir) => {
+      await capture(dir, '/contact-with-recaptcha', 'no-typing');
+      const html = readFileSync(join(dir, 'captures', 'no-typing.html'), 'utf8');
+      // A value attribute would be the only trace typing could leave in the saved markup.
+      assert.doesNotMatch(html, /name="name"[^>]*value=/);
+      assert.doesNotMatch(html, /name="email"[^>]*value=/);
+      // And the textarea is still empty.
+      assert.match(html, /<textarea[^>]*id="f"[^>]*>\s*<\/textarea>/);
+    });
+  });
+});
+
+/**
+ * The distinction that separates a registration form from a login wall.
+ *
+ * capture-v1.0.5. A login form's username box is part of the barrier, not the form the study
+ * wants, so content inputs are counted outside any form carrying a password field. That alone
+ * would classify a registration form as a wall, since its name field sits beside the password.
+ *
+ * What tells them apart is that the registration form asks for a person's name - which is this
+ * study's subject. So a password-bearing form containing a name field is never a wall, however
+ * the surrounding page is worded, and the highest-priority category cannot be excluded by a
+ * stray "already have an account? Log in" link.
+ */
+describe('a registration form is not a sign-in wall', () => {
+  let server;
+  let origin;
+  const PAGES = {
+    // A registration form on a page that also invites existing users to sign in.
+    '/register-with-signin-link': `<!doctype html><html><body>
+      <h1>Create an account</h1><p>Already registered? Please sign in.</p>
+      <form action="/create" method="post">
+        <label for="fn">Full name</label><input id="fn" name="fullName" type="text">
+        <label for="e">Email</label><input id="e" name="email" type="email">
+        <label for="p">Password</label><input id="p" name="password" type="password">
+      </form></body></html>`,
+    // A login form with no name field at all.
+    '/login-only': `<!doctype html><html><body><h1>Log in</h1>
+      <form action="/session" method="post">
+        <label for="u">Username</label><input id="u" name="username" type="text">
+        <label for="p">Password</label><input id="p" name="password" type="password">
+      </form></body></html>`,
+  };
+  before(async () => {
+    server = createServer((req, res) => {
+      res.writeHead(200, { 'content-type': 'text/html' });
+      res.end(PAGES[req.url.split('?')[0]] ?? '<html><body>ok</body></html>');
+    });
+    await new Promise((r) => server.listen(0, '127.0.0.1', r));
+    origin = `http://127.0.0.1:${server.address().port}`;
+  });
+  after(() => { server?.closeAllConnections?.(); server?.close(); });
+
+  const capture = (dir, path, pageId) => capturePage({
+    browserFactory, url: `${origin}${path}`, agency: 'Synthetic Agency', website: origin,
+    pageId, category: 'account-registration', outDir: join(dir, 'captures'), settleMs: 50,
+    loadEventTimeoutMs: 2000,
+  });
+
+  test('a registration form beside a sign-in invitation is not excluded', async () => {
+    await inTemp(async (dir) => {
+      const record = await capture(dir, '/register-with-signin-link', 'register-signin-link');
+      assert.deepEqual(record.accessBarriers, [], JSON.stringify(record.accessBarriers));
+      assert.equal(record.authenticationSignals.length, 1);
+    });
+  });
+
+  test('a login form with no name field is excluded', async () => {
+    await inTemp(async (dir) => {
+      const record = await capture(dir, '/login-only', 'login-only');
+      assert.ok(record.accessBarriers.includes('sign-in wall'), JSON.stringify(record.accessBarriers));
+    });
+  });
+});

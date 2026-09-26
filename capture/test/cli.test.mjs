@@ -256,7 +256,9 @@ describe('capture CLI', () => {
         '--url', `${origin}/locked`, '--page-id', 'locked-001',
         '--category', 'account-registration', '--evidence', 'looked like a registration form', '--synthetic']);
       assert.equal(cap.status, 0, cap.stderr);
-      assert.match(cap.stdout, /excluded: .*password field/);
+      // capture-v1.0.5: excluded because the form cannot be read without signing in, not
+      // because a password field exists. The reason is the wall, not the field.
+      assert.match(cap.stdout, /excluded: .*sign-in wall/);
       assert.match(readFileSync(join(dir, 'captures', 'selection-ledger.csv'), 'utf8'), /not publicly reachable/);
     });
   });

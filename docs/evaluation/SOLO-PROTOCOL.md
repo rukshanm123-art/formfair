@@ -1911,3 +1911,80 @@ accepted states named, which is the regression that produced this amendment.
 Six tests, one of them the table. The capture package has 255 tests. The live ledger passes
 unchanged — 51 permits, **0 problems** — with only the pending Ministry set and its four
 unassessed candidates outstanding.
+
+## Amendment 24: a challenge is not a locked door
+
+**Dated 26 September 2026.** `capture-v1.0.5`. Moves no earlier tag.
+
+**Triggered by a held-out observation, and written before it was assessed or captured.** While
+recording `enquiry-or-contact` discovery for the Ministry of Health, `www.health.govt.nz`'s
+feedback page turned out to carry an ordinary HTML form with a required text input named `name`,
+labelled "Name", `maxlength="255"`, no `pattern` and no `minlength` — readable on load without
+interacting with anything. The page also loads Google reCAPTCHA, and `detectBlocking` would have
+returned `captcha`, which the CLI turned into *"not publicly reachable"*.
+
+The same flat list treated **any password field** as blocking. That would have excluded every
+public registration form — account registration being the first category in the frozen priority
+order, and so the one most likely to contribute pages.
+
+### What the frozen criteria actually require
+
+Criterion one asks that the form be publicly reachable **without signing in**; criterion four that
+the name field be visible **without entering data or submitting**. Both hold for that page: it was
+read without authenticating and without answering a challenge, and the name field is rendered on
+load. The reCAPTCHA guards *submission*, which this protocol never performs — no code path types
+or submits, and a test asserts it from the captured markup.
+
+So the interpretation is fixed, before any assessment:
+
+- **CAPTCHA and password signals are not automatic access barriers.**
+- **reCAPTCHA, hCaptcha and Turnstile are recorded as submission-protection properties** of the
+  captured form.
+- **A page is excluded only when the intended form or name field cannot be viewed** without
+  authenticating or interacting with a challenge.
+- **A visible form protected only at submission remains eligible.**
+
+### The three signals
+
+`detectBlocking` returned one list in which everything meant exclusion. It now returns three,
+because they mean different things, and all three are carried through the capture record, the
+corpus draft, the seal and the published provenance:
+
+| field | meaning | effect |
+| --- | --- | --- |
+| `accessBarriers` | the form cannot be read — 401, 403, a challenge interstitial, a sign-in wall | excluded |
+| `submissionProtection` | a challenge guarding submission of a readable form | recorded |
+| `authenticationSignals` | password fields present on the page | recorded |
+
+Two judgements inside that deserve stating. A login form's username box is part of the barrier
+rather than the form under study, so readable content is counted *outside* any form carrying a
+password field. That alone would classify a registration form as a wall, since its name field sits
+beside the password — so what separates them is that **the registration form asks for a person's
+name**, which is this study's own subject. A password-bearing form containing a name field is
+never a wall, however the surrounding page is worded, which stops a stray "already have an
+account? Log in" link excluding the highest-priority category.
+
+Eight tests: a visible contact form with reCAPTCHA captured with the protection recorded and its
+`name` field intact in the saved markup; a public registration form with two password fields not
+blocked; a challenge interstitial excluded; a real sign-in wall excluded; 401 and 403 excluded;
+nothing typed or submitted on a form the harness now keeps; a registration form beside a sign-in
+invitation not excluded; and a login form with no name field excluded. The capture package has 263
+tests.
+
+### Scope
+
+**No previous CAPTCHA or password exclusion needs reassessing: the log contains none.** The only
+`publiclyReachableWithoutSigningIn: false` exclusion recorded so far is Te Haeata's, which was a
+robots disallow, not a challenge. **No FormFair analysis and no capture occurred before this
+interpretation was fixed** — the Health feedback page is recorded as a discovery candidate and has
+not been captured.
+
+### An interim descriptive observation
+
+Bounded discovery across the first three agencies identified **13 document-based
+service-application candidate URLs: nine PDFs and four DOCX files** — five PDFs for Te Puni Kōkiri
+via `www.tupu.nz`, four DOCX for the Family Violence and Sexual Violence Executive Board, and four
+PDFs for the Ministry of Health. No eligible HTML service-application form has yet been identified.
+
+That is an interim descriptive observation about three agencies, not a prevalence estimate, and the
+study has measured nothing about how commonly government contact forms carry bot protection.

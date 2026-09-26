@@ -294,7 +294,18 @@ export function sealCorpus({
     }
     if (!Array.isArray(page?.redirects)) problems.push(`${where}.redirects must be an array`);
     const capture = readRelative(page?.file, `${where}.file`);
-    if (capture) pages.push({ ...page, sha256: sha256(capture.bytes), bytes: capture.bytes.length });
+    if (capture) {
+      pages.push({
+        ...page,
+        // capture-v1.0.5 / solo-protocol: submission protection and credential fields are
+        // properties of the captured form, sealed with it.
+        accessBarriers: page.accessBarriers ?? [],
+        submissionProtection: page.submissionProtection ?? [],
+        authenticationSignals: page.authenticationSignals ?? [],
+        sha256: sha256(capture.bytes),
+        bytes: capture.bytes.length,
+      });
+    }
   }
 
   // solo-protocol-v1.0.1. The exhaustion records, validated and carried into the manifest.

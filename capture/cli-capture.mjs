@@ -206,19 +206,22 @@ async function doCapture() {
     die('HTTP 429 received. The run stops here by policy. Respect Retry-After before resuming.');
   }
 
-  // A page behind a sign-in, CAPTCHA or blocking control is ineligible by the protocol's
-  // first criterion, and nothing here attempts to get past one.
-  if (record.blocking.length > 0) {
+  // capture-v1.0.5. Only an ACCESS barrier excludes: a page whose form cannot be read without
+  // authenticating or interacting with a challenge. A reCAPTCHA guarding submission, or password
+  // fields on a public registration form, are recorded as properties of the capture - the first
+  // because the protocol never submits, the second because a registration form necessarily has
+  // them and is the protocol's highest-priority category.
+  if (record.accessBarriers.length > 0) {
     appendAttempt(log, {
       ...base, status: 'excluded', category, finalUrl: record.finalUrl,
-      exclusionReason: `not publicly reachable: ${record.blocking.join(', ')}`,
+      exclusionReason: `not publicly reachable: ${record.accessBarriers.join(', ')}`,
       eligibility: { ...Object.fromEntries(ELIGIBILITY_CRITERIA.map((c) => [c, null])),
         publiclyReachableWithoutSigningIn: false },
       politeness: { robots: verdict.reason, userAgent: record.userAgent },
     });
     writeLog(logPath, log);
     writeDerived({ log, dir, frameSha256: flag('frame-sha256'), drawOrderSha256: flag('draw-order-sha256'), synthetic: has('synthetic') });
-    console.log(`excluded: ${record.blocking.join(', ')}`);
+    console.log(`excluded: ${record.accessBarriers.join(', ')}`);
     return;
   }
 
@@ -227,7 +230,7 @@ async function doCapture() {
     inclusionEvidence: evidence,
     eligibility: {
       // Mechanically established by this run.
-      publiclyReachableWithoutSigningIn: record.blocking.length === 0,
+      publiclyReachableWithoutSigningIn: record.accessBarriers.length === 0,
       nameFieldVisibleWithoutEnteringDataOrSubmitting: true,
       normalHtmlOrBrowserRenderedNotPdfOrNative: true,
       // Proposed by the operator and confirmed at approval, per the frozen criteria.

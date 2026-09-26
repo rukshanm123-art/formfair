@@ -147,28 +147,113 @@ export function validatePageId(pageId) {
 }
 
 /**
- * Detects controls that would have to be bypassed to see the form, without bypassing any.
+ * Classifies what stands between a reader and the form, without touching any of it.
  *
- * The protocol requires an eligible form to be publicly reachable without signing in, so a
- * page behind one of these is genuinely ineligible rather than merely awkward. What is
- * found is recorded and the page is excluded; nothing here clicks, dismisses or solves
- * anything.
+ * Three kinds of signal, because they mean different things:
+ *
+ *   accessBarriers        the form cannot be read at all - a 401 or 403, a challenge
+ *                         interstitial with nothing behind it, a sign-in wall. Excluded.
+ *   submissionProtection  a challenge that guards submitting, on a form already readable.
+ *                         Recorded, not excluded: the protocol never submits.
+ *   authenticationSignals password fields on the page. Recorded, not excluded: a public
+ *                         registration form has them, and that is the highest-priority
+ *                         category in the protocol.
+ *
+ * Nothing here clicks, dismisses or solves anything.
  */
 export async function detectBlocking(page, httpStatus) {
-  const signals = [];
-  if (httpStatus === 401 || httpStatus === 403) signals.push(`http ${httpStatus}`);
+  const accessBarriers = [];
+  const submissionProtection = [];
+  const authenticationSignals = [];
+
+  // An HTTP 401 or 403 is the page refusing to be read at all.
+  if (httpStatus === 401 || httpStatus === 403) accessBarriers.push(`http ${httpStatus}`);
+
   const found = await page.evaluate(() => {
-    const out = [];
-    if (document.querySelector('input[type="password"]')) out.push('password field');
+    const visible = (el) => Boolean(el) && el.offsetParent !== null;
+    // Text-like inputs the page renders on load, other than the site search. A form the study
+    // could assess has at least one; a challenge interstitial or a sign-in wall has none.
+    const TEXT_TYPES = ['text', 'email', 'tel', 'url', 'number'];
+    const textInputs = [...document.querySelectorAll('input')].filter(
+      (i) => TEXT_TYPES.includes(i.type) && visible(i)
+    );
+    const looksLikeSearch = (i) =>
+      /search|^q$|query|keyword/i.test(`${i.name} ${i.id} ${i.getAttribute('aria-label') ?? ''}`) ||
+      /search/i.test(i.closest('form')?.getAttribute('action') ?? '');
+    const contentInputs = textInputs.filter((i) => !looksLikeSearch(i));
+    const textareas = [...document.querySelectorAll('textarea')].filter(visible);
+
     const src = [...document.querySelectorAll('script[src],iframe[src]')].map((e) => e.src).join(' ');
-    if (/recaptcha|hcaptcha|turnstile|challenges\.cloudflare/i.test(src)) out.push('captcha');
+    const challenge = /recaptcha|hcaptcha|turnstile|challenges\.cloudflare/i.test(src)
+      ? (src.match(/recaptcha|hcaptcha|turnstile|challenges\.cloudflare/i) ?? ['challenge'])[0].toLowerCase()
+      : null;
+    const passwords = document.querySelectorAll('input[type="password"]').length;
     const text = (document.body?.innerText ?? '').slice(0, 4000).toLowerCase();
-    if (/(^|\W)(sign in|log in|login required)(\W|$)/.test(text) && document.querySelector('input[type="password"]')) {
-      out.push('sign-in wall');
-    }
-    return out;
+    const saysSignIn = /(^|\W)(sign in|log in|login required)(\W|$)/.test(text);
+
+    // A login form's username box is part of the barrier, not the form the study wants, so
+    // content inputs are counted OUTSIDE any form that carries a password field.
+    const passwordForms = new Set(
+      [...document.querySelectorAll('input[type="password"]')].map((i) => i.closest('form')).filter(Boolean)
+    );
+    const outside = (el) => !passwordForms.has(el.closest('form'));
+    const contentInputsOutsideCredentials = contentInputs.filter(outside);
+    const textareasOutsideCredentials = textareas.filter(outside);
+
+    // What separates a registration form from a login form is that the registration form asks
+    // for a person's name - which is precisely this study's subject. A password-bearing form
+    // containing one is not a wall, however the surrounding page is worded.
+    const NAME_HINT = /(^|[^a-z])(name|firstname|first_name|givenname|given_name|surname|lastname|last_name|fullname|full_name)([^a-z]|$)/i;
+    const asksForAName = [...passwordForms].some((form) =>
+      [...form.querySelectorAll('input, label')].some((el) =>
+        NAME_HINT.test(`${el.getAttribute?.('name') ?? ''} ${el.id ?? ''} ${el.textContent ?? ''}`)
+      )
+    );
+
+    return {
+      challenge,
+      passwords,
+      saysSignIn,
+      asksForAName,
+      contentInputs: contentInputs.length,
+      textareas: textareas.length,
+      readableOutsideCredentials:
+        contentInputsOutsideCredentials.length + textareasOutsideCredentials.length,
+      credentialFieldNames: [...document.querySelectorAll('input[type="password"]')]
+        .map((i) => i.name || i.id || '(unnamed)')
+        .slice(0, 5),
+    };
   });
-  return [...signals, ...found];
+
+  // capture-v1.0.5. A challenge or a password field is not itself an access barrier.
+  //
+  // The previous detector returned a flat list in which `password field` and `captcha` both meant
+  // "not publicly reachable". That excluded two kinds of page the protocol wants: a public contact
+  // form whose reCAPTCHA protects only submission, and a public registration form - the highest
+  // priority category - which necessarily contains password fields. Neither prevents reading the
+  // form, and the protocol never types or submits.
+  //
+  // What makes a page unreadable is the intended form being unreachable without interacting with
+  // a challenge or authenticating. That is what is tested: a challenge with no readable content
+  // field behind it is an interstitial, and credential fields with nothing else readable are a
+  // sign-in wall.
+  const hasReadableForm = found.contentInputs > 0 || found.textareas > 0;
+  if (found.challenge) {
+    if (hasReadableForm) submissionProtection.push(found.challenge);
+    else accessBarriers.push(`${found.challenge} interstitial`);
+  }
+  if (found.passwords > 0) {
+    authenticationSignals.push(
+      `${found.passwords} password field(s): ${found.credentialFieldNames.join(', ')}`
+    );
+    // A sign-in wall: the page says so, carries credentials, offers nothing readable beyond
+    // them, and does not ask for a person's name - which a registration form would.
+    if (found.saysSignIn && found.readableOutsideCredentials === 0 && !found.asksForAName) {
+      accessBarriers.push('sign-in wall');
+    }
+  }
+
+  return { accessBarriers, submissionProtection, authenticationSignals };
 }
 
 /**
@@ -258,7 +343,10 @@ export async function capturePage({
     const version = browser.version?.() ?? 'unknown';
     return {
       httpStatus,
-      blocking,
+      // capture-v1.0.5: three fields, not one flat list. Only accessBarriers excludes.
+      accessBarriers: blocking.accessBarriers,
+      submissionProtection: blocking.submissionProtection,
+      authenticationSignals: blocking.authenticationSignals,
       userAgent,
       settleMs,
       // 'load' for a page captured at the load event, 'domcontentloaded' for one whose
