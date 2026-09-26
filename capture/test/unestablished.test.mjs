@@ -25,6 +25,7 @@ import {
 } from '../run.mjs';
 import { DISCOVERY_OUTCOMES, TECHNICAL_ATTRITION_OUTCOMES } from '../selection.mjs';
 import { captureDisposition, needsHeadedFallback } from '../capture.mjs';
+import { buildPacket, renderPacket } from '../packet.mjs';
 
 /** The real thing, byte for byte, from https://www.nzsis.govt.nz/robots.txt on 2026-09-26. */
 const INCAPSULA = Buffer.from(
@@ -492,5 +493,55 @@ describe('a deviation must name evidence that exists and must not contradict it'
     recordDeviation(log, { kind: 'k', summary: 's', detail: 'd', permitIds: ['p-0001'] });
     log.deviations[0].permitIds = ['p-9999']; // tampered with after the fact
     assert.equal(corpusBlockers(log).some((b) => b.kind === 'deviations'), true);
+  });
+});
+
+describe('the packet must not call an unreadable origin an empty one', () => {
+  // The wording that was wrong: "none - this category yields no eligible form" asserts the agency
+  // publishes none. For NZSIS nothing of the kind was established: two origins refused every
+  // request and the third answered with 404s and a client-rendered shell.
+  const roundWith = (rows) => {
+    const log = emptyLog();
+    const agency = 'NZSIS';
+    rows.forEach(([url, outcome, method], i) => {
+      appendAttempt(log, {
+        examinedAt: `2026-09-26T19:0${i}:00Z`, agency, website: new URL(url).origin + '/',
+        url, status: 'discovery', discoveryKind: method ?? 'navigation', outcome,
+        category: 'account-registration', candidateSetVersion: 1,
+        navigatedAt: `2026-09-26T19:0${i}:00Z`, approval: 'approved',
+      });
+    });
+    recordCandidates(log, { agency, category: 'account-registration', urls: [], declaration: 'none' });
+    lockCandidateSet(log, { agency, category: 'account-registration' });
+    return renderPacket(buildPacket(log, { agency, category: 'account-registration' }));
+  };
+
+  test('an empty set built on attrition says so, per origin', () => {
+    const text = roundWith([
+      ['https://a.govt.nz/robots.txt', 'retrieval-blocked', 'robots'],
+      ['https://a.govt.nz/', 'retrieval-blocked'],
+      ['https://b.govt.nz/robots.txt', 'unavailable', 'robots'],
+      ['https://b.govt.nz/', 'retrieval-inconclusive'],
+    ]);
+    assert.doesNotMatch(text, /this category yields no eligible form/,
+      'it must not claim the agency publishes none');
+    assert.match(text, /NOT because the category was searched and found empty/);
+    assert.match(text, /https:\/\/a\.govt\.nz - retrieval-blocked x2/);
+    // The distinction the first attempt at this collapsed: b was not blocked, it answered.
+    assert.match(text, /https:\/\/b\.govt\.nz - unavailable x1, retrieval-inconclusive x1/);
+    assert.match(text, /Nothing here establishes/);
+  });
+
+  test('an empty set that really was searched keeps the finding', () => {
+    const text = roundWith([
+      ['https://a.govt.nz/', 'no-candidates'],
+      ['https://a.govt.nz/contact', 'no-candidates'],
+    ]);
+    assert.match(text, /every inspection was read, and this category yields no eligible form/);
+  });
+
+  test('attrition is raised for attention, marked as not read', () => {
+    const text = roundWith([['https://a.govt.nz/', 'retrieval-blocked']]);
+    assert.match(text, /NOT READ \(retrieval-blocked\): navigation https:\/\/a\.govt\.nz\//);
   });
 });

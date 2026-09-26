@@ -85,6 +85,9 @@ describe('the approval packet', () => {
     recordCandidates(log, { agency: AGENCY, category: CAT, urls: [], declaration: 'none' });
     lockCandidateSet(log, { agency: AGENCY, category: CAT });
     const text = renderPacket(buildPacket(log, { agency: AGENCY, category: CAT }));
-    assert.match(text, /none - this category yields no eligible form/);
+    // selection-v1.0.21: the claim now states its own basis. It may only say the category yields
+    // nothing when every inspection was actually READ; where an origin could not be read, the
+    // same sentence would be a prevalence finding no inspection supports.
+    assert.match(text, /none - every inspection was read, and this category yields no eligible form/);
   });
 });

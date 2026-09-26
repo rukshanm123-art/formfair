@@ -12,7 +12,10 @@
  * approve, and the difference is the part a reviewer needs.
  */
 
-import { setKey, CATEGORY_ORDER, SEARCH_TERMS, MAX_CANDIDATES_PER_CATEGORY } from './selection.mjs';
+import {
+  setKey, CATEGORY_ORDER, SEARCH_TERMS, MAX_CANDIDATES_PER_CATEGORY,
+  TECHNICAL_ATTRITION_OUTCOMES,
+} from './selection.mjs';
 
 const pad = (s, n) => String(s).padEnd(n);
 
@@ -77,6 +80,14 @@ export function buildPacket(log, { agency, category }) {
     }
   }
   for (const r of active) {
+    // selection-v1.0.21: attrition first. An inspection that could not be read is the most
+    // decision-relevant thing in a packet whose candidate list is empty, because it decides
+    // whether the emptiness says anything about the agency at all.
+    if (TECHNICAL_ATTRITION_OUTCOMES.includes(r.outcome)) {
+      anomalies.push(
+        `NOT READ (${r.outcome}): ${r.discoveryKind} ${r.url}${r.note ? ` - ${r.note}` : ''}`
+      );
+    }
     if (r.outcome === 'disallowed') anomalies.push(`${r.method ?? r.discoveryKind} disallowed: ${r.url}${r.note ? ` - ${r.note}` : ''}`);
     if (r.outcome === 'unavailable') anomalies.push(`${r.discoveryKind} unavailable: ${r.url}${r.note ? ` - ${r.note}` : ''}`);
   }
@@ -97,12 +108,38 @@ export function buildPacket(log, { agency, category }) {
     (v) => v.agency === agency && v.category === category
   );
 
+  // Which origins could not be read, and which merely had nothing at the path asked for. Computed
+  // here, from the records, because `inspections` on the rendered packet is a COUNT - the first
+  // version of this read `p.inspections.filter` and would have thrown on every empty set.
+  const originOf = (url) => { try { return new URL(url).origin; } catch { return url; } };
+  // Per ORIGIN and per outcome, not merged into one bucket. The first version said "blocked or
+  // withheld on 3 origins", which was wrong about the third: providinginformation.nzsis.govt.nz
+  // answered every request, its robots and sitemap with 404s and its home page with a shell. One
+  // label covering "refused us" and "answered but unreadable" is the same collapse that made
+  // `no-candidates` wrong in the first place.
+  const notRead = active.filter(
+    (r) => TECHNICAL_ATTRITION_OUTCOMES.includes(r.outcome) || r.outcome === 'unavailable'
+  );
+  const attritionByOrigin = [...notRead.reduce((acc, r) => {
+    const origin = originOf(r.url);
+    if (!acc.has(origin)) acc.set(origin, new Map());
+    const counts = acc.get(origin);
+    counts.set(r.outcome, (counts.get(r.outcome) ?? 0) + 1);
+    return acc;
+  }, new Map())]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([origin, counts]) => ({
+      origin,
+      outcomes: [...counts].map(([outcome, n]) => ({ outcome, n })),
+    }));
+
   return {
     agency, category, version: set.version,
     approval: set.approval, lockedAt: set.lockedAt,
     terms: SEARCH_TERMS[category] ?? [],
     websites: byWebsite,
     inspections: active.length,
+    attritionByOrigin,
     supersededRecords: supersededIds.size,
     candidates: set.locked,
     droppedBeyondBound: set.droppedBeyondBound ?? [],
@@ -137,7 +174,25 @@ export function renderPacket(p) {
   }
   out.push('');
   out.push(`CANDIDATES (${p.candidates.length})`);
-  if (p.candidates.length === 0) out.push('  none - this category yields no eligible form');
+  if (p.candidates.length === 0) {
+    // selection-v1.0.21. An empty set has two quite different causes, and this line asserted the
+    // wrong one for NZSIS: "this category yields no eligible form" says the agency publishes none,
+    // which is a finding about the agency. Where the origins could not be read at all, nothing was
+    // established about what they publish, and saying otherwise would put a prevalence observation
+    // into the record that no inspection supports.
+    const notRead = p.attritionByOrigin ?? [];
+    if (notRead.length === 0) {
+      out.push('  none - every inspection was read, and this category yields no eligible form');
+    } else {
+      out.push('  none recorded - and NOT because the category was searched and found empty.');
+      out.push('  What each origin actually did:');
+      for (const { origin, outcomes } of notRead) {
+        out.push(`    ${origin} - ${outcomes.map(({ outcome, n }) => `${outcome} x${n}`).join(', ')}`);
+      }
+      out.push('  This is technical attrition in the discovery method. Nothing here establishes');
+      out.push('  whether this agency publishes such a form, or whether the public can reach one.');
+    }
+  }
   p.candidates.forEach((c, i) => out.push(`  ${i + 1}. ${c}`));
   if (p.droppedBeyondBound.length) {
     out.push(`  beyond the bound, not assessed: ${p.droppedBeyondBound.length}`);
