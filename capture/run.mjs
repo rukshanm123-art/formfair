@@ -250,7 +250,12 @@ export function appendAttempt(log, attempt) {
     // two records for one URL BY DESIGN - the evidence and the reading of it. The duplicate rule
     // exists to stop one page being recorded twice as two findings, and an observation is not a
     // finding, so the two kinds are compared only against their own kind.
-    const kindOf = (a) => (a.recordType === RECORD_TYPES.OBSERVATION ? 'observation' : 'finding');
+    // selection-v1.0.28: a REFUSED retrieval is an attempt, not a finding, so it shares the
+    // observation side of this split. Without that, recording "this page redirects somewhere the
+    // policy forbids" was impossible for any URL the round had already inspected - which is every
+    // URL in the retrospective backlog.
+    const kindOf = (a) =>
+      (a.recordType === RECORD_TYPES.OBSERVATION || a.renderRefused === true ? 'observation' : 'finding');
     const incoming = kindOf(attempt);
     const sameRound = log.attempts.some(
       (a) => a.status === 'discovery' && a.agency === attempt.agency && a.url === attempt.url &&
@@ -2914,9 +2919,31 @@ function boundToCurrentSet(log) {
   return ids;
 }
 
+/**
+ * URLs a render attempt found to be unreachable within the robots policy.
+ *
+ * selection-v1.0.28. Without this the obligation would be unsatisfiable: a page that redirects to a
+ * disallowed target can never be rendered, so demanding its render would withhold the corpus draft
+ * for ever. A recorded refusal discharges the obligation as ATTRITION rather than as a judgement -
+ * the page was not read, and the record says why and where it stopped.
+ *
+ * Keyed on the explicit `renderRefused` flag rather than inferred from an outcome, so an ordinary
+ * `disallowed` record cannot quietly excuse a page nobody tried to render.
+ */
+function renderRefusedUrls(log) {
+  const urls = new Set();
+  for (const a of log.attempts) {
+    if (a.status !== 'discovery' || a.renderRefused !== true) continue;
+    if (isDiscoverySuperseded(log, a.id)) continue;
+    urls.add(canonicalise(a.url));
+  }
+  return urls;
+}
+
 export function renderBacklog(log) {
   const answered = renderedJudgements(log);
   const current = boundToCurrentSet(log);
+  const unreachable = renderRefusedUrls(log);
   return log.attempts.filter((a) => {
     // Only evidence a CURRENT set stands on. A record belonging solely to a superseded round is
     // history, and re-rendering it would be traffic spent on a finding already withdrawn.
@@ -2932,6 +2959,8 @@ export function renderBacklog(log) {
     try { url = new URL(a.url); } catch { return false; }
     // Answered by a judgement that NAMES this record, not one that merely shares its page.
     if (answered.has(a.id)) return false;
+    // Or discharged as attrition, because a render attempt found the page unreachable within policy.
+    if (unreachable.has(canonicalise(a.url))) return false;
     if (NON_HTML.test(url.pathname)) return false;
     // And the request must not be FORBIDDEN by the policy in force now. Without this the gate would
     // demand renders that politeness forbids - an obligation meetable only by breaching robots,

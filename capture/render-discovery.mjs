@@ -26,6 +26,7 @@ import { mkdirSync, writeFileSync, existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { detectBlocking, validateUrl, VIEWPORT, LOCALE, NAVIGATION_TIMEOUT_MS, LOAD_EVENT_TIMEOUT_MS } from './capture.mjs';
 import { POLICY } from './politeness.mjs';
+import { installRedirectGuard, isRefusedNavigation, REFUSE_ALL_REDIRECTS } from './redirect-guard.mjs';
 
 const sha256 = (v) => createHash('sha256').update(v).digest('hex');
 
@@ -51,6 +52,10 @@ export async function renderDiscoveryPage({
   settleMs = POLICY.postLoadSettleMs,
   loadEventTimeoutMs = LOAD_EVENT_TIMEOUT_MS,
   browserMode = 'headless',
+  // Decides one absolute URL against the RECORDED policies. It must never fetch: a render is
+  // authorised by a permit issued in advance, and reaching for a fresh policy mid-navigation would
+  // be traffic no permit covers.
+  policyFor = REFUSE_ALL_REDIRECTS,
 }) {
   validateUrl(url);
   const dir = resolve(outDir);
@@ -63,8 +68,33 @@ export async function renderDiscoveryPage({
   const context = await browser.newContext({ viewport: VIEWPORT, locale: LOCALE });
   const page = await context.newPage();
   try {
+    // Every top-level redirect target is checked against the recorded policy before it is asked
+    // for. See `redirect-guard.mjs` for why this cannot be done with `page.route`.
+    const guard = await installRedirectGuard(context, page, { url, policyFor });
+
     const navigatedAt = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
-    const response = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: NAVIGATION_TIMEOUT_MS });
+    let response = null;
+    try {
+      response = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: NAVIGATION_TIMEOUT_MS });
+    } catch (error) {
+      // A refusal surfaces as a blocked navigation. Anything else is a real failure.
+      if (!isRefusedNavigation(error, guard)) throw error;
+    }
+    if (guard.refusal) {
+      return {
+        url,
+        refused: true,
+        refusal: guard.refusal,
+        redirectChain: guard.redirectChain,
+        navigatedAt,
+        browserMode,
+        // Deliberately no file, no digest and no controls: nothing was retrieved to record, and a
+        // render that stopped at a policy boundary must not leave evidence-shaped fields behind.
+        renderFile: null,
+        renderedSha256: null,
+        renderedBytes: null,
+      };
+    }
     const httpStatus = response?.status() ?? null;
 
     let loadState = 'load';
@@ -159,6 +189,8 @@ export async function renderDiscoveryPage({
 
     return {
       url,
+      refused: false,
+      redirectChain: guard.redirectChain,
       finalUrl: page.url(),
       navigatedAt,
       httpStatus,

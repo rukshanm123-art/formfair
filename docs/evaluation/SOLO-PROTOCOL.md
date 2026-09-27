@@ -2790,3 +2790,93 @@ unchanged, and the floor assertion of 35 refusals still holds with room to spare
 is the same objection this protocol has made to unread hashes and unread digests. The conformance
 suite now asserts its own size — the number of cases, the number of refusals, and that the two halves
 sum to the whole — so a future miscount fails a test instead of reaching a tag message.
+
+## Amendment 32: the permit boundary was one hop deep
+
+**Dated 27 September 2026.** `selection-v1.0.28`, `capture-v1.0.8` and `solo-protocol-v1.0.10`.
+Moves no earlier tag.
+
+**Recorded before the fifty-seven retrospective renders, not after.** `page.goto` follows redirects
+itself, so a permit and a policy check covering the requested URL covered nothing beyond it.
+Reproduced against `selection-v1.0.27`:
+
+```
+requested   /allowed          (permitted by robots)
+server hits ["/allowed", "/forbidden"]
+finalUrl    /forbidden        (Disallow: /forbidden)
+httpStatus  200
+controls    1                 the disallowed page rendered, name field and all
+```
+
+None of the sixty-six historical backlog records carries a `finalUrl`, so nothing proved the
+fifty-seven pages about to be rendered would not do exactly this.
+
+### Two obvious fixes that do not work
+
+**`page.route` is not called for a redirected request.** Playwright invokes the handler for the
+request it intercepts and then follows redirects internally. Measured: the handler saw `/allowed` and
+never `/forbidden`, which reached the server anyway.
+
+**Fulfilling the 3xx is worse.** Chromium follows a fulfilled redirect *without* interception, so the
+destination is requested and the handler is not consulted. Both were built and both leaked. Checking
+the chain after `goto` returns is later still: by then the forbidden page has been served.
+
+So the check sits where the decision actually is — the **response stage of the document request**,
+through CDP `Fetch`. Chromium hands over the 3xx before acting on it; a refusal fails the request and
+the target is never asked for. Measured with the guard in place: `server hits ["/allowed"]`.
+
+### The rule
+
+Every **top-level** redirect target is checked against the **recorded** policy before it is
+requested. The guard never fetches: a render is authorised by a permit issued in advance, so reaching
+for a fresh policy mid-navigation would be traffic no permit covers. A target is refused when its
+policy is missing, stale beyond 24 hours, `unestablished`, or disallows the path — and when no policy
+source was supplied at all, which is the fail-closed default.
+
+Scope is the main frame. An iframe is a subresource the page fetches, and failing a render because an
+embedded third party redirects to an origin whose policy we have not recorded would refuse pages for
+a reason that has nothing to do with the page.
+
+The chain is recorded per hop — `from`, `to`, status, the verdict and **the identity of the robots
+check that decided it** — so a reader can re-verify the decision. Full target URLs are recorded rather
+than sanitised to origin-plus-path, unlike outstanding subresource requests: a redirect target is a
+URL the server chose, and stripping the query would make the robots decision impossible to check.
+
+**The same rule in the capture path.** A capture that followed a redirect to a disallowed path would
+put a page in the *corpus* that robots forbade — worse than a discovery inspection doing it, because
+the corpus is what gets analysed and published. A refused capture writes no file, claims no
+eligibility, and is recorded `excluded` with the chain.
+
+### Two flaws found while building it
+
+**The hop counter was bypassed.** A redirect back to the authorised URL needs no second *policy*
+decision, and the first version skipped the counter for that case too — so a loop between the
+original URL and another path was never bounded here. Chromium hit its own redirect limit instead,
+which means the refusal came from the browser and the log carried no reason for it. Every hop is now
+counted; only the policy decision is skipped.
+
+**A refusal could not be recorded.** The duplicate-URL rule refuses a second record for a page
+already inspected in that round — which is every URL in the retrospective backlog. A refused
+retrieval is an **attempt**, not a finding, so it now shares the observation side of that split. The
+rule exists to stop one page being recorded twice as two findings.
+
+### An unreachable page discharges its obligation as attrition
+
+A page that redirects to a disallowed target can never be rendered, so demanding its render would
+withhold the corpus draft for ever. A recorded refusal — keyed on an explicit `renderRefused` flag, so
+an ordinary `disallowed` record cannot quietly excuse a page nobody tried to render — discharges that
+URL's backlog entry as **technical attrition**, and only that URL's.
+
+### Tests
+
+Nine, and in every one the assertion that matters is the **destination server's request log**: a
+refusal that still lets the request leave is not a refusal, and that is exactly where the two earlier
+designs failed. A disallowed same-origin target, an origin with no recorded policy (which is never
+contacted at all, not even for its robots file), a permitted redirect that must still work, a page
+that does not redirect, the fail-closed default, a redirect loop, and both capture paths.
+
+### What this does not establish
+
+Nothing is rendered or captured yet. The backlog stands at **66 records across 57 URLs on 12 origins**,
+all twelve policies fresh and valid, and how many of the fifty-seven redirect is still unknown — which
+is the point of fixing this first.

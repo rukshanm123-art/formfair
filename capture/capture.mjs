@@ -26,6 +26,7 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, writeFileSync, existsSync, readFileSync, appendFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { POLICY } from './politeness.mjs';
+import { installRedirectGuard, isRefusedNavigation, REFUSE_ALL_REDIRECTS } from './redirect-guard.mjs';
 
 export const VIEWPORT = { width: 1280, height: 800 };
 export const LOCALE = 'en-NZ';
@@ -317,6 +318,10 @@ export async function capturePage({
   // default headless Chromium, whose unmodified user agent says HeadlessChrome. That mismatch was
   // invisible until a host served a challenge to it.
   browserMode = 'headless',
+  // selection-v1.0.28. The same redirect boundary as discovery. A capture that followed a redirect
+  // to a disallowed path would put a page in the CORPUS that robots forbade - worse than a
+  // discovery inspection doing it, because the corpus is what gets analysed and published.
+  policyFor = REFUSE_ALL_REDIRECTS,
 }) {
   validateUrl(url);
   validatePageId(pageId);
@@ -345,10 +350,24 @@ export async function capturePage({
     page.on('requestfinished', (r) => inFlight.delete(r));
     page.on('requestfailed', (r) => inFlight.delete(r));
 
-    const response = await page.goto(url, {
-      waitUntil: 'domcontentloaded',
-      timeout: NAVIGATION_TIMEOUT_MS,
-    });
+    const guard = await installRedirectGuard(context, page, { url, policyFor });
+
+    let response = null;
+    try {
+      response = await page.goto(url, {
+        waitUntil: 'domcontentloaded',
+        timeout: NAVIGATION_TIMEOUT_MS,
+      });
+    } catch (error) {
+      if (!isRefusedNavigation(error, guard)) throw error;
+    }
+    if (guard.refusal) {
+      // No file, no hash, no eligibility: nothing was retrieved. The caller records the refusal.
+      return {
+        url, refused: true, refusal: guard.refusal, redirectChain: guard.redirectChain,
+        browserMode, file: null, htmlSha256: null,
+      };
+    }
     const httpStatus = response?.status() ?? null;
 
     // The load event, waited for separately and bounded. A page that reaches it is at the
@@ -397,6 +416,8 @@ export async function capturePage({
 
     const version = browser.version?.() ?? 'unknown';
     return {
+      refused: false,
+      redirectChain: guard.redirectChain,
       blocked,
       browserMode,
       httpStatus,

@@ -115,6 +115,37 @@ const now = () => new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
 const logPathFor = (dir) => join(resolve(dir), 'capture-log.json');
 const require_ = (name) => flag(name) ?? die(`--${name} is required\n\n${USAGE}`);
 
+/**
+ * Decides one absolute URL against the RECORDED robots policies, for the redirect guard.
+ *
+ * selection-v1.0.28. Never fetches. A render is authorised by a permit issued in advance, and
+ * reaching for a fresh policy in the middle of a navigation would be traffic no permit covers - so a
+ * target whose policy is missing, stale or unestablished is refused rather than looked up.
+ */
+const recordedPolicyFor = (log) => (target) => {
+  let parsed = null;
+  try { parsed = new URL(target); } catch { return { allowed: false, reason: `${target} is not a usable URL` }; }
+  const check = findRobotsCheck(log, parsed.origin);
+  if (!check) {
+    return { allowed: false, reason: `no recorded robots policy for ${parsed.origin}` };
+  }
+  if (!robotsCheckIsFresh(check)) {
+    return {
+      allowed: false,
+      robotsCheckId: check.id,
+      disposition: check.disposition,
+      reason: `the robots policy for ${parsed.origin} was fetched at ${check.fetchedAt}, more than 24 hours ago`,
+    };
+  }
+  const verdict = evaluatePolicy(check, parsed.pathname + parsed.search, 'chromium');
+  return {
+    allowed: verdict.allowed === true,
+    robotsCheckId: check.id,
+    disposition: check.disposition,
+    reason: verdict.reason,
+  };
+};
+
 const pacer = createPacer();
 
 async function doCapture() {
@@ -201,6 +232,7 @@ async function doCapture() {
         browserFactory: () => chromium.launch({ headless: true }),
         url, agency, website, pageId, category, outDir: capturesDir, settleMs,
         browserMode: 'headless',
+        policyFor: recordedPolicyFor(log),
       });
       break;
     } catch (error) {
@@ -252,6 +284,7 @@ async function doCapture() {
         browserFactory: () => chromium.launch({ headless: false }),
         url, agency, website, pageId, category, outDir: capturesDir, settleMs,
         browserMode: 'headed',
+        policyFor: recordedPolicyFor(log),
       });
       attemptedModes.push({
         browserMode: headed.browserMode, httpStatus: headed.httpStatus,
@@ -273,6 +306,25 @@ async function doCapture() {
   // no file and no hash - where it died inside validation. A page whose eligibility the harness
   // had in fact established could not be recorded at all, and the failure looked like a bug in
   // the log rather than in the order of these checks.
+  // A capture whose page redirected outside the policy is refused outright. No file was written and
+  // no eligibility is claimed: a page the policy forbids must not enter the corpus by redirect.
+  if (record?.refused) {
+    appendAttempt(log, {
+      ...base, status: 'excluded', category,
+      exclusionReason:
+        `not retrieved: ${url} redirected to ${record.refusal.url}, which the recorded robots ` +
+        `policy does not permit (${record.refusal.reason}). The destination was never requested.`,
+      eligibility: Object.fromEntries(ELIGIBILITY_CRITERIA.map((c) => [c, null])),
+      redirectChain: record.redirectChain,
+      attemptedModes,
+      politeness: { robots: verdict.reason },
+    });
+    writeLog(logPath, log);
+    writeDerived({ log, dir, frameSha256: flag('frame-sha256'), drawOrderSha256: flag('draw-order-sha256'), synthetic: has('synthetic') });
+    console.log(`excluded: redirect to ${record.refusal.url} is not permitted; it was not requested`);
+    return;
+  }
+
   const disposition = captureDisposition(record);
   const { authBarriers } = disposition;
 
@@ -930,7 +982,43 @@ async function doRenderDiscovery() {
     browserFactory: () => chromium.launch({ headless: true }),
     url, outDir: renderedDir, recordId: `g${Date.now()}`, settleMs,
     browserMode: 'headless',
+    policyFor: recordedPolicyFor(log),
   });
+
+  // The page redirected somewhere the recorded policy does not permit. The original URL was
+  // requested under its permit and the target never was, so the permit is consumed and the finding
+  // recorded - as a robots decision, not as anything about the agency's forms.
+  if (rendered.refused) {
+    const permitForRefusal = consumeDiscoveryPermit(log, {
+      agency, category, candidateSetVersion: setVersion, url,
+      navigatedAt: rendered.navigatedAt, permitId,
+    });
+    const missingPolicy = /no recorded robots policy|more than 24 hours ago|no policy is established/
+      .test(rendered.refusal.reason ?? '');
+    appendAttempt(log, {
+      permitId: permitForRefusal.id,
+      examinedAt: now(), agency, website, url,
+      status: 'discovery', discoveryKind: method,
+      outcome: missingPolicy ? 'robots-unestablished' : 'disallowed',
+      category, candidateSetVersion: setVersion,
+      navigatedAt: rendered.navigatedAt,
+      renderRefused: true,
+      redirectChain: rendered.redirectChain,
+      note: flag('note') ??
+        `REDIRECT REFUSED. ${url} redirected to ${rendered.refusal.url}, which was not requested: ` +
+        `${rendered.refusal.reason}. Nothing of the destination was retrieved.`,
+      approval: APPROVAL.APPROVED,
+    });
+    writeLog(logPath, log);
+    writeDerived({ log, dir, frameSha256: flag('frame-sha256'), drawOrderSha256: flag('draw-order-sha256'), synthetic: has('synthetic') });
+    const record = log.attempts.at(-1);
+    console.log(`recorded ${record.id}: ${record.outcome} - the redirect target was not requested`);
+    for (const hop of rendered.redirectChain) {
+      console.log(`  ${hop.httpStatus} ${hop.from} -> ${hop.to}  ${hop.allowed ? 'allowed' : 'REFUSED'} (${hop.robotsCheckId ?? 'no policy'})`);
+    }
+    console.log(`reason: ${rendered.refusal.reason}`);
+    return;
+  }
 
   const permit = consumeDiscoveryPermit(log, {
     agency, category, candidateSetVersion: setVersion, url,
