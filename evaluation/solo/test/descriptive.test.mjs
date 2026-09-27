@@ -588,6 +588,12 @@ describe('the corpus seal requires the exhaustion records', () => {
     const renderedRoot = join(dir, 'rendered');
     mkdirSync(renderedRoot, { recursive: true });
     writeFileSync(join(renderedRoot, 'g1.html'), tamper ?? html);
+    // solo-protocol-v1.0.8: the registry's permit must exist, be consumed, and be for this page.
+    log.discoveryPermits = [{
+      id: 'p-0001', agency: 'obs', category: 'account-registration', candidateSetVersion: 1,
+      url: 'https://example.invalid/apply', robotsCheckId: 'r-0001',
+      issuedAt: '2026-09-25T03:29:00Z', consumedAt: '2026-09-25T03:31:00Z',
+    }];
     log.renders = [{
       id: 'g-0001', url: 'https://example.invalid/apply', navigatedAt: '2026-09-25T03:30:00Z',
       permitId: 'p-0001', renderFile: 'g1.html',

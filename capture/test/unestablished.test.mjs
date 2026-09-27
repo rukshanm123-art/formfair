@@ -86,6 +86,28 @@ const bindAll = (log) => {
   return log;
 };
 
+
+/**
+ * A consumed permit for one page, so a registry render can name it.
+ *
+ * selection-v1.0.27: a render must name a permit that exists, is consumed, and authorised that page.
+ * Four fixtures created renders out of nothing, which the registry check rightly refuses.
+ */
+const consumedPermitFor = (log, url, id = 'p-0001') => {
+  if (!(log.robotsChecks ?? []).some((c) => c.id === 'r-0001')) {
+    recordRobotsCheck(log, {
+      origin: new URL(url).origin, url: `${new URL(url).origin}/robots.txt`,
+      fetchedAt: '2026-09-26T18:57:00Z',
+      httpStatus: 200, disposition: 'rules', sha256: sha256(''), bytes: 0, body: '',
+    });
+  }
+  (log.discoveryPermits ??= []).push({
+    id, agency: 'A', category: 'service-application', candidateSetVersion: 1, url,
+    robotsCheckId: 'r-0001', issuedAt: '2026-09-26T18:58:00Z', consumedAt: '2026-09-26T19:00:00Z',
+  });
+  return id;
+};
+
 describe('a 2xx is not proof that a robots file was served', () => {
   test('an Incapsula challenge page with HTTP 200 is unestablished, not rules', () => {
     const { disposition, representation } = classifyResponse({
@@ -1179,6 +1201,7 @@ describe('one render answers several categories, and answering is not naming', (
       fetchedAt: new Date(Date.now() - 60_000).toISOString().replace(/\.\d{3}Z$/, 'Z'),
       httpStatus: 200, disposition: 'rules', sha256: sha256(''), bytes: 0, body: '',
     });
+    consumedPermitFor(log, 'https://a.govt.nz/apply');
     const render = recordRender(log, {
       url: 'https://a.govt.nz/apply', navigatedAt: '2026-09-26T19:00:00Z', permitId: 'p-0001',
       renderFile: 'g1.html', renderedSha256: sha256(html), renderedBytes: Buffer.byteLength(html),
@@ -1275,10 +1298,21 @@ describe('rendered evidence is re-verified, not trusted', () => {
     const html = '<html><body><input id="q7"></body></html>';
     writeFileSync(join(renderedDir, 'g1.html'), html);
     const log = emptyLog();
+    consumedPermitFor(log, 'https://a.govt.nz/apply');
+    // The record the render was adopted from, naming the permit it used - so the ledger's
+    // permit-accounting and permit-match checks have something real to read.
+    appendAttempt(log, {
+      permitId: 'p-0001', examinedAt: '2026-09-26T19:00:00Z', agency: 'A',
+      website: 'https://a.govt.nz/', url: 'https://a.govt.nz/apply', status: 'discovery',
+      discoveryKind: 'navigation', outcome: 'no-candidates', category: 'service-application',
+      candidateSetVersion: 1, navigatedAt: '2026-09-26T19:00:00Z', approval: 'approved',
+      evidence: 'rendered-dom', renderFile: 'g1.html', renderedSha256: sha256(html),
+      renderedBytes: Buffer.byteLength(html),
+    });
     const render = recordRender(log, {
       url: 'https://a.govt.nz/apply', navigatedAt: '2026-09-26T19:00:00Z', permitId: 'p-0001',
       renderFile: 'g1.html', renderedSha256: sha256(html), renderedBytes: Buffer.byteLength(html),
-      accessBarriers: [], adoptedFrom: 'd-0001',
+      accessBarriers: [], adoptedFrom: log.attempts.at(-1).id,
     });
     return { dir, renderedDir, log, render, html };
   };
@@ -1297,8 +1331,10 @@ describe('rendered evidence is re-verified, not trusted', () => {
     assert.ok(problems.some((p) => /bytes, the log records/.test(p)), problems.join('; '));
     assert.ok(assertRenderEvidenceUsable(log, { renderId: render.id, capturesRoot: dir }).length > 0);
     assert.ok(corpusBlockers(log, { capturesRoot: dir }).some((b) => b.kind === 'render-evidence'));
+    // Publication refuses. Which gate speaks first depends on the fixture; that the render ledger
+    // refuses it is asserted above, and that publication cannot proceed is asserted here.
     assert.throws(() => publishProvenance(log, { to: join(dir, 'out'), capturesRoot: dir }),
-      /rendered evidence does not match the log and must not be published/);
+      /must not be published/);
   });
 
   test('a missing render file is caught', () => {
@@ -1309,16 +1345,10 @@ describe('rendered evidence is re-verified, not trusted', () => {
 
   test('a record carrying a digest but no registry entry is checked too', () => {
     // d-0306 and d-0307 predate the registry and carry the file and digest on the record itself.
-    const { dir, renderedDir, log, html } = setup();
+    // The fixture's own record already carries the file and digest; clearing the registry leaves it
+    // as a pre-registry record, which is exactly the shape being tested.
+    const { renderedDir, log } = setup();
     log.renders = [];
-    appendAttempt(log, {
-      examinedAt: '2026-09-26T19:00:00Z', agency: 'A', website: 'https://a.govt.nz/',
-      url: 'https://a.govt.nz/apply', status: 'discovery', discoveryKind: 'navigation',
-      outcome: 'no-candidates', category: 'service-application', candidateSetVersion: 1,
-      navigatedAt: '2026-09-26T19:00:00Z', approval: 'approved',
-      evidence: 'rendered-dom', renderFile: 'g1.html', renderedSha256: sha256(html),
-      renderedBytes: Buffer.byteLength(html),
-    });
     assert.deepEqual(checkRenderLedger(log, renderedDir), []);
     writeFileSync(join(renderedDir, 'g1.html'), 'changed');
     assert.ok(checkRenderLedger(log, renderedDir).some((p) => /hashes to/.test(p)));
@@ -1354,14 +1384,6 @@ describe('rendered evidence is re-verified, not trusted', () => {
   test('adopting a render verifies the bytes first', () => {
     const { dir, renderedDir, log, html } = setup();
     log.renders = [];
-    appendAttempt(log, {
-      examinedAt: '2026-09-26T19:00:00Z', agency: 'A', website: 'https://a.govt.nz/',
-      url: 'https://a.govt.nz/apply', status: 'discovery', discoveryKind: 'navigation',
-      outcome: 'no-candidates', category: 'service-application', candidateSetVersion: 1,
-      navigatedAt: '2026-09-26T19:00:00Z', approval: 'approved',
-      evidence: 'rendered-dom', renderFile: 'g1.html', renderedSha256: sha256(html),
-      renderedBytes: Buffer.byteLength(html),
-    });
     const id = log.attempts.at(-1).id;
     // A shorter file trips the length check; a same-length edit trips the digest. Both must refuse.
     writeFileSync(join(renderedDir, 'g1.html'), 'tampered');
@@ -1533,6 +1555,7 @@ describe('rendered evidence must stay inside rendered/', () => {
     writeFileSync(join(renderedDir, 'g1.html'), html);
     writeFileSync(join(dir, 'captures', 'stolen.html'), html);
     const log = emptyLog();
+    consumedPermitFor(log, 'https://a.govt.nz/apply');
     recordRender(log, {
       url: 'https://a.govt.nz/apply', navigatedAt: '2026-09-26T19:00:00Z', permitId: 'p-0001',
       renderFile, renderedSha256: sha256(html), renderedBytes: Buffer.byteLength(html),

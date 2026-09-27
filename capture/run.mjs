@@ -2553,6 +2553,7 @@ export function checkRenderLedger(log, renderedDir) {
 
   // Exactly one active observation per render. Two would make it ambiguous which record a
   // judgement's `evidenceFromDiscoveryId` is required to name.
+  const permits = log.discoveryPermits ?? [];
   for (const render of log.renders ?? []) {
     if (!render.id) continue;
     const observations = attempts.filter(
@@ -2568,6 +2569,30 @@ export function checkRenderLedger(log, renderedDir) {
     if (observations.length === 0 && !render.adoptedFrom) {
       problems.push(`${render.id} has no observation record and was not adopted from one`);
     }
+
+    // selection-v1.0.27. The registry's own permit, checked. A render naming a permit that
+    // authorised a different request - or none - would make the traffic behind the evidence
+    // unaccounted, and the ledger accepted `p-0001` in place of `p-0093` without comment.
+    const permit = permits.find((x) => x.id === render.permitId);
+    if (!render.permitId) problems.push(`${render.id} names no permit`);
+    else if (!permit) problems.push(`${render.id} names permit ${render.permitId}, which does not exist`);
+    else if (!permit.consumedAt) {
+      problems.push(`${render.id} names permit ${permit.id}, which is not recorded as consumed`);
+    } else if (permit.url !== render.url) {
+      problems.push(
+        `${render.id} is of ${render.url} but names permit ${permit.id}, which authorised ${permit.url}`
+      );
+    }
+    // And it must be the permit the record that introduced it used, not merely some consumed one.
+    const introducer = observations[0] ??
+      (render.adoptedFrom ? byId.get(render.adoptedFrom) : null);
+    if (introducer && introducer.permitId && render.permitId &&
+        introducer.permitId !== render.permitId) {
+      problems.push(
+        `${render.id} names permit ${render.permitId} but ${introducer.id}, which recorded it, used ` +
+          `${introducer.permitId}`
+      );
+    }
   }
 
   for (const a of attempts) {
@@ -2577,6 +2602,79 @@ export function checkRenderLedger(log, renderedDir) {
     // correction a permanent publication block, which is the opposite of what append-only
     // correction is for. Its BYTES are still checked below, because the evidence is still evidence.
     const withdrawn = isDiscoverySuperseded(log, a.id);
+
+    // selection-v1.0.27. What each record TYPE is allowed to contain, enforced here and not only at
+    // write time. The ledger checked that `recordType` held a recognised word and nothing about
+    // whether the record was shaped like one: an active judgement relabelled `observation` with its
+    // evidence source deleted still reported `no-candidates`, still claimed no navigation, still
+    // answered its record, still cleared the backlog, and passed both validators with zero
+    // problems. A rule enforced where a value is written but not where it is trusted is the defect
+    // this scan keeps rediscovering, and this is the fourth time it has been this exact defect.
+    if (!withdrawn && a.recordType === RECORD_TYPES.OBSERVATION) {
+      const where = `${a.id} (observation)`;
+      if (!['rendered', 'retrieval-blocked'].includes(a.outcome)) {
+        problems.push(`${where} records ${JSON.stringify(a.outcome)}; an observation concludes nothing`);
+      }
+      if (a.navigationPerformed === false) {
+        problems.push(`${where} claims no navigation occurred; an observation IS a retrieval`);
+      }
+      if (!isoUtcish(a.navigatedAt)) {
+        problems.push(`${where} has no navigation timestamp`);
+      }
+      if (!a.permitId) problems.push(`${where} names no permit`);
+      else {
+        const permit = permits.find((x) => x.id === a.permitId);
+        if (!permit) problems.push(`${where} names permit ${a.permitId}, which does not exist`);
+        else if (!permit.consumedAt) problems.push(`${where} names permit ${permit.id}, which is not consumed`);
+      }
+      if (a.evidenceFromDiscoveryId) {
+        problems.push(`${where} names an evidence source; an observation IS the evidence`);
+      }
+      if (a.answersDiscoveryId) {
+        problems.push(`${where} answers ${a.answersDiscoveryId}; an observation concludes nothing, so it answers nothing`);
+      }
+      if (!a.renderId) problems.push(`${where} cites no render`);
+    }
+    if (!withdrawn && a.recordType === RECORD_TYPES.JUDGEMENT_ONLY) {
+      const where = `${a.id} (judgement)`;
+      if (!JUDGEMENT_OUTCOMES.includes(a.outcome)) {
+        problems.push(`${where} records ${JSON.stringify(a.outcome)}, not ${JUDGEMENT_OUTCOMES.join(' or ')}`);
+      }
+      if (a.permitId) {
+        problems.push(`${where} names permit ${a.permitId}; a judgement makes no request`);
+      }
+      if (a.navigationPerformed !== false) {
+        problems.push(`${where} does not record navigationPerformed: false`);
+      }
+      if (!a.renderId) problems.push(`${where} cites no rendered evidence`);
+      // If it resolves a prior record, it resolves exactly one.
+      if (a.answersDiscoveryId && a.supersedesDiscoveryId &&
+          a.answersDiscoveryId !== a.supersedesDiscoveryId) {
+        problems.push(
+          `${where} answers ${a.answersDiscoveryId} and supersedes ${a.supersedesDiscoveryId}; a ` +
+            'judgement resolves one record, or it is unclear which it resolved'
+        );
+      }
+    }
+
+    // One authority for the evidence. A record may repeat the registry's file, digest and size for
+    // readability, but a copy that DISAGREES with the registry is a second claim about the same
+    // bytes, and nothing said which of the two governs.
+    if (a.renderId) {
+      const render = findRender(log, a.renderId);
+      if (render) {
+        for (const [field, label] of [['renderFile', 'file'], ['renderedSha256', 'digest'],
+          ['renderedBytes', 'byte count']]) {
+          if (a[field] !== undefined && a[field] !== null && a[field] !== render[field]) {
+            problems.push(
+              `${a.id} carries a ${label} of its own (${JSON.stringify(a[field])}) that disagrees ` +
+                `with render ${render.id} (${JSON.stringify(render[field])}); the registry is the ` +
+                'single authority, so a copy must match it or be absent'
+            );
+          }
+        }
+      }
+    }
 
     // A record citing a render must cite one that exists, of the page it judges.
     if (a.renderId && !withdrawn) {

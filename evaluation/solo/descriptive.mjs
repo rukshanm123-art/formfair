@@ -168,7 +168,7 @@ const FRAME_FILES = [
  * exhaustion records at all. A manifest that misnames its own protocol is worse than one that
  * omits it: a reader checking which rules a corpus was sealed under would be told the wrong ones.
  */
-export const SOLO_PROTOCOL_TAG = 'solo-protocol-v1.0.7';
+export const SOLO_PROTOCOL_TAG = 'solo-protocol-v1.0.8';
 
 /**
  * Two resolutions, mirrored from the capture package and checked equal by a test.
@@ -279,6 +279,7 @@ export function renderLedgerProblems(log, renderedDir) {
     if (full) verifyBytes(where, full, render.renderedSha256, render.renderedBytes);
   }
 
+  const permits = Array.isArray(log.discoveryPermits) ? log.discoveryPermits : [];
   for (const render of renders) {
     if (!render.id) continue;
     const observations = attempts.filter(
@@ -290,6 +291,18 @@ export function renderLedgerProblems(log, renderedDir) {
     if (observations.length === 0 && !render.adoptedFrom) {
       problems.push(`${render.id} has no observation record and was not adopted from one`);
     }
+    // solo-protocol-v1.0.8: the registry's own permit.
+    const permit = permits.find((x) => x.id === render.permitId);
+    if (!render.permitId) problems.push(`${render.id} names no permit`);
+    else if (!permit) problems.push(`${render.id} names permit ${render.permitId}, which does not exist`);
+    else if (!permit.consumedAt) problems.push(`${render.id} names permit ${permit.id}, which is not consumed`);
+    else if (permit.url !== render.url) {
+      problems.push(`${render.id} names permit ${permit.id}, which authorised a different page`);
+    }
+    const introducer = observations[0] ?? (render.adoptedFrom ? byId.get(render.adoptedFrom) : null);
+    if (introducer && introducer.permitId && render.permitId && introducer.permitId !== render.permitId) {
+      problems.push(`${render.id} names a permit other than the one ${introducer.id} used`);
+    }
   }
 
   for (const a of attempts) {
@@ -297,6 +310,55 @@ export function renderLedgerProblems(log, renderedDir) {
     // was withdrawn with its judgement; holding it to the rule would make every correction a
     // permanent publication block. Its bytes are still checked below.
     const withdrawn = superseded.has(a.id);
+
+    // solo-protocol-v1.0.8. What each record TYPE may contain. The ledger checked only that
+    // `recordType` held a recognised word: an active judgement relabelled `observation` with its
+    // evidence source deleted still reported `no-candidates`, claimed no navigation, answered its
+    // record and cleared the backlog, and both implementations passed it with zero problems. They
+    // agreed on an incomplete rule, which a conformance test cannot detect by itself.
+    if (!withdrawn && a.recordType === 'observation') {
+      const where = `${a.id} (observation)`;
+      if (!['rendered', 'retrieval-blocked'].includes(a.outcome)) {
+        problems.push(`${where} records an outcome an observation may not record`);
+      }
+      if (a.navigationPerformed === false) problems.push(`${where} claims no navigation occurred`);
+      if (!isoUtc(a.navigatedAt)) problems.push(`${where} has no navigation timestamp`);
+      if (!a.permitId) problems.push(`${where} names no permit`);
+      else {
+        const permit = permits.find((x) => x.id === a.permitId);
+        if (!permit) problems.push(`${where} names permit ${a.permitId}, which does not exist`);
+        else if (!permit.consumedAt) problems.push(`${where} names an unconsumed permit`);
+      }
+      if (a.evidenceFromDiscoveryId) problems.push(`${where} names an evidence source`);
+      if (a.answersDiscoveryId) problems.push(`${where} answers a record`);
+      if (!a.renderId) problems.push(`${where} cites no render`);
+    }
+    if (!withdrawn && a.recordType === 'judgement-only') {
+      const where = `${a.id} (judgement)`;
+      if (!['candidates-found', 'no-candidates'].includes(a.outcome)) {
+        problems.push(`${where} records an outcome a judgement may not record`);
+      }
+      if (a.permitId) problems.push(`${where} names a permit`);
+      if (a.navigationPerformed !== false) problems.push(`${where} does not record navigationPerformed: false`);
+      if (!a.renderId) problems.push(`${where} cites no rendered evidence`);
+      if (a.answersDiscoveryId && a.supersedesDiscoveryId &&
+          a.answersDiscoveryId !== a.supersedesDiscoveryId) {
+        problems.push(`${where} answers one record and supersedes another`);
+      }
+    }
+
+    // One authority for the evidence: a copy of the registry's file, digest or size must match it.
+    if (a.renderId) {
+      const render = findRender(a.renderId);
+      if (render) {
+        for (const field of ['renderFile', 'renderedSha256', 'renderedBytes']) {
+          if (a[field] !== undefined && a[field] !== null && a[field] !== render[field]) {
+            problems.push(`${a.id} carries a ${field} that disagrees with render ${render.id}`);
+          }
+        }
+      }
+    }
+
     if (a.renderId && !withdrawn) {
       const render = findRender(a.renderId);
       if (!render) { problems.push(`${a.id} cites render ${a.renderId}, which does not exist`); continue; }

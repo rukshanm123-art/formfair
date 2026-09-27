@@ -2683,3 +2683,65 @@ The `service-application` set remains approved with one candidate.
 
 Nothing about the NZSIS form. It has not been captured, sealed or analysed, and 66 records across 57
 URLs still rest on plain retrieval.
+
+## Amendment 31: a recognised word is not a shape
+
+**Dated 27 September 2026.** `selection-v1.0.27` and `solo-protocol-v1.0.8`. Moves no earlier tag.
+No new capture tag.
+
+Amendment 30 put one render-ledger rule set behind both packages and proved they agreed. **They
+agreed on an incomplete rule**, which is the one failure a conformance test cannot find by itself: two
+implementations enforcing the same gap enforce it perfectly.
+
+The ledger checked that `recordType` held a **recognised word**, and nothing about whether the record
+was shaped like one. Three states passed both validators with zero problems:
+
+**An active judgement relabelled as an observation, with its evidence source deleted.** `d-0309` was
+changed to `recordType: 'observation'` and its `evidenceFromDiscoveryId` removed. It still reported
+`no-candidates`, still claimed no navigation occurred, still answered `d-0301`, still cleared that
+item from the backlog — and both validators reported nothing. Five checks now refuse it.
+
+**A render naming the wrong permit.** `g-0001` was changed to name `p-0001` instead of `p-0093`.
+Accepted by both. The traffic behind the evidence was therefore unaccounted while the evidence itself
+verified perfectly.
+
+**A record carrying a digest that disagrees with the registry.** Two claims about the same bytes, with
+nothing saying which governs.
+
+### What each record type may contain
+
+**An observation** records only `rendered` or `retrieval-blocked`; performed a real navigation, with a
+timestamp; names a permit that exists and is **consumed**; names **no** evidence source, because it
+*is* the evidence; and answers nothing, because it concludes nothing.
+
+**A judgement** records only `candidates-found` or `no-candidates`; names **no** permit, because it
+makes no request; states `navigationPerformed: false`; cites valid rendered evidence; and where it
+resolves a prior record, resolves exactly one — answering one record while superseding another leaves
+it unclear which was resolved.
+
+**A registry render** names a permit that exists, is consumed, and authorised **that page** — and it
+must be the permit the record that introduced it actually used, not merely some consumed permit.
+
+**One authority for the bytes.** A record may repeat the registry's file name, digest and size for
+readability, but a copy that *disagrees* must be refused or removed. Two claims about one file with no
+stated precedence is not redundancy; it is ambiguity.
+
+All of it is enforced in **both** implementations and at trust time, not only where the values are
+written. This is the fourth time in this scan that the defect has been precisely "the rule is checked
+where it is written and not where it is trusted", and it is now the fourth place it has been closed.
+
+### The conformance table
+
+Twenty-one further cases, bringing it to **47**: the relabelling attack itself, each observation
+constraint, each judgement constraint, the three permit cases, and the three disagreeing-copy cases
+plus a matching copy that must be *accepted*. The floor assertion rises from 15 refusals to 35, so the
+table cannot quietly become permissive.
+
+### What this does not establish
+
+Nothing has been captured. The retrospective backlog stands at **66 records across 57 URLs on 12
+origins**, and none of it is done: the 12 robots checks only unlock the work. A capture taken now could
+preserve a page that the retrospective renders later show should not have been selected, so the order
+is robots checks, then all 57 renders, then the 66 category judgements, then re-binding and
+re-approving affected sets, then re-confirming the selected page and category ordering for agencies
+1–4 — and only then the NZSIS capture.

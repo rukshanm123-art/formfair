@@ -31,6 +31,11 @@ const HTML = '<html><body><input id="q7" type="text"></body></html>';
 /** A ledger that both implementations must accept. */
 function clean() {
   return {
+    discoveryPermits: [{
+      id: 'p-0001', agency: 'A', category: 'service-application', candidateSetVersion: 1,
+      url: 'https://a.govt.nz/apply', robotsCheckId: 'r-0001',
+      issuedAt: '2026-09-26T18:58:00Z', consumedAt: '2026-09-26T19:00:00Z',
+    }],
     renders: [{
       id: 'g-0001', url: 'https://a.govt.nz/apply', navigatedAt: '2026-09-26T19:00:00Z',
       permitId: 'p-0001', renderFile: 'g1.html',
@@ -217,6 +222,138 @@ const CASES = [
     mutate: (l) => { l.attempts[1].answersDiscoveryId = 'd-9999'; },
   },
 
+  // selection-v1.0.27 / solo-protocol-v1.0.8. The rule both implementations agreed on was
+  // incomplete: `recordType` was checked for a recognised word and not for what that type may
+  // contain. A conformance test cannot find that by itself - two implementations agreeing on an
+  // incomplete rule agree perfectly - so these cases pin the contents of each type.
+  {
+    name: 'TYPE: THE ATTACK - a judgement relabelled as an observation, evidence source removed',
+    acceptable: false,
+    mutate: (l) => {
+      l.attempts[1].recordType = 'observation';
+      delete l.attempts[1].evidenceFromDiscoveryId;
+      l.attempts[1].answersDiscoveryId = 'd-0001';
+    },
+  },
+  {
+    name: 'TYPE: an observation concluding candidates-found',
+    acceptable: false,
+    mutate: (l) => { l.attempts[0].outcome = 'candidates-found'; },
+  },
+  {
+    name: 'TYPE: an observation claiming no navigation occurred',
+    acceptable: false,
+    mutate: (l) => { l.attempts[0].navigationPerformed = false; delete l.attempts[0].navigatedAt; },
+  },
+  {
+    name: 'TYPE: an observation with no navigation timestamp',
+    acceptable: false,
+    mutate: (l) => { delete l.attempts[0].navigatedAt; },
+  },
+  {
+    name: 'TYPE: an observation with no permit',
+    acceptable: false,
+    mutate: (l) => { delete l.attempts[0].permitId; l.renders[0].permitId = undefined; },
+  },
+  {
+    name: 'TYPE: an observation naming an unconsumed permit',
+    acceptable: false,
+    mutate: (l) => { l.discoveryPermits[0].consumedAt = null; },
+  },
+  {
+    name: 'TYPE: an observation naming an evidence source',
+    acceptable: false,
+    mutate: (l) => { l.attempts[0].evidenceFromDiscoveryId = 'd-0002'; },
+  },
+  {
+    name: 'TYPE: an observation answering a record',
+    acceptable: false,
+    mutate: (l) => { l.attempts[0].answersDiscoveryId = 'd-0002'; },
+  },
+  {
+    name: 'TYPE: a judgement recording an attrition outcome',
+    acceptable: false,
+    mutate: (l) => { l.attempts[1].outcome = 'retrieval-blocked'; },
+  },
+  {
+    name: 'TYPE: a judgement claiming a permit',
+    acceptable: false,
+    mutate: (l) => { l.attempts[1].permitId = 'p-0001'; },
+  },
+  {
+    name: 'TYPE: a judgement that does not say it navigated nothing',
+    acceptable: false,
+    mutate: (l) => { l.attempts[1].navigationPerformed = true; },
+  },
+  {
+    name: 'TYPE: a judgement resolving two different records at once',
+    acceptable: false,
+    mutate: (l) => {
+      l.attempts.push({
+        id: 'd-0020', agency: 'A', category: 'service-application', status: 'discovery',
+        discoveryKind: 'navigation', outcome: 'no-candidates', candidateSetVersion: 1,
+        url: 'https://a.govt.nz/apply', navigatedAt: '2026-09-26T18:00:00Z', approval: 'approved',
+      });
+      l.attempts.push({
+        id: 'd-0021', agency: 'A', category: 'service-application', status: 'discovery',
+        discoveryKind: 'navigation', outcome: 'no-candidates', candidateSetVersion: 1,
+        url: 'https://a.govt.nz/apply', navigatedAt: '2026-09-26T18:01:00Z', approval: 'approved',
+      });
+      l.attempts[1].answersDiscoveryId = 'd-0020';
+      l.attempts[1].supersedesDiscoveryId = 'd-0021';
+    },
+  },
+
+  // The registry's permit.
+  {
+    name: 'PERMIT: a render naming a permit that authorised another page',
+    acceptable: false,
+    mutate: (l) => { l.discoveryPermits[0].url = 'https://a.govt.nz/elsewhere'; },
+  },
+  {
+    name: 'PERMIT: a render naming a permit that does not exist',
+    acceptable: false,
+    mutate: (l) => { l.renders[0].permitId = 'p-9999'; },
+  },
+  {
+    name: 'PERMIT: a render naming a permit other than the one its observation used',
+    acceptable: false,
+    mutate: (l) => {
+      l.discoveryPermits.push({
+        id: 'p-0002', agency: 'A', category: 'service-application', candidateSetVersion: 1,
+        url: 'https://a.govt.nz/apply', robotsCheckId: 'r-0001',
+        issuedAt: '2026-09-26T18:58:00Z', consumedAt: '2026-09-26T19:00:00Z',
+      });
+      l.renders[0].permitId = 'p-0002';
+    },
+  },
+
+  // One authority for the bytes.
+  {
+    name: 'AUTHORITY: a record carrying a digest that disagrees with the registry',
+    acceptable: false,
+    mutate: (l) => { l.attempts[1].renderedSha256 = '0'.repeat(64); },
+  },
+  {
+    name: 'AUTHORITY: a record carrying a byte count that disagrees with the registry',
+    acceptable: false,
+    mutate: (l) => { l.attempts[1].renderedBytes = 1; },
+  },
+  {
+    name: 'AUTHORITY: a record carrying a file name that disagrees with the registry',
+    acceptable: false,
+    mutate: (l) => { l.attempts[1].renderFile = 'other.html'; },
+  },
+  {
+    name: 'AUTHORITY: a copy that MATCHES the registry is fine',
+    acceptable: true,
+    mutate: (l) => {
+      l.attempts[1].renderFile = l.renders[0].renderFile;
+      l.attempts[1].renderedSha256 = l.renders[0].renderedSha256;
+      l.attempts[1].renderedBytes = l.renders[0].renderedBytes;
+    },
+  },
+
   // Withdrawn records. A superseded judgement's citation was withdrawn with it; holding it to the
   // rule would make every correction a permanent publication block.
   {
@@ -291,6 +428,6 @@ describe('the two render-ledger implementations agree', () => {
 
   test('the table is not vacuous', () => {
     assert.ok(CASES.filter((c) => c.acceptable).length >= 3, 'some ledgers must be acceptable');
-    assert.ok(CASES.filter((c) => !c.acceptable).length >= 15, 'and most must be refused');
+    assert.ok(CASES.filter((c) => !c.acceptable).length >= 35, 'and most must be refused');
   });
 });
