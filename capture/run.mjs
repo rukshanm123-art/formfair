@@ -16,7 +16,7 @@
 
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync, renameSync, unlinkSync, mkdirSync, readdirSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { LEDGER_HEADER, recordExamination, CATEGORIES } from './capture.mjs';
 import { POLICY } from './politeness.mjs';
 import { DISCOVERY_EVIDENCE, RENDERED_METHODS } from './render-discovery.mjs';
@@ -296,6 +296,34 @@ export function appendAttempt(log, attempt) {
   // category, and the first use of this is a service-application render of a page first inspected
   // under account-registration. The link must therefore cross categories, and it is not a
   // correction - the earlier record was true about the method it used.
+  // selection-v1.0.26. An explicit answered record, checked at write time as well as at the gate.
+  // Keying answers by canonical URL and category alone let a judgement about a shared third-party
+  // form under one agency clear another agency's backlog entry for the same page.
+  if (attempt.answersDiscoveryId) {
+    const target = log.attempts.find((a) => a.id === attempt.answersDiscoveryId);
+    if (!target) {
+      throw new Error(`answersDiscoveryId ${attempt.answersDiscoveryId} matches no recorded attempt`);
+    }
+    if (target.status !== 'discovery') {
+      throw new Error(`${target.id} is a ${target.status} attempt; a judgement answers a discovery record`);
+    }
+    if (!attempt.renderId) {
+      throw new Error('a record that answers another must cite the rendered evidence it rests on');
+    }
+    for (const [field, label] of [['agency', 'agency'], ['category', 'category'],
+      ['candidateSetVersion', 'round']]) {
+      if (target[field] !== attempt[field]) {
+        throw new Error(
+          `${target.id} is ${label} ${JSON.stringify(target[field])}, but this judgement is ` +
+            `${JSON.stringify(attempt[field])}; a judgement answers a record in its own round`
+        );
+      }
+    }
+    if (canonicalise(target.url) !== canonicalise(attempt.url)) {
+      throw new Error(`${target.id} is ${target.url}, not ${attempt.url}`);
+    }
+  }
+
   if (attempt.rendersDiscoveryId) {
     const target = log.attempts.find((a) => a.id === attempt.rendersDiscoveryId);
     if (!target) {
@@ -1267,7 +1295,7 @@ export function publishProvenance(log, { to, capturesRoot = null }) {
     if (!capturesRoot) {
       throw new Error('publishing provenance for a log with renders requires the capture root, so the evidence can be verified');
     }
-    const renderProblems = checkRenderEvidence(log, join(resolve(capturesRoot), RENDERED_DIR));
+    const renderProblems = checkRenderLedger(log, join(resolve(capturesRoot), RENDERED_DIR));
     if (renderProblems.length) {
       throw new Error(
         `rendered evidence does not match the log and must not be published:\n  ${renderProblems.join('\n  ')}`
@@ -1522,12 +1550,38 @@ export function assertPermitUsable(log, { agency, category, candidateSetVersion,
         '`preflight-discovery` before making the request'
     );
   }
+  if (issued > Date.now()) {
+    throw new Error(`permit ${permitId} is stamped ${permit.issuedAt}, which is in the future`);
+  }
   const check = (log.robotsChecks ?? []).find((c) => c.id === permit.robotsCheckId);
   if (!check) throw new Error(`permit ${permitId} names robots check ${permit.robotsCheckId}, which does not exist`);
+  const fetched = Date.parse(check.fetchedAt ?? '');
+  if (Number.isNaN(fetched)) throw new Error(`robots check ${check.id} has no usable fetchedAt`);
+  if (fetched > Date.now()) {
+    throw new Error(`robots check ${check.id} is stamped ${check.fetchedAt}, which is in the future`);
+  }
   if (!robotsCheckIsFresh(check)) {
     throw new Error(
       `the robots policy behind permit ${permitId} was fetched at ${check.fetchedAt}, more than 24 ` +
         'hours ago; RFC 9309 section 2.4 does not support relying on it'
+    );
+  }
+  // selection-v1.0.26. The policy must be THIS origin's, and must still permit THIS exact path. The
+  // check verified only that a policy existed and was fresh, so a permit could rest on another
+  // origin's robots file, or on one that had been re-read since and now disallowed the path.
+  let parsed = null;
+  try { parsed = new URL(url); } catch { throw new Error(`${url} is not a usable URL`); }
+  if (check.origin !== parsed.origin) {
+    throw new Error(
+      `permit ${permitId} rests on the robots policy for ${check.origin}, but the request is to ` +
+        `${parsed.origin}`
+    );
+  }
+  const verdict = evaluatePolicy(check, parsed.pathname + parsed.search, 'chromium');
+  if (!verdict.allowed) {
+    throw new Error(
+      `the robots policy for ${parsed.origin} does not permit ${parsed.pathname}${parsed.search}: ` +
+        verdict.reason
     );
   }
   return permit;
@@ -1788,6 +1842,115 @@ export function permitAudit(log) {
       url: p.url, agency: p.agency, category: p.category, round: p.candidateSetVersion,
     })),
   };
+}
+
+/**
+ * Candidate sets whose bound evidence has since been superseded.
+ *
+ * selection-v1.0.26. The approved NZSIS account-registration set still binds `d-0301`, which `d-0308`
+ * superseded - so the set rests on a withdrawn finding while its replacement is bound to nothing. The
+ * corpus gate did not report it: `supportingRecords` checks that every bound id EXISTS, and a
+ * superseded record still exists. An approval is a judgement about particular evidence, and evidence
+ * that has been withdrawn since is not that evidence.
+ */
+export function staleSetBindings(log) {
+  const out = [];
+  for (const set of Object.values(log.candidateSets ?? {})) {
+    const stale = (set.discoveryRecordIds ?? [])
+      .map((id) => log.attempts.find((a) => a.id === id))
+      .filter((a) => a && isDiscoverySuperseded(log, a.id));
+    if (!stale.length) continue;
+    out.push({
+      agency: set.agency,
+      category: set.category,
+      version: set.version,
+      approval: set.approval,
+      stale: stale.map((a) => {
+        const replacement = log.attempts.find((r) => r.supersedesDiscoveryId === a.id);
+        return { id: a.id, replacedBy: replacement?.id ?? null };
+      }),
+    });
+  }
+  return out;
+}
+
+/**
+ * Re-binds a candidate set onto the records that replaced its superseded evidence.
+ *
+ * Append-only: the previous binding is archived with the reason and the time, not edited. The set
+ * returns to PENDING, because the researcher approved a set standing on particular records and the
+ * records have changed - carrying the old approval across would be asserting a judgement nobody made
+ * about this evidence. A binding that would still contain a superseded record is refused outright.
+ */
+export function reResolveCandidateSet(log, { agency, category, reason }) {
+  if (typeof reason !== 'string' || reason.trim() === '') {
+    throw new Error('re-binding a candidate set requires a reason, which is recorded');
+  }
+  const set = log.candidateSets?.[setKey(agency, category)];
+  if (!set) throw new Error(`no candidate set for ${agency} / ${category}`);
+  const bound = set.discoveryRecordIds ?? [];
+  const superseded = bound.filter((id) => {
+    const record = log.attempts.find((a) => a.id === id);
+    return record && isDiscoverySuperseded(log, id);
+  });
+  if (!superseded.length) {
+    throw new Error(`${agency} / ${category} binds no superseded record; there is nothing to re-bind`);
+  }
+
+  const substitutions = [];
+  const rebound = [];
+  for (const id of bound) {
+    if (!superseded.includes(id)) { rebound.push(id); continue; }
+    // Follow the chain to the end: a correction may itself have been corrected.
+    let current = id;
+    const walked = new Set([id]);
+    for (;;) {
+      const next = log.attempts.find((a) => a.supersedesDiscoveryId === current);
+      if (!next) break;
+      if (walked.has(next.id)) throw new Error(`the supersession chain from ${id} loops at ${next.id}`);
+      walked.add(next.id);
+      current = next.id;
+    }
+    if (current === id) throw new Error(`${id} is superseded but no replacement names it`);
+    substitutions.push({ from: id, to: current });
+    rebound.push(current);
+  }
+
+  const deduped = [...new Set(rebound)];
+  const stillSuperseded = deduped.filter((id) => isDiscoverySuperseded(log, id));
+  if (stillSuperseded.length) {
+    throw new Error(
+      `the new binding would still contain superseded record(s): ${stillSuperseded.join(', ')}`
+    );
+  }
+  const missing = deduped.filter((id) => !log.attempts.some((a) => a.id === id));
+  if (missing.length) throw new Error(`the new binding names missing record(s): ${missing.join(', ')}`);
+
+  const at = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
+  (set.bindingHistory ??= []).push({
+    discoveryRecordIds: [...bound],
+    approval: set.approval,
+    approvedAt: set.approvedAt ?? null,
+    approvalNote: set.approvalNote ?? null,
+    reboundAt: at,
+    reason,
+    substitutions,
+  });
+  set.discoveryRecordIds = deduped;
+  set.discoveryMethods = [...new Set(
+    deduped.map((id) => log.attempts.find((a) => a.id === id)?.discoveryKind).filter(Boolean)
+  )].sort();
+  set.approval = APPROVAL.PENDING;
+  set.approvedAt = null;
+  set.approvalNote = null;
+  set.reboundAt = at;
+
+  // Validated in the state it would be left in, and rolled back entirely if it does not hold.
+  assertSetAgreesWithRound(log, set, {
+    members: set.locked ?? [],
+    declaration: set.candidateDeclaration,
+  });
+  return { set, substitutions };
 }
 
 /**
@@ -2316,16 +2479,66 @@ export function findRenderForUrl(log, url) {
  * from the seal. A rule enforced where a value is written but not where it is trusted is the defect
  * this scan keeps rediscovering.
  */
-export function checkRenderEvidence(log, renderedDir) {
+export function checkRenderLedger(log, renderedDir) {
   const problems = [];
   const root = resolve(renderedDir);
+  const attempts = log.attempts.filter((a) => a.status === 'discovery');
+  const byId = new Map(log.attempts.map((a) => [a.id, a]));
+
+  /**
+   * A render filename must resolve INSIDE the rendered directory.
+   *
+   * selection-v1.0.26. Both implementations joined the name straight onto the directory, so
+   * `../../captures/some-page.html` read a corpus capture and verified happily against its own
+   * digest - evidence confinement broken by a string. The name is also required to be a plain
+   * basename, because that is all the harness ever writes.
+   */
+  const confinedPath = (file, where) => {
+    if (typeof file !== 'string' || file.trim() === '') {
+      problems.push(`${where} names no rendered file`);
+      return null;
+    }
+    if (file !== basename(file)) {
+      problems.push(`${where} names ${JSON.stringify(file)}, which is not a plain file name`);
+      return null;
+    }
+    const full = resolve(root, file);
+    const rel = relative(root, full);
+    if (rel.startsWith('..') || isAbsolute(rel)) {
+      problems.push(`${where} names ${JSON.stringify(file)}, which resolves outside ${RENDERED_DIR}/`);
+      return null;
+    }
+    return full;
+  };
+
+  const verifyBytes = (where, full, claimedSha, claimedBytes) => {
+    let bytes = null;
+    try {
+      bytes = readFileSync(full);
+    } catch (error) {
+      problems.push(`${where}: ${basename(full)} could not be read: ${error.message}`);
+      return;
+    }
+    if (claimedBytes !== undefined && claimedBytes !== null && bytes.length !== claimedBytes) {
+      problems.push(`${where}: ${basename(full)} is ${bytes.length} bytes, the log records ${claimedBytes}`);
+    }
+    if (sha256(bytes) !== claimedSha) {
+      problems.push(
+        `${where}: ${basename(full)} hashes to ${sha256(bytes).slice(0, 12)}, the log records ` +
+          `${String(claimedSha).slice(0, 12)}. The evidence on disk is not the evidence that was ` +
+          'observed.'
+      );
+    }
+  };
+
+  // The registry itself.
   const seen = new Set();
   for (const render of log.renders ?? []) {
     const where = render.id ?? '(a render with no id)';
     if (!render.id) problems.push('a render has no id');
     else if (seen.has(render.id)) problems.push(`render id ${render.id} appears more than once`);
     seen.add(render.id);
-    for (const field of ['url', 'renderFile', 'renderedSha256', 'navigatedAt']) {
+    for (const field of ['url', 'renderedSha256', 'navigatedAt']) {
       if (!render[field]) problems.push(`${where} has no ${field}`);
     }
     if (!/^[0-9a-f]{64}$/.test(render.renderedSha256 ?? '')) {
@@ -2334,68 +2547,115 @@ export function checkRenderEvidence(log, renderedDir) {
     if (!Number.isInteger(render.renderedBytes) || render.renderedBytes < 0) {
       problems.push(`${where} has renderedBytes ${JSON.stringify(render.renderedBytes)}`);
     }
-    if (!render.renderFile) continue;
-    const file = join(root, render.renderFile);
-    let bytes = null;
-    try {
-      bytes = readFileSync(file);
-    } catch (error) {
-      problems.push(`${where} names ${render.renderFile}, which could not be read: ${error.message}`);
-      continue;
-    }
-    if (bytes.length !== render.renderedBytes) {
+    const full = confinedPath(render.renderFile, where);
+    if (full) verifyBytes(where, full, render.renderedSha256, render.renderedBytes);
+  }
+
+  // Exactly one active observation per render. Two would make it ambiguous which record a
+  // judgement's `evidenceFromDiscoveryId` is required to name.
+  for (const render of log.renders ?? []) {
+    if (!render.id) continue;
+    const observations = attempts.filter(
+      (a) => a.renderId === render.id && a.recordType === RECORD_TYPES.OBSERVATION &&
+        !isDiscoverySuperseded(log, a.id)
+    );
+    if (observations.length > 1) {
       problems.push(
-        `${where}: ${render.renderFile} is ${bytes.length} bytes on disk, but the log records ` +
-          `${render.renderedBytes}`
+        `${render.id} is claimed by ${observations.length} active observations ` +
+          `(${observations.map((a) => a.id).join(', ')}); a render is observed once`
       );
     }
-    const actual = sha256(bytes);
-    if (actual !== render.renderedSha256) {
-      problems.push(
-        `${where}: ${render.renderFile} hashes to ${actual.slice(0, 12)} but the log records ` +
-          `${String(render.renderedSha256).slice(0, 12)}. The evidence on disk is not the evidence ` +
-          'that was observed.'
-      );
+    if (observations.length === 0 && !render.adoptedFrom) {
+      problems.push(`${render.id} has no observation record and was not adopted from one`);
     }
   }
 
-  // And every record that cites a render must cite one that exists, for the same page.
-  for (const a of log.attempts) {
-    if (!a.renderId) continue;
-    const render = findRender(log, a.renderId);
-    if (!render) {
-      problems.push(`${a.id} cites render ${a.renderId}, which does not exist`);
-      continue;
-    }
-    if (canonicalise(render.url) !== canonicalise(a.url)) {
-      problems.push(
-        `${a.id} is ${a.url} but cites render ${render.id} of ${render.url}; a judgement must rest ` +
-          'on evidence of the page it judges'
-      );
-    }
-  }
+  for (const a of attempts) {
+    // selection-v1.0.26. The SEMANTIC checks apply to active records only. A superseded record's
+    // judgement has been withdrawn, and its citation withdrawn with it - `d-0308` names the wrong
+    // evidence source and `d-0309` corrects it, so holding `d-0308` to the rule would make every
+    // correction a permanent publication block, which is the opposite of what append-only
+    // correction is for. Its BYTES are still checked below, because the evidence is still evidence.
+    const withdrawn = isDiscoverySuperseded(log, a.id);
 
-  // A record carrying a digest but no registry entry is checked directly against disk. Two such
-  // records exist - written before the registry did - and a hash nobody re-reads is decoration
-  // whether or not a registry happens to hold it.
-  for (const a of log.attempts) {
-    if (a.renderId || !a.renderFile) continue;
-    const file = join(root, a.renderFile);
-    let bytes = null;
-    try {
-      bytes = readFileSync(file);
-    } catch (error) {
-      problems.push(`${a.id} names ${a.renderFile}, which could not be read: ${error.message}`);
-      continue;
+    // A record citing a render must cite one that exists, of the page it judges.
+    if (a.renderId && !withdrawn) {
+      const render = findRender(log, a.renderId);
+      if (!render) {
+        problems.push(`${a.id} cites render ${a.renderId}, which does not exist`);
+        continue;
+      }
+      if (canonicalise(render.url) !== canonicalise(a.url)) {
+        problems.push(
+          `${a.id} is ${a.url} but cites render ${render.id} of ${render.url}; a judgement must ` +
+            'rest on evidence of the page it judges'
+        );
+      }
+      if (a.recordType !== RECORD_TYPES.OBSERVATION && a.recordType !== RECORD_TYPES.JUDGEMENT_ONLY) {
+        problems.push(
+          `${a.id} cites render ${a.renderId} but is neither an observation nor a judgement; a ` +
+            'record resting on rendered evidence must say which it is'
+        );
+      }
+      // A judgement may not rest on a challenge document.
+      if (a.recordType === RECORD_TYPES.JUDGEMENT_ONLY && (render.accessBarriers ?? []).length > 0) {
+        problems.push(
+          `${a.id} judges ${a.url} on render ${render.id}, which was access-barred ` +
+            `(${render.accessBarriers.join(', ')}); a challenge document is not the page`
+        );
+      }
+      // The evidence source must be the observation of that render, not some other record.
+      if (a.recordType === RECORD_TYPES.JUDGEMENT_ONLY) {
+        const source = byId.get(a.evidenceFromDiscoveryId);
+        if (!a.evidenceFromDiscoveryId) {
+          problems.push(`${a.id} is a judgement with no evidenceFromDiscoveryId`);
+        } else if (!source) {
+          problems.push(`${a.id} names evidence source ${a.evidenceFromDiscoveryId}, which does not exist`);
+        } else if (source.status !== 'discovery') {
+          problems.push(`${a.id} names evidence source ${source.id}, a ${source.status} attempt`);
+        } else {
+          const introduced = source.renderId === a.renderId || render.adoptedFrom === source.id;
+          if (!introduced) {
+            problems.push(
+              `${a.id} cites render ${a.renderId} but names ${source.id} as its source, and ${source.id} ` +
+                'neither recorded that render nor is the record it was adopted from'
+            );
+          }
+        }
+      }
     }
-    if (a.renderedBytes !== undefined && bytes.length !== a.renderedBytes) {
-      problems.push(`${a.id}: ${a.renderFile} is ${bytes.length} bytes, the record says ${a.renderedBytes}`);
+
+    // An answered record must be the same work: same agency, category, round and page.
+    if (a.answersDiscoveryId && !withdrawn) {
+      const target = byId.get(a.answersDiscoveryId);
+      const where = `${a.id} answers ${a.answersDiscoveryId}`;
+      if (!target) {
+        problems.push(`${where}, which does not exist`);
+      } else if (target.status !== 'discovery') {
+        problems.push(`${where}, a ${target.status} attempt`);
+      } else {
+        if (!a.renderId) problems.push(`${where} without citing rendered evidence`);
+        for (const [field, label] of [['agency', 'agency'], ['category', 'category'],
+          ['candidateSetVersion', 'round']]) {
+          if (target[field] !== a[field]) {
+            problems.push(
+              `${where}, but that record is ${label} ${JSON.stringify(target[field])} and this one is ` +
+                `${JSON.stringify(a[field])}`
+            );
+          }
+        }
+        if (canonicalise(target.url) !== canonicalise(a.url)) {
+          problems.push(`${where}, which is ${target.url}, not ${a.url}`);
+        }
+      }
     }
-    if (a.renderedSha256 && sha256(bytes) !== a.renderedSha256) {
-      problems.push(
-        `${a.id}: ${a.renderFile} hashes to ${sha256(bytes).slice(0, 12)}, the record says ` +
-          `${String(a.renderedSha256).slice(0, 12)}`
-      );
+
+    // A record carrying a digest but no registry entry is checked directly against disk. Two such
+    // records exist - written before the registry did - and a hash nobody re-reads is decoration
+    // whether or not a registry happens to hold it.
+    if (!a.renderId && a.renderFile) {
+      const full = confinedPath(a.renderFile, a.id);
+      if (full) verifyBytes(a.id, full, a.renderedSha256, a.renderedBytes);
     }
   }
   return problems;
@@ -2448,7 +2708,7 @@ export function adoptRender(log, { fromAttemptId, capturesRoot }) {
  * One render's evidence, re-verified before anything is concluded from it.
  *
  * selection-v1.0.25. The shared validator, called from classification, from correction, and - as
- * `checkRenderEvidence` over the whole registry - from the corpus gate, from provenance publication
+ * `checkRenderLedger` over the whole registry - from the corpus gate, from provenance publication
  * and from the seal. Reading a digest out of the log and trusting it is what made the hashes
  * decorative.
  */
@@ -2519,19 +2779,50 @@ const CONTENT_OUTCOMES = Object.freeze(['candidates-found', 'no-candidates', 're
  */
 function renderedJudgements(log) {
   const answered = new Set();
+  const byId = new Map(log.attempts.map((a) => [a.id, a]));
   for (const a of log.attempts) {
     if (a.status !== 'discovery') continue;
     if (!a.renderId) continue;
-    if (!['candidates-found', 'no-candidates'].includes(a.outcome)) continue;
+    if (!JUDGEMENT_OUTCOMES.includes(a.outcome)) continue;
     if (isDiscoverySuperseded(log, a.id)) continue;
-    answered.add(`${canonicalise(a.url)}\u0000${a.category}`);
+    // selection-v1.0.26. The EXACT record, named. Keying by canonical URL and category alone meant
+    // a judgement about a shared third-party form under one agency cleared another agency's
+    // backlog entry for the same page - and the two agencies' rounds are different work with
+    // different provenance. A judgement answers the record it names, and only if it is the same
+    // agency, category, round and page.
+    const target = byId.get(a.answersDiscoveryId);
+    if (!target) continue;
+    if (target.agency !== a.agency || target.category !== a.category) continue;
+    if (target.candidateSetVersion !== a.candidateSetVersion) continue;
+    if (canonicalise(target.url) !== canonicalise(a.url)) continue;
+    answered.add(target.id);
   }
   return answered;
 }
 
+/**
+ * The discovery record ids bound to a CURRENT candidate set.
+ *
+ * selection-v1.0.26. The backlog counted records bound only to SUPERSEDED sets - rounds that were
+ * rejected and redone, whose evidence the corpus no longer rests on. Thirty-four of the ninety-eight
+ * were withdrawn work, so the obligation was overstated by a third and would have sent the scan back
+ * to re-render pages nothing depends on.
+ */
+function boundToCurrentSet(log) {
+  const ids = new Set();
+  for (const set of Object.values(log.candidateSets ?? {})) {
+    for (const id of set.discoveryRecordIds ?? []) ids.add(id);
+  }
+  return ids;
+}
+
 export function renderBacklog(log) {
   const answered = renderedJudgements(log);
+  const current = boundToCurrentSet(log);
   return log.attempts.filter((a) => {
+    // Only evidence a CURRENT set stands on. A record belonging solely to a superseded round is
+    // history, and re-rendering it would be traffic spent on a finding already withdrawn.
+    if (!current.has(a.id)) return false;
     if (a.status !== 'discovery') return false;
     if (!RENDERED_METHODS.includes(a.discoveryKind)) return false;
     if (isDiscoverySuperseded(log, a.id)) return false;
@@ -2541,8 +2832,8 @@ export function renderBacklog(log) {
     if (a.navigationPerformed === false) return false;
     let url = null;
     try { url = new URL(a.url); } catch { return false; }
-    // Answered by a judgement for THIS page and THIS category, not merely mentioned by one.
-    if (answered.has(`${canonicalise(a.url)}\u0000${a.category}`)) return false;
+    // Answered by a judgement that NAMES this record, not one that merely shares its page.
+    if (answered.has(a.id)) return false;
     if (NON_HTML.test(url.pathname)) return false;
     // And the request must not be FORBIDDEN by the policy in force now. Without this the gate would
     // demand renders that politeness forbids - an obligation meetable only by breaching robots,
@@ -2677,11 +2968,19 @@ export function corpusBlockers(log, { capturesRoot = null } = {}) {
   if ((log.renders ?? []).length > 0 && !capturesRoot) {
     add('render-evidence', 'rendered evidence could not be verified: no capture root was supplied', []);
   } else if ((log.renders ?? []).length > 0) {
-    const renderProblems = checkRenderEvidence(log, join(resolve(capturesRoot), RENDERED_DIR));
+    const renderProblems = checkRenderLedger(log, join(resolve(capturesRoot), RENDERED_DIR));
     if (renderProblems.length) {
       add('render-evidence', `rendered evidence does not match the log: ${renderProblems.length} problem(s)`,
         renderProblems);
     }
+  }
+
+  const stale = staleSetBindings(log);
+  if (stale.length) {
+    add('stale-set-bindings',
+      `${stale.length} candidate set(s) bind a superseded discovery record`,
+      stale.map((s) => `${s.agency} / ${s.category} v${s.version} (${s.approval ?? 'pending'}): ` +
+        s.stale.map((r) => `${r.id} -> ${r.replacedBy ?? 'no replacement'}`).join(', ')));
   }
 
   const backlog = renderBacklog(log);

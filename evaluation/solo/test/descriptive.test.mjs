@@ -594,6 +594,14 @@ describe('the corpus seal requires the exhaustion records', () => {
       renderedSha256: createHash('sha256').update(html).digest('hex'),
       renderedBytes: Buffer.byteLength(html),
     }];
+    // solo-protocol-v1.0.7: a render must have an observation record, or say which record it was
+    // adopted from. A registry entry nobody recorded is evidence from nowhere.
+    log.attempts.push({
+      id: 'd-9400', agency: 'obs', category: 'account-registration', status: 'discovery',
+      discoveryKind: 'navigation', outcome: 'rendered', recordType: 'observation',
+      renderId: 'g-0001', permitId: 'p-0001', candidateSetVersion: 1, approval: 'approved',
+      url: 'https://example.invalid/apply', navigatedAt: '2026-09-25T03:30:00Z',
+    });
     return log;
   };
 
@@ -612,7 +620,7 @@ describe('the corpus seal requires the exhaustion records', () => {
       const tampered = sealCorpus({ draft: d, capturesDir: prepared.capturesDir, instrument: identity, frameDir, captureLogPath: prepared.captureLogPath });
       assert.equal(tampered.manifest, null);
       assert.ok(
-        tampered.problems.some((p) => /is not the evidence that was observed/.test(p)),
+        tampered.problems.some((p) => /does not match its recorded digest/.test(p)),
         tampered.problems.join('; ')
       );
     });
@@ -643,7 +651,8 @@ describe('the corpus seal requires the exhaustion records', () => {
       const prepared = prepareReal(dir, d, { log });
       const sealed = sealCorpus({ draft: d, capturesDir: prepared.capturesDir, instrument: identity, frameDir, captureLogPath: prepared.captureLogPath });
       assert.equal(sealed.manifest, null);
-      assert.ok(sealed.problems.some((p) => /cites render g-9999, which is not registered/.test(p)));
+      assert.ok(sealed.problems.some((p) => /cites render g-9999, which does not exist/.test(p)),
+        sealed.problems.join('; '));
     });
   });
 

@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const RULE_IDS = ['FF-01', 'FF-02', 'FF-03', 'FF-04', 'FF-05'];
@@ -168,7 +168,7 @@ const FRAME_FILES = [
  * exhaustion records at all. A manifest that misnames its own protocol is worse than one that
  * omits it: a reader checking which rules a corpus was sealed under would be told the wrong ones.
  */
-export const SOLO_PROTOCOL_TAG = 'solo-protocol-v1.0.6';
+export const SOLO_PROTOCOL_TAG = 'solo-protocol-v1.0.7';
 
 /**
  * Two resolutions, mirrored from the capture package and checked equal by a test.
@@ -208,6 +208,138 @@ export const RESOLUTION_REASONS = Object.freeze({
  * never accepted as current: an exhaustion recorded under superseded wording must be re-resolved
  * before it can be sealed, or a manifest would carry a claim the protocol has since withdrawn.
  */
+/**
+ * The render ledger rules, mirrored from the capture package and held to it by a conformance test.
+ *
+ * solo-protocol-v1.0.7. `evaluation/` must not import `capture/`, so these rules exist twice. The
+ * duplication is only safe if the two are checked against each other over the same inputs, and the
+ * previous sealing-time check was a weaker second implementation rather than a mirror — it verified
+ * bytes and URLs and none of the semantics, while the protocol claimed one shared validator.
+ *
+ * Returns problems rather than throwing, in the order the capture package produces them.
+ */
+export function renderLedgerProblems(log, renderedDir) {
+  const problems = [];
+  const root = resolve(renderedDir);
+  const attempts = (Array.isArray(log.attempts) ? log.attempts : []).filter((a) => a.status === 'discovery');
+  const byId = new Map((log.attempts ?? []).map((a) => [a.id, a]));
+  const renders = Array.isArray(log.renders) ? log.renders : [];
+  const findRender = (id) => renders.find((r) => r.id === id) ?? null;
+  const superseded = new Set(
+    (log.attempts ?? []).map((a) => a.supersedesDiscoveryId).filter((id) => id !== undefined && id !== null)
+  );
+  const canon = (u) => { try { const x = new URL(u); x.hash = ''; return x.href; } catch { return String(u); } };
+
+  // A rendered file name must resolve inside `rendered/`. Both implementations joined the name
+  // straight onto the directory, so `../../captures/page.html` escaped confinement entirely.
+  const confinedPath = (file, where) => {
+    if (typeof file !== 'string' || file.trim() === '') { problems.push(`${where} names no rendered file`); return null; }
+    if (file !== basename(file)) {
+      problems.push(`${where} names ${JSON.stringify(file)}, which is not a plain file name`);
+      return null;
+    }
+    const full = resolve(root, file);
+    const rel = relative(root, full);
+    if (rel.startsWith('..') || isAbsolute(rel)) {
+      problems.push(`${where} names ${JSON.stringify(file)}, which resolves outside rendered/`);
+      return null;
+    }
+    return full;
+  };
+  const verifyBytes = (where, full, claimedSha, claimedBytes) => {
+    let bytes = null;
+    try { bytes = readFileSync(full); } catch (error) {
+      problems.push(`${where}: ${basename(full)} could not be read: ${error.message}`);
+      return;
+    }
+    if (claimedBytes !== undefined && claimedBytes !== null && bytes.length !== claimedBytes) {
+      problems.push(`${where}: ${basename(full)} is ${bytes.length} bytes, the log records ${claimedBytes}`);
+    }
+    if (sha256(bytes) !== claimedSha) {
+      problems.push(`${where}: ${basename(full)} does not match its recorded digest`);
+    }
+  };
+
+  const seen = new Set();
+  for (const render of renders) {
+    const where = render.id ?? '(a render with no id)';
+    if (!render.id) problems.push('a render has no id');
+    else if (seen.has(render.id)) problems.push(`render id ${render.id} appears more than once`);
+    seen.add(render.id);
+    for (const field of ['url', 'renderedSha256', 'navigatedAt']) {
+      if (!render[field]) problems.push(`${where} has no ${field}`);
+    }
+    if (!/^[0-9a-f]{64}$/.test(render.renderedSha256 ?? '')) {
+      problems.push(`${where} has an unusable renderedSha256`);
+    }
+    if (!Number.isInteger(render.renderedBytes) || render.renderedBytes < 0) {
+      problems.push(`${where} has an unusable renderedBytes`);
+    }
+    const full = confinedPath(render.renderFile, where);
+    if (full) verifyBytes(where, full, render.renderedSha256, render.renderedBytes);
+  }
+
+  for (const render of renders) {
+    if (!render.id) continue;
+    const observations = attempts.filter(
+      (a) => a.renderId === render.id && a.recordType === 'observation' && !superseded.has(a.id)
+    );
+    if (observations.length > 1) {
+      problems.push(`${render.id} is claimed by ${observations.length} active observations`);
+    }
+    if (observations.length === 0 && !render.adoptedFrom) {
+      problems.push(`${render.id} has no observation record and was not adopted from one`);
+    }
+  }
+
+  for (const a of attempts) {
+    // solo-protocol-v1.0.7: semantic checks apply to ACTIVE records. A superseded record's citation
+    // was withdrawn with its judgement; holding it to the rule would make every correction a
+    // permanent publication block. Its bytes are still checked below.
+    const withdrawn = superseded.has(a.id);
+    if (a.renderId && !withdrawn) {
+      const render = findRender(a.renderId);
+      if (!render) { problems.push(`${a.id} cites render ${a.renderId}, which does not exist`); continue; }
+      if (canon(render.url) !== canon(a.url)) {
+        problems.push(`${a.id} cites render ${render.id} of a different page`);
+      }
+      if (a.recordType !== 'observation' && a.recordType !== 'judgement-only') {
+        problems.push(`${a.id} cites render ${a.renderId} but is neither an observation nor a judgement`);
+      }
+      if (a.recordType === 'judgement-only' && (render.accessBarriers ?? []).length > 0) {
+        problems.push(`${a.id} judges ${a.url} on access-barred render ${render.id}`);
+      }
+      if (a.recordType === 'judgement-only') {
+        const source = byId.get(a.evidenceFromDiscoveryId);
+        if (!a.evidenceFromDiscoveryId) problems.push(`${a.id} is a judgement with no evidenceFromDiscoveryId`);
+        else if (!source) problems.push(`${a.id} names evidence source ${a.evidenceFromDiscoveryId}, which does not exist`);
+        else if (source.status !== 'discovery') problems.push(`${a.id} names evidence source ${source.id}, not a discovery record`);
+        else if (!(source.renderId === a.renderId || render.adoptedFrom === source.id)) {
+          problems.push(`${a.id} names ${source.id} as its evidence source, which did not introduce render ${a.renderId}`);
+        }
+      }
+    }
+    if (a.answersDiscoveryId && !withdrawn) {
+      const target = byId.get(a.answersDiscoveryId);
+      const where = `${a.id} answers ${a.answersDiscoveryId}`;
+      if (!target) problems.push(`${where}, which does not exist`);
+      else if (target.status !== 'discovery') problems.push(`${where}, not a discovery record`);
+      else {
+        if (!a.renderId) problems.push(`${where} without citing rendered evidence`);
+        for (const field of ['agency', 'category', 'candidateSetVersion']) {
+          if (target[field] !== a[field]) problems.push(`${where}, which differs in ${field}`);
+        }
+        if (canon(target.url) !== canon(a.url)) problems.push(`${where}, which is a different page`);
+      }
+    }
+    if (!a.renderId && a.renderFile) {
+      const full = confinedPath(a.renderFile, a.id);
+      if (full) verifyBytes(a.id, full, a.renderedSha256, a.renderedBytes);
+    }
+  }
+  return problems;
+}
+
 export const SUPERSEDED_REASONS = Object.freeze([
   'all four categories in the frozen priority order were searched and none yielded an eligible form',
   'all four categories in the frozen priority order were attempted, but technical retrieval ' +
@@ -679,51 +811,14 @@ export function sealCorpus({
           }
         }
 
-        // solo-protocol-v1.0.6. Rendered discovery evidence, re-hashed at sealing time.
-        //
-        // The digests were written into the log and read by nothing. A render file that had been
-        // edited, truncated or deleted would leave a convincing hash-shaped claim behind, and every
-        // gate would pass - the same defect the capture files had before their bytes were compared,
-        // in the directory that had just become load-bearing for discovery. The seal is the last
-        // gate, so it checks rather than inherits.
-        const renderedRoot = join(logRoot, 'rendered');
-        const registered = Array.isArray(log.renders) ? log.renders : [];
-        const claims = [
-          ...registered.map((r) => ({ what: r.id, file: r.renderFile, sha256: r.renderedSha256, bytes: r.renderedBytes })),
-          // Records written before the registry carry the file and digest themselves.
-          ...attempts
-            .filter((a) => !a.renderId && a.renderFile)
-            .map((a) => ({ what: a.id, file: a.renderFile, sha256: a.renderedSha256, bytes: a.renderedBytes })),
-        ];
-        for (const claim of claims) {
-          const where = `renderedEvidence[${claim.what}]`;
-          if (!claim.file) { problems.push(`${where} names no file`); continue; }
-          let bytes = null;
-          try {
-            bytes = readFileSync(join(renderedRoot, claim.file));
-          } catch (error) {
-            problems.push(`${where}: ${claim.file} could not be read: ${error.message}`);
-            continue;
-          }
-          if (claim.bytes !== undefined && claim.bytes !== null && bytes.length !== claim.bytes) {
-            problems.push(`${where}: ${claim.file} is ${bytes.length} bytes, the log records ${claim.bytes}`);
-          }
-          if (claim.sha256 && sha256(bytes) !== claim.sha256) {
-            problems.push(
-              `${where}: ${claim.file} hashes to ${sha256(bytes).slice(0, 12)}, the log records ` +
-                `${String(claim.sha256).slice(0, 12)}. The discovery evidence on disk is not the ` +
-                'evidence that was observed.'
-            );
-          }
-        }
-        // A judgement must cite a render that exists, of the page it judges.
-        for (const a of attempts) {
-          if (!a.renderId) continue;
-          const render = registered.find((r) => r.id === a.renderId);
-          if (!render) { problems.push(`${a.id} cites render ${a.renderId}, which is not registered`); continue; }
-          if (render.url !== a.url) {
-            problems.push(`${a.id} is ${a.url} but cites render ${render.id} of ${render.url}`);
-          }
+        // solo-protocol-v1.0.7. The render ledger, checked by the same rules as the capture
+        // package's `checkRenderLedger` — and `checkRenderLedger` is exported as
+        // `renderLedgerProblems` below so a conformance test can drive BOTH implementations over one
+        // table of adversarial ledgers and require identical verdicts. The previous version here was
+        // a weaker second implementation of a validator described as shared, which is how two
+        // divergent rule sets came to sit behind one claim.
+        for (const problem of renderLedgerProblems(log, join(logRoot, 'rendered'))) {
+          problems.push(`renderLedger: ${problem}`);
         }
 
         // The symmetric check: a sealed page must be an approved capture in the log.

@@ -27,7 +27,8 @@ import {
   PERMIT_TTL_MS, sha256, approveCandidateSet, exhaustAgency, agencyResolution, agencyResolutions,
   AGENCY_RESOLUTIONS, BOUNDED_COMPLETE_REASON, ATTRITION_REASON, reResolveExhaustion,
   renderBacklog, renderBacklogByUrl, renderPrerequisite, SUPERSEDED_COMPLETE_REASONS,
-  recordRender, findRender, findRenderForUrl, checkRenderEvidence, assertRenderEvidenceUsable,
+  recordRender, findRender, findRenderForUrl, checkRenderLedger, assertRenderEvidenceUsable,
+  reResolveCandidateSet, staleSetBindings, approveCandidateSet as approveSet,
   assertPermitUsable, adoptRender, publishProvenance, checkPermitLedger,
 } from '../run.mjs';
 import {
@@ -52,6 +53,38 @@ const response = (status, contentType, bytes) => ({
   async arrayBuffer() { return bytes; },
   async text() { return bytes.toString('utf8'); },
 });
+
+
+/** A fresh, permissive robots policy for one origin. */
+const withPolicyFor = (log, origin, body = '') => {
+  recordRobotsCheck(log, {
+    origin, url: `${origin}/robots.txt`,
+    fetchedAt: new Date(Date.now() - 60_000).toISOString().replace(/\.\d{3}Z$/, 'Z'),
+    httpStatus: 200, disposition: 'rules', sha256: sha256(body), bytes: body.length, body,
+  });
+  return log;
+};
+
+
+/**
+ * Binds every discovery record in the log into a current candidate set, per category.
+ *
+ * selection-v1.0.26: the backlog counts only evidence a CURRENT set stands on, so a fixture that
+ * binds nothing has an empty backlog - correctly. Eight tests written before that rule had to be
+ * given bindings, which is what a real round always has.
+ */
+const bindAll = (log) => {
+  for (const a of log.attempts.filter((x) => x.status === 'discovery')) {
+    const key = `${a.agency}\u0000${a.category}`;
+    const set = (log.candidateSets[key] ??= {
+      agency: a.agency, category: a.category, version: a.candidateSetVersion ?? 1,
+      discovered: [], locked: [], lockedAt: '2026-09-26T23:00:00Z', approval: 'approved',
+      candidateDeclaration: 'none', discoveryRecordIds: [],
+    });
+    if (!set.discoveryRecordIds.includes(a.id)) set.discoveryRecordIds.push(a.id);
+  }
+  return log;
+};
 
 describe('a 2xx is not proof that a robots file was served', () => {
   test('an Incapsula challenge page with HTTP 200 is unestablished, not rules', () => {
@@ -867,6 +900,7 @@ describe('the rendered DOM is the authoritative discovery evidence', () => {
   test('a plain-retrieval navigation record is in the backlog', () => {
     const log = withPolicy(emptyLog());
     appendAttempt(log, recordFor());
+    bindAll(log);
     assert.equal(renderBacklog(log).length, 1);
     assert.equal(renderPrerequisite(log, renderBacklog(log)[0]), null, 'and is renderable now');
   });
@@ -884,6 +918,7 @@ describe('the rendered DOM is the authoritative discovery evidence', () => {
       navigatedAt: '2026-09-26T19:01:00Z', examinedAt: '2026-09-26T19:01:00Z',
       evidence: 'rendered-dom', rendersDiscoveryId: original,
     }));
+    bindAll(log);
     assert.deepEqual(renderBacklog(log).map((a) => a.id), [original],
       'the named record is still unanswered: nothing has judged its category');
   });
@@ -950,6 +985,7 @@ describe('the rendered DOM is the authoritative discovery evidence', () => {
     // them shrank the real obligation from 99 records to 32.
     const log = emptyLog();
     appendAttempt(log, recordFor());
+    bindAll(log);
     assert.equal(renderBacklog(log).length, 1);
     assert.match(renderPrerequisite(log, renderBacklog(log)[0]), /no recorded robots policy/);
   });
@@ -962,6 +998,7 @@ describe('the rendered DOM is the authoritative discovery evidence', () => {
       sha256: sha256(''), bytes: 0, body: '',
     });
     appendAttempt(log, recordFor());
+    bindAll(log);
     assert.equal(renderBacklog(log).length, 1);
     assert.match(renderPrerequisite(log, renderBacklog(log)[0]), /more than 24 hours old/);
   });
@@ -970,6 +1007,7 @@ describe('the rendered DOM is the authoritative discovery evidence', () => {
     const log = withPolicy(emptyLog());
     appendAttempt(log, recordFor({ category: 'account-registration' }));
     appendAttempt(log, recordFor({ category: 'service-application', examinedAt: '2026-09-26T19:20:00Z', navigatedAt: '2026-09-26T19:20:00Z' }));
+    bindAll(log);
     const groups = renderBacklogByUrl(log);
     assert.equal(renderBacklog(log).length, 2);
     assert.equal(groups.length, 1);
@@ -979,6 +1017,7 @@ describe('the rendered DOM is the authoritative discovery evidence', () => {
   test('the backlog withholds the corpus draft', () => {
     const log = withPolicy(emptyLog());
     appendAttempt(log, recordFor());
+    bindAll(log);
     assert.ok(corpusBlockers(log).some((b) => b.kind === 'render-backlog'));
   });
 });
@@ -1145,7 +1184,17 @@ describe('one render answers several categories, and answering is not naming', (
       renderFile: 'g1.html', renderedSha256: sha256(html), renderedBytes: Buffer.byteLength(html),
       accessBarriers: [],
     });
-    return { dir, log, render, html };
+    // selection-v1.0.26: a render needs the record that observed it, or `adoptedFrom`. A registry
+    // entry nobody recorded is evidence from nowhere.
+    appendAttempt(log, {
+      recordType: 'observation', renderId: render.id, permitId: 'p-0001',
+      examinedAt: '2026-09-26T18:59:00Z', agency: 'A', website: 'https://a.govt.nz/',
+      url: 'https://a.govt.nz/apply', status: 'discovery', discoveryKind: 'navigation',
+      outcome: 'rendered', category: 'service-application', candidateSetVersion: 1,
+      navigatedAt: '2026-09-26T18:59:00Z', approval: 'approved',
+    });
+    const observation = log.attempts.at(-1);
+    return { dir, log, render, html, observation };
   };
 
   const plain = (log, category, at) => {
@@ -1158,13 +1207,16 @@ describe('one render answers several categories, and answering is not naming', (
   };
   const judge = (log, { render, category, outcome, answers, at }) => {
     appendAttempt(log, {
-      recordType: 'judgement-only', renderId: render.id, evidenceFromDiscoveryId: 'd-0001',
+      recordType: 'judgement-only', renderId: render.id,
+      evidenceFromDiscoveryId: log.attempts.find((a) => a.recordType === 'observation').id,
       ...(answers ? { rendersDiscoveryId: answers } : {}),
       examinedAt: at, agency: 'A', website: 'https://a.govt.nz/', url: render.url,
       status: 'discovery', discoveryKind: 'navigation', outcome, category, candidateSetVersion: 1,
       navigationPerformed: false, checkedAt: at, evidence: 'rendered-dom',
       renderFile: render.renderFile, renderedSha256: render.renderedSha256,
       renderedBytes: render.renderedBytes, approval: 'approved',
+      // selection-v1.0.26: the EXACT record answered, by id.
+      ...(answers ? { answersDiscoveryId: answers } : {}),
       supersedesDiscoveryId: answers,
     });
     return log.attempts.at(-1);
@@ -1175,6 +1227,7 @@ describe('one render answers several categories, and answering is not naming', (
     // `retrieval-inconclusive` and no account-registration judgement was ever made.
     const { dir, log } = setup();
     const ar = plain(log, 'account-registration', '2026-09-26T19:00:00Z');
+    bindAll(log);
     assert.equal(renderBacklog(log).length, 1);
 
     // A record that merely mentions it, in another category, clears nothing.
@@ -1182,7 +1235,7 @@ describe('one render answers several categories, and answering is not naming', (
     judge(log, { render, category: 'service-application', outcome: 'candidates-found', at: '2026-09-26T19:01:00Z' });
     assert.deepEqual(renderBacklog(log).map((a) => a.id), [ar.id],
       'the account-registration record is still unanswered');
-    assert.equal(checkRenderEvidence(log, join(dir, 'rendered')).length, 0);
+    assert.equal(checkRenderLedger(log, join(dir, 'rendered')).length, 0);
   });
 
   test('one render supports a judgement per category, and each clears its own', () => {
@@ -1190,6 +1243,7 @@ describe('one render answers several categories, and answering is not naming', (
     const render = log.renders[0];
     const ar = plain(log, 'account-registration', '2026-09-26T19:00:00Z');
     const sa = plain(log, 'service-application', '2026-09-26T19:01:00Z');
+    bindAll(log);
     assert.equal(renderBacklog(log).length, 2);
     assert.equal(renderBacklogByUrl(log).length, 1, 'one page, so one render answers both');
 
@@ -1198,7 +1252,7 @@ describe('one render answers several categories, and answering is not naming', (
 
     judge(log, { render, category: 'service-application', outcome: 'candidates-found', answers: sa.id, at: '2026-09-26T19:03:00Z' });
     assert.deepEqual(renderBacklog(log), [], 'one render, two categories, both cleared');
-    assert.equal(checkRenderEvidence(log, join(dir, 'rendered')).length, 0);
+    assert.equal(checkRenderLedger(log, join(dir, 'rendered')).length, 0);
   });
 
   test('the same page can be no-candidates for one category and candidates-found for another', () => {
@@ -1224,23 +1278,23 @@ describe('rendered evidence is re-verified, not trusted', () => {
     const render = recordRender(log, {
       url: 'https://a.govt.nz/apply', navigatedAt: '2026-09-26T19:00:00Z', permitId: 'p-0001',
       renderFile: 'g1.html', renderedSha256: sha256(html), renderedBytes: Buffer.byteLength(html),
-      accessBarriers: [],
+      accessBarriers: [], adoptedFrom: 'd-0001',
     });
     return { dir, renderedDir, log, render, html };
   };
 
   test('an untouched render verifies', () => {
     const { dir, log, render } = setup();
-    assert.deepEqual(checkRenderEvidence(log, join(dir, 'rendered')), []);
+    assert.deepEqual(checkRenderLedger(log, join(dir, 'rendered')), []);
     assert.deepEqual(assertRenderEvidenceUsable(log, { renderId: render.id, capturesRoot: dir }), []);
   });
 
   test('a tampered render file is caught, and blocks the gate and publication', () => {
     const { dir, renderedDir, log, render, html } = setup();
     writeFileSync(join(renderedDir, 'g1.html'), `${html}<!-- edited -->`);
-    const problems = checkRenderEvidence(log, renderedDir);
+    const problems = checkRenderLedger(log, renderedDir);
     assert.ok(problems.some((p) => /is not the evidence that was observed/.test(p)), problems.join('; '));
-    assert.ok(problems.some((p) => /bytes on disk/.test(p)));
+    assert.ok(problems.some((p) => /bytes, the log records/.test(p)), problems.join('; '));
     assert.ok(assertRenderEvidenceUsable(log, { renderId: render.id, capturesRoot: dir }).length > 0);
     assert.ok(corpusBlockers(log, { capturesRoot: dir }).some((b) => b.kind === 'render-evidence'));
     assert.throws(() => publishProvenance(log, { to: join(dir, 'out'), capturesRoot: dir }),
@@ -1250,7 +1304,7 @@ describe('rendered evidence is re-verified, not trusted', () => {
   test('a missing render file is caught', () => {
     const { dir, renderedDir, log } = setup();
     rmSync(join(renderedDir, 'g1.html'));
-    assert.ok(checkRenderEvidence(log, renderedDir).some((p) => /could not be read/.test(p)));
+    assert.ok(checkRenderLedger(log, renderedDir).some((p) => /could not be read/.test(p)));
   });
 
   test('a record carrying a digest but no registry entry is checked too', () => {
@@ -1265,9 +1319,9 @@ describe('rendered evidence is re-verified, not trusted', () => {
       evidence: 'rendered-dom', renderFile: 'g1.html', renderedSha256: sha256(html),
       renderedBytes: Buffer.byteLength(html),
     });
-    assert.deepEqual(checkRenderEvidence(log, renderedDir), []);
+    assert.deepEqual(checkRenderLedger(log, renderedDir), []);
     writeFileSync(join(renderedDir, 'g1.html'), 'changed');
-    assert.ok(checkRenderEvidence(log, renderedDir).some((p) => /hashes to/.test(p)));
+    assert.ok(checkRenderLedger(log, renderedDir).some((p) => /hashes to/.test(p)));
   });
 
   test('a judgement may not rest on a challenge document', () => {
@@ -1293,7 +1347,7 @@ describe('rendered evidence is re-verified, not trusted', () => {
       outcome: 'no-candidates', category: 'service-application', candidateSetVersion: 1,
       navigationPerformed: false, checkedAt: '2026-09-26T19:00:00Z', approval: 'approved',
     });
-    assert.ok(checkRenderEvidence(log, join(dir, 'rendered'))
+    assert.ok(checkRenderLedger(log, join(dir, 'rendered'))
       .some((p) => /must rest on evidence of the page it judges/.test(p)));
   });
 
@@ -1318,5 +1372,255 @@ describe('rendered evidence is re-verified, not trusted', () => {
     const adopted = adoptRender(log, { fromAttemptId: id, capturesRoot: dir });
     assert.equal(adopted.adoptedFrom, id);
     assert.throws(() => adoptRender(log, { fromAttemptId: id, capturesRoot: dir }), /already registered/);
+  });
+});
+
+describe('the backlog counts only what a current set stands on', () => {
+  // selection-v1.0.26. Thirty-four of ninety-eight backlog records belonged to SUPERSEDED candidate
+  // sets - rounds rejected and redone, whose evidence the corpus no longer rests on. The obligation
+  // was overstated by a third, and would have sent the scan back to re-render withdrawn findings.
+  const build = () => {
+    const log = withPolicyFor(emptyLog(), 'https://a.govt.nz');
+    let n = 0;
+    const record = (category) => {
+      const at = `2026-09-26T19:${String(n++).padStart(2, '0')}:00Z`;
+      appendAttempt(log, {
+        examinedAt: at, agency: 'A', website: 'https://a.govt.nz/',
+        url: `https://a.govt.nz/${category}-${n}`, status: 'discovery', discoveryKind: 'navigation',
+        outcome: 'no-candidates', category, candidateSetVersion: 1, navigatedAt: at,
+        approval: 'approved',
+      });
+      return log.attempts.at(-1);
+    };
+    return { log, record };
+  };
+
+  test('a record bound only to a superseded set is not in the backlog', () => {
+    const { log, record } = build();
+    const kept = record('account-registration');
+    const withdrawn = record('service-application');
+    log.candidateSets[`A\u0000account-registration`] = {
+      agency: 'A', category: 'account-registration', version: 1, discovered: [], locked: [],
+      lockedAt: '2026-09-26T20:00:00Z', approval: 'approved', candidateDeclaration: 'none',
+      discoveryRecordIds: [kept.id],
+    };
+    log.supersededCandidateSets = [{
+      agency: 'A', category: 'service-application', version: 1,
+      discoveryRecordIds: [withdrawn.id], supersededAt: '2026-09-26T20:00:00Z',
+      supersededReason: 'incomplete provenance',
+    }];
+    assert.deepEqual(renderBacklog(log).map((a) => a.id), [kept.id]);
+  });
+
+  test('a record bound to no set at all is not in the backlog either', () => {
+    // It supports nothing, so re-rendering it would buy nothing.
+    const { log, record } = build();
+    record('account-registration');
+    assert.deepEqual(renderBacklog(log), []);
+  });
+});
+
+describe('an approved set may not rest on withdrawn evidence', () => {
+  // selection-v1.0.26. The approved NZSIS account-registration set still bound d-0301 after d-0308
+  // superseded it, and the gate said nothing: `supportingRecords` checks that bound ids EXIST, and a
+  // superseded record still exists.
+  const build = () => {
+    const log = withPolicyFor(emptyLog(), 'https://a.govt.nz');
+    const at = '2026-09-26T19:00:00Z';
+    appendAttempt(log, {
+      examinedAt: at, agency: 'A', website: 'https://a.govt.nz/', url: 'https://a.govt.nz/apply',
+      status: 'discovery', discoveryKind: 'navigation', outcome: 'candidates-found',
+      category: 'service-application', candidateSetVersion: 1, navigatedAt: at, approval: 'approved',
+    });
+    const original = log.attempts.at(-1);
+    recordCandidates(log, { agency: 'A', category: 'service-application', urls: ['https://a.govt.nz/f'] });
+    lockCandidateSet(log, { agency: 'A', category: 'service-application' });
+    approveSet(log, { agency: 'A', category: 'service-application', approved: true });
+    return { log, original };
+  };
+
+  const supersedeWith = (log, original, outcome = 'candidates-found') => {
+    appendAttempt(log, {
+      supersedesDiscoveryId: original.id,
+      examinedAt: '2026-09-26T19:05:00Z', agency: 'A', website: 'https://a.govt.nz/',
+      url: 'https://a.govt.nz/apply', status: 'discovery', discoveryKind: 'navigation',
+      outcome, category: 'service-application', candidateSetVersion: 1,
+      navigatedAt: '2026-09-26T19:05:00Z', approval: 'approved',
+    });
+    return log.attempts.at(-1);
+  };
+
+  test('THE GAP: a stale binding is reported, and withholds the draft', () => {
+    const { log, original } = build();
+    assert.deepEqual(staleSetBindings(log), []);
+    const replacement = supersedeWith(log, original);
+    const stale = staleSetBindings(log);
+    assert.equal(stale.length, 1);
+    assert.deepEqual(stale[0].stale, [{ id: original.id, replacedBy: replacement.id }]);
+    assert.ok(corpusBlockers(log).some((b) => b.kind === 'stale-set-bindings'));
+  });
+
+  test('re-binding substitutes the replacement, archives the old binding, and un-approves', () => {
+    const { log, original } = build();
+    const replacement = supersedeWith(log, original);
+    const { set, substitutions } = reResolveCandidateSet(log, {
+      agency: 'A', category: 'service-application', reason: 'the bound record was superseded',
+    });
+    assert.deepEqual(substitutions, [{ from: original.id, to: replacement.id }]);
+    assert.deepEqual(set.discoveryRecordIds, [replacement.id]);
+    assert.equal(set.approval, 'pending', 'an approval is a judgement about particular records');
+    assert.equal(set.approvedAt, null);
+    assert.equal(set.bindingHistory.length, 1);
+    assert.deepEqual(set.bindingHistory[0].discoveryRecordIds, [original.id]);
+    assert.equal(set.bindingHistory[0].approval, 'approved', 'the withdrawn approval is on the record');
+    assert.match(set.bindingHistory[0].reason, /superseded/);
+    assert.ok(set.bindingHistory[0].reboundAt);
+    assert.deepEqual(staleSetBindings(log), []);
+  });
+
+  test('it follows a chain of corrections to the end', () => {
+    const { log, original } = build();
+    const first = supersedeWith(log, original);
+    appendAttempt(log, {
+      supersedesDiscoveryId: first.id,
+      examinedAt: '2026-09-26T19:10:00Z', agency: 'A', website: 'https://a.govt.nz/',
+      url: 'https://a.govt.nz/apply', status: 'discovery', discoveryKind: 'navigation',
+      outcome: 'candidates-found', category: 'service-application', candidateSetVersion: 1,
+      navigatedAt: '2026-09-26T19:10:00Z', approval: 'approved',
+    });
+    const last = log.attempts.at(-1);
+    const { set } = reResolveCandidateSet(log, { agency: 'A', category: 'service-application', reason: 'chain' });
+    assert.deepEqual(set.discoveryRecordIds, [last.id], 'the end of the chain, not the first link');
+  });
+
+  test('re-binding refuses a set with nothing stale, and requires a reason', () => {
+    const { log } = build();
+    assert.throws(() => reResolveCandidateSet(log, { agency: 'A', category: 'service-application', reason: 'x' }),
+      /binds no superseded record/);
+    assert.throws(() => reResolveCandidateSet(log, { agency: 'A', category: 'service-application', reason: ' ' }),
+      /requires a reason/);
+  });
+
+  test('a re-binding that would still hold a superseded record is refused', () => {
+    // The replacement itself withdrawn, with nothing after it: there is no clean binding to make.
+    const { log, original } = build();
+    const replacement = supersedeWith(log, original);
+    const set = log.candidateSets['A\u0000service-application'];
+    set.discoveryRecordIds = [original.id, replacement.id];
+    appendAttempt(log, {
+      supersedesDiscoveryId: replacement.id,
+      examinedAt: '2026-09-26T19:20:00Z', agency: 'A', website: 'https://a.govt.nz/',
+      url: 'https://a.govt.nz/apply', status: 'discovery', discoveryKind: 'navigation',
+      outcome: 'candidates-found', category: 'service-application', candidateSetVersion: 1,
+      navigatedAt: '2026-09-26T19:20:00Z', approval: 'approved',
+    });
+    const { set: rebound } = reResolveCandidateSet(log, { agency: 'A', category: 'service-application', reason: 'x' });
+    assert.equal(rebound.discoveryRecordIds.length, 1, 'both links resolve to one end record');
+    assert.deepEqual(staleSetBindings(log), []);
+  });
+});
+
+describe('rendered evidence must stay inside rendered/', () => {
+  // selection-v1.0.26. Both implementations joined the file name straight onto the directory, so a
+  // name of `../captures/health-govt-nz-feedback.html` read a corpus capture and verified happily
+  // against its own digest. Confinement broken by a string.
+  const setup = (renderFile) => {
+    const dir = mkdtempSync(join(tmpdir(), 'ff-esc-'));
+    const renderedDir = join(dir, 'rendered');
+    mkdirSync(renderedDir, { recursive: true });
+    mkdirSync(join(dir, 'captures'), { recursive: true });
+    const html = '<html><body><input id="q7"></body></html>';
+    writeFileSync(join(renderedDir, 'g1.html'), html);
+    writeFileSync(join(dir, 'captures', 'stolen.html'), html);
+    const log = emptyLog();
+    recordRender(log, {
+      url: 'https://a.govt.nz/apply', navigatedAt: '2026-09-26T19:00:00Z', permitId: 'p-0001',
+      renderFile, renderedSha256: sha256(html), renderedBytes: Buffer.byteLength(html),
+      accessBarriers: [], adoptedFrom: 'd-0001',
+    });
+    return { dir, renderedDir, log };
+  };
+
+  for (const escape of ['../captures/stolen.html', '../../etc/hosts', '/etc/hosts', 'sub/g1.html']) {
+    test(`refuses ${escape}`, () => {
+      const { renderedDir, log } = setup(escape);
+      const problems = checkRenderLedger(log, renderedDir);
+      assert.ok(
+        problems.some((p) => /resolves outside rendered\/|is not a plain file name/.test(p)),
+        `${escape} was not refused: ${problems.join('; ')}`
+      );
+    });
+  }
+
+  test('the escape would otherwise have verified against its own digest', () => {
+    // Which is why a digest check alone does not confine anything: the stolen file hashes correctly.
+    const { dir, renderedDir, log } = setup('../captures/stolen.html');
+    const problems = checkRenderLedger(log, renderedDir);
+    assert.equal(problems.filter((p) => /does not match|hashes to/.test(p)).length, 0,
+      'the bytes matched; only confinement catches this');
+    assert.ok(problems.length > 0);
+  });
+
+  test('a plain name inside rendered/ is accepted', () => {
+    const { renderedDir, log } = setup('g1.html');
+    assert.deepEqual(checkRenderLedger(log, renderedDir), []);
+  });
+});
+
+describe('the permit is checked against the page it authorises', () => {
+  const build = ({ body = '', origin = 'https://a.govt.nz', minutesAgo = 1 } = {}) => {
+    const log = emptyLog();
+    recordRobotsCheck(log, {
+      origin, url: `${origin}/robots.txt`,
+      fetchedAt: new Date(Date.now() - minutesAgo * 60_000).toISOString().replace(/\.\d{3}Z$/, 'Z'),
+      httpStatus: 200, disposition: 'rules', sha256: sha256(body), bytes: body.length, body,
+    });
+    const permit = issueDiscoveryPermit(log, {
+      agency: 'A', category: 'service-application', candidateSetVersion: 1,
+      url: `${origin}/apply`, robotsCheckId: 'r-0001',
+    });
+    return { log, permit, origin };
+  };
+  const usable = (log, permit, over = {}) => assertPermitUsable(log, {
+    agency: 'A', category: 'service-application', candidateSetVersion: 1,
+    url: 'https://a.govt.nz/apply', permitId: permit.id, ...over,
+  });
+
+  test('a usable permit passes', () => {
+    const { log, permit } = build();
+    assert.doesNotThrow(() => usable(log, permit));
+  });
+
+  test('a policy that now disallows the exact path is refused', () => {
+    // The check verified only that a policy existed and was fresh. A path disallowed by a policy
+    // re-read since would still have been fetched.
+    const { log, permit } = build({ body: 'User-agent: *\nDisallow: /apply\n' });
+    assert.throws(() => usable(log, permit), /does not permit \/apply/);
+  });
+
+  test('a policy for another origin is refused', () => {
+    const { log, permit } = build();
+    log.robotsChecks[0].origin = 'https://elsewhere.govt.nz';
+    assert.throws(() => usable(log, permit), /rests on the robots policy for https:\/\/elsewhere\.govt\.nz/);
+  });
+
+  test('a permit stamped in the future is refused', () => {
+    const { log, permit } = build();
+    permit.issuedAt = new Date(Date.now() + 10 * 60_000).toISOString().replace(/\.\d{3}Z$/, 'Z');
+    assert.throws(() => usable(log, permit), /which is in the future/);
+  });
+
+  test('a robots check stamped in the future is refused', () => {
+    const { log, permit } = build();
+    log.robotsChecks[0].fetchedAt = new Date(Date.now() + 10 * 60_000).toISOString().replace(/\.\d{3}Z$/, 'Z');
+    assert.throws(() => usable(log, permit), /which is in the future/);
+  });
+
+  test('a stale policy and an expired permit are both refused', () => {
+    const { log, permit } = build({ minutesAgo: 60 * 30 });
+    assert.throws(() => usable(log, permit), /more than 24 hours ago/);
+    const fresh = build();
+    fresh.permit.issuedAt = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString().replace(/\.\d{3}Z$/, 'Z');
+    assert.throws(() => usable(fresh.log, fresh.permit), /has expired/);
   });
 });

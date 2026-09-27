@@ -2577,3 +2577,109 @@ The retrospective backlog is now **98 records across 58 URLs**.
 Nothing about the NZSIS form's constraints. The `maxlength="100"` on its name fields is visible in the
 rendered evidence and is not a finding: it has not been captured, sealed or analysed, and the
 candidate set is not yet approved.
+
+## Amendment 30: what the obligation actually is, and who may discharge it
+
+**Dated 27 September 2026.** `selection-v1.0.26` and `solo-protocol-v1.0.7`. Moves no earlier tag.
+No new capture tag.
+
+Four defects that only the live data exposed.
+
+### 1. The backlog counted withdrawn work
+
+Reported as 98 records across 58 URLs. **Thirty-four of those records belong to superseded candidate
+sets** — rounds that were rejected and redone, whose evidence the corpus no longer rests on.
+Re-rendering them would be traffic spent confirming findings already withdrawn.
+
+`renderBacklog` now counts only records bound to a **current** candidate set. The obligation is:
+
+| | |
+| --- | --- |
+| active records | **66** |
+| unique URLs to render | **57** |
+| distinct origins | **12** |
+| origins needing a robots check or refresh | **12** |
+
+All three of the reviewer's figures reproduce exactly. One correction to the review: **34** records
+belong only to superseded sets, not 32 — 66 + 34 = 100 records in scope. The earlier total of 98 was
+taken before `d-0301` and `d-0306` were superseded, which moved the in-scope count.
+
+So the retrospective work is 57 renders and 12 robots requests, not 57 robots requests.
+
+### 2. An approved set was resting on withdrawn evidence
+
+The approved NZSIS `account-registration` set still bound `d-0301` after `d-0308` superseded it, and
+the replacement was bound to nothing. **The corpus gate said nothing**, because `supportingRecords`
+checks that every bound id *exists* — and a superseded record still exists.
+
+`staleSetBindings` now reports any set binding a superseded record, and withholds the draft.
+`re-resolve-set` repairs one: append-only, archiving the previous binding with its approval, its
+reason and the time, substituting the record at the **end** of the supersession chain, refusing a
+binding that would still contain a superseded record, and returning the set to **pending**. An
+approval is a judgement about particular records, and these are not those records, so it must be
+given again.
+
+**And `d-0308` cited the wrong evidence source.** It named `d-0301` — the *plain fetch* — as where its
+rendered evidence came from. The cause: `correct-discovery` fell back to the correction target when a
+pre-registry render had no observation record. `g-0001` was adopted from `d-0306`, and `adoptedFrom`
+says so, so it is now asked rather than guessed. `d-0309` corrects the citation with the judgement
+unchanged; `d-0308` is preserved. A correction may now correct either the judgement or the citation,
+but must change one of them.
+
+### 3. A judgement could clear another agency's backlog
+
+`renderedJudgements` keyed answers by **canonical URL and category only**. A third-party form linked
+by two agencies is genuine evidence for both, and each agency's round is separate work with separate
+provenance — so a judgement recorded under agency A cleared agency B's entry for the same page.
+
+A judgement now carries an explicit **`answersDiscoveryId`**, and clears that record only if it names
+it *and* matches its agency, category, round and canonical URL, *and* cites valid rendered evidence.
+Checked at write time and again at the gate. One render still supports several judgements; each
+judgement answers its own record.
+
+### 4. Trust-time validation was incomplete, and duplicated rather than shared
+
+The protocol claimed one shared validator. It was two, and the sealer's was the weaker: it verified
+bytes and URLs and **none of the semantics**, so a judgement resting on a challenge document, naming
+the wrong evidence source, or answering another agency's record sealed cleanly.
+
+One rule set now covers: path confinement; bytes and length; observation-versus-judgement record
+types; `evidenceFromDiscoveryId` naming the record that actually introduced the render; exactly one
+active observation per render (and none orphaned); the exact answered record with agency, category,
+round and page agreement; and no judgement resting on an access-barred render.
+
+Because `evaluation/` must not import `capture/`, the rules still exist twice — but a **conformance
+test drives both implementations over one table of 24 adversarial ledgers and requires identical
+verdicts**. Verdicts are compared, not wording: two packages phrasing a problem differently is fine,
+two disagreeing about whether it *is* a problem is the defect the test exists to catch.
+
+**Both implementations allowed `../` escape.** A render file named
+`../captures/health-govt-nz-feedback.html` read a corpus capture and **verified happily against its
+own digest** — which is precisely why a hash check alone confines nothing. A render file must now be a
+plain basename resolving inside `rendered/`; absolute paths, traversals and nested paths are all
+refused, in both packages, for registry entries and for pre-registry records alike.
+
+### Also: the permit is checked against the page it authorises
+
+`assertPermitUsable` verified that *a* policy existed and was fresh. It now also requires that the
+policy belongs to the **request's own origin**, that it still permits **that exact path** — a path
+disallowed by a policy re-read since would otherwise have been fetched — and that neither the permit
+nor the robots check is stamped in the **future**.
+
+### The NZSIS record as it stands
+
+| record | category | outcome | evidence |
+| --- | --- | --- | --- |
+| `d-0301` | account-registration | `retrieval-inconclusive` | plain fetch; preserved |
+| `d-0308` | account-registration | `no-candidates` | `g-0001`, cites `d-0301` as source — **wrong**, preserved |
+| `d-0309` | account-registration | `no-candidates` | `g-0001` from `d-0306`; citation corrected |
+| `d-0306` | service-application | `no-candidates` | preserved, superseded |
+| `d-0307` | service-application | `candidates-found` | supersedes `d-0306` |
+
+The `account-registration` set is re-bound from `d-0301` to `d-0309` and is **pending approval again**.
+The `service-application` set remains approved with one candidate.
+
+### What this does not establish
+
+Nothing about the NZSIS form. It has not been captured, sealed or analysed, and 66 records across 57
+URLs still rest on plain retrieval.

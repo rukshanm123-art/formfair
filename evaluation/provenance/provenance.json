@@ -12,17 +12,17 @@
     "postLoadSettleMs": 2000
   },
   "counts": {
-    "discoveryPages": 290,
+    "discoveryPages": 291,
     "candidatesAssessed": 18,
     "captured": 2,
     "excluded": 15,
     "failed": 1,
     "captureBlocked": 0,
     "pendingApprovalAttempts": 0,
-    "pendingApprovalCandidateSets": 1
+    "pendingApprovalCandidateSets": 0
   },
   "discoveryByMethod": {
-    "navigation": 83,
+    "navigation": 84,
     "internal-search": 54,
     "sitemap": 76,
     "robots": 77
@@ -30,7 +30,7 @@
   "discoveryByOutcome": {
     "unrecorded": 15,
     "unavailable": 49,
-    "no-candidates": 162,
+    "no-candidates": 163,
     "disallowed": 38,
     "candidates-found": 15,
     "retrieval-blocked": 6,
@@ -137,8 +137,8 @@
     }
   ],
   "renderBacklog": {
-    "records": 98,
-    "urls": 58
+    "records": 66,
+    "urls": 57
   },
   "permits": {
     "issued": 93,
@@ -278,7 +278,7 @@
     "Ministry of Health / account-registration v3": 28,
     "Ministry of Health / service-application v1": 26,
     "Ministry of Health / enquiry-or-contact v1": 35,
-    "New Zealand Security Intelligence Service / account-registration v1": 10,
+    "New Zealand Security Intelligence Service / account-registration v1": 11,
     "New Zealand Security Intelligence Service / service-application v1": 6
   },
   "candidateSets": [
@@ -648,7 +648,7 @@
       "droppedBeyondBound": 0,
       "lockedAt": "2026-09-26T20:28:52Z",
       "approval": "approved",
-      "approvedAt": "2026-09-26T21:18:30Z",
+      "approvedAt": "2026-09-27T06:45:09Z",
       "supportedByDiscoveryRecords": [
         "d-0293",
         "d-0294",
@@ -658,7 +658,7 @@
         "d-0298",
         "d-0299",
         "d-0300",
-        "d-0301"
+        "d-0309"
       ],
       "discoveryMethods": [
         "navigation",
@@ -674,8 +674,8 @@
       "locked": 1,
       "droppedBeyondBound": 0,
       "lockedAt": "2026-09-26T22:28:39Z",
-      "approval": "pending",
-      "approvedAt": null,
+      "approval": "approved",
+      "approvedAt": "2026-09-27T06:28:36Z",
       "supportedByDiscoveryRecords": [
         "d-0302",
         "d-0303",

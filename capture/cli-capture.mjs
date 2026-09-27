@@ -36,6 +36,7 @@ import {
   quarantineCapture, recordDeviation, agencyResolutions, agencyResolution, reResolveExhaustion,
   renderBacklog, renderBacklogByUrl, renderPrerequisite, recordRender, findRender,
   findRenderForUrl, assertRenderEvidenceUsable, assertPermitUsable, adoptRender,
+  reResolveCandidateSet, staleSetBindings,
 } from './run.mjs';
 import { fetchRobotsPolicy, evaluatePolicy, DISPOSITION } from './robots-policy.mjs';
 import {
@@ -1008,6 +1009,28 @@ async function doRenderDiscovery() {
   console.log(`Nothing is judged yet. Run \`classify-render --render ${render.id} --category <c> --outcome <o>\`.`);
 }
 
+/**
+ * Re-binds an approved candidate set onto the records that replaced its superseded evidence.
+ *
+ * The set returns to PENDING and must be approved again: an approval is a judgement about particular
+ * records, and these are not those records.
+ */
+function doReResolveSet() {
+  const dir = require_('out');
+  const logPath = logPathFor(dir);
+  const log = readLog(logPath);
+  const { set, substitutions } = reResolveCandidateSet(log, {
+    agency: require_('agency'), category: require_('category'), reason: require_('reason'),
+  });
+  writeLog(logPath, log);
+  writeDerived({ log, dir, frameSha256: flag('frame-sha256'), drawOrderSha256: flag('draw-order-sha256'), synthetic: has('synthetic') });
+  const previous = set.bindingHistory.at(-1);
+  console.log(`re-bound ${set.agency} / ${set.category} v${set.version} at ${set.reboundAt}`);
+  for (const sub of substitutions) console.log(`  ${sub.from} -> ${sub.to}`);
+  console.log(`previous binding (${previous.approval}) archived: ${previous.discoveryRecordIds.join(', ')}`);
+  console.log(`the set is now ${set.approval}; it must be approved again before anything is assessed`);
+}
+
 /** Registers a render recorded before the registry existed, verifying its bytes first. */
 function doAdoptRender() {
   const dir = require_('out');
@@ -1046,26 +1069,18 @@ function doClassifyRender() {
   const render = findRender(log, renderId);
   const observation = log.attempts.find(
     (a) => a.renderId === renderId && a.recordType === 'observation'
-  ) ?? log.attempts.find((a) => a.renderFile === render.renderFile);
-  if (!observation) die(`no observation record names render ${renderId}`);
+  ) ?? (render.adoptedFrom ? log.attempts.find((a) => a.id === render.adoptedFrom) : null);
+  if (!observation) die(`no record introduced render ${renderId}; it has no observation and no adoptedFrom`);
 
+  // selection-v1.0.26: the exact record answered, by id. `appendAttempt` checks that it is the same
+  // agency, category, round and page, so a judgement cannot clear another agency's work.
   const answers = flag('answers');
-  if (answers) {
-    const target = log.attempts.find((a) => a.id === answers);
-    if (!target) die(`--answers ${answers} matches no recorded attempt`);
-    if (target.category !== category) {
-      die(
-        `--answers ${answers} is a ${target.category} record, but this judgement is for ${category}. ` +
-          'A judgement answers a record in its own category; one render supports one judgement per category.'
-      );
-    }
-  }
 
   appendAttempt(log, {
     recordType: 'judgement-only',
     renderId,
     evidenceFromDiscoveryId: observation.id,
-    ...(answers ? { rendersDiscoveryId: answers } : {}),
+    ...(answers ? { answersDiscoveryId: answers } : {}),
     examinedAt: now(), agency: observation.agency, website: observation.website, url: render.url,
     status: 'discovery', discoveryKind: observation.discoveryKind, outcome,
     category, candidateSetVersion: setVersion,
@@ -1117,8 +1132,16 @@ function doCorrectDiscovery() {
   const target = log.attempts.find((a) => a.id === targetId);
   if (!target) die(`${targetId} matches no recorded attempt`);
   if (target.status !== 'discovery') die(`${targetId} is a ${target.status} attempt`);
-  if (target.outcome === outcome) {
-    die(`${targetId} already records ${outcome}; a correction must change the judgement`);
+  // selection-v1.0.26. A correction may correct the JUDGEMENT or the EVIDENCE CITATION. `d-0308`
+  // has the right outcome and names the wrong source, and refusing an unchanged outcome left no way
+  // to fix that without rewriting the record - which append-only history forbids. Something must
+  // change; it need not be the outcome.
+  const correctsCitation = has('recite-evidence');
+  if (target.outcome === outcome && !correctsCitation) {
+    die(
+      `${targetId} already records ${outcome}. A correction must change something: pass ` +
+        '`--recite-evidence` to correct the evidence citation while keeping the judgement.'
+    );
   }
   if (isDiscoverySuperseded(log, targetId)) {
     die(`${targetId} has already been corrected; correct the correction instead`);
@@ -1136,9 +1159,19 @@ function doCorrectDiscovery() {
   if (canonicalise(render.url) !== canonicalise(target.url)) {
     die(`render ${renderId} is of ${render.url}, not ${target.url}`);
   }
+  // selection-v1.0.26. The fallback used to be `target`, and for a pre-registry render - which has
+  // no observation record - that made the PLAIN FETCH the stated evidence source. `d-0308` cites
+  // render g-0001 and names d-0301, the plain fetch, as where that evidence came from. The render
+  // was adopted from d-0306, and `adoptedFrom` says so, so it is asked rather than guessed.
   const observation = log.attempts.find(
     (a) => a.renderId === renderId && a.recordType === 'observation'
-  ) ?? target;
+  ) ?? (render.adoptedFrom ? log.attempts.find((a) => a.id === render.adoptedFrom) : null);
+  if (!observation) {
+    die(
+      `no record introduced render ${renderId}: it has no observation record and no adoptedFrom. A ` +
+        'judgement must name where its evidence came from.'
+    );
+  }
 
   appendAttempt(log, {
     recordType: 'judgement-only',
@@ -1160,8 +1193,12 @@ function doCorrectDiscovery() {
   writeLog(logPath, log);
   writeDerived({ log, dir, frameSha256: flag('frame-sha256'), drawOrderSha256: flag('draw-order-sha256'), synthetic: has('synthetic') });
   const record = log.attempts.at(-1);
-  console.log(`recorded ${record.id}: corrects ${targetId}, ${target.outcome} -> ${outcome}`);
-  console.log(`evidence: ${renderId} ${render.renderFile} sha256 ${render.renderedSha256.slice(0, 16)} (re-verified)`);
+  console.log(
+    correctsCitation && target.outcome === outcome
+      ? `recorded ${record.id}: corrects the evidence citation of ${targetId}, judgement unchanged (${outcome})`
+      : `recorded ${record.id}: corrects ${targetId}, ${target.outcome} -> ${outcome}`
+  );
+  console.log(`evidence: ${renderId} from ${observation.id}, ${render.renderFile} sha256 ${render.renderedSha256.slice(0, 16)} (re-verified)`);
   console.log(`${targetId} is preserved unchanged; no request was made for this correction`);
 }
 
@@ -1252,7 +1289,8 @@ const commands = { packet: doPacket, candidates: doCandidates, lock: doLock, 'ap
   'supersede-set': doSupersedeSet, publish: doPublish, next: doNext, capture: doCapture, exclude: doExclude, discovery: doDiscovery, budget: doBudget, approve: doApprove, status: doStatus, build: doBuild, exhaust: doExhaust, 'preflight-discovery': doPreflightDiscovery, 'reopen-set': doReopenSet, 'close-permit': doClosePermit,
   deviation: doDeviation, 'recheck-robots': doRecheckRobots, 're-resolve': doReResolve,
   'render-discovery': doRenderDiscovery, 'correct-discovery': doCorrectDiscovery,
-  'classify-render': doClassifyRender, 'adopt-render': doAdoptRender };
+  'classify-render': doClassifyRender, 'adopt-render': doAdoptRender,
+  're-resolve-set': doReResolveSet };
 if (!commands[command]) die(USAGE);
 try {
   await commands[command]();
