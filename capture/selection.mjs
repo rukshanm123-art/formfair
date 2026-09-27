@@ -68,7 +68,23 @@ export const DISCOVERY_OUTCOMES = Object.freeze([
   'robots-unestablished',
   'retrieval-blocked',
   'retrieval-inconclusive',
+  // selection-v1.0.25. An observation, not a judgement: the DOM was retrieved and retained and
+  // nothing has yet been concluded from it. It exists because `render-discovery` required
+  // `--outcome` before the page had been rendered, which is exactly how a page carrying three name
+  // fields came to be recorded `no-candidates`. Judgement is now a separate record.
+  'rendered',
 ]);
+
+/** Outcomes that are a judgement about whether a page yields candidates. */
+export const JUDGEMENT_OUTCOMES = Object.freeze(['candidates-found', 'no-candidates']);
+
+/** How a discovery record came to exist. */
+export const RECORD_TYPES = Object.freeze({
+  /** A retrieval that happened, under a permit. Carries evidence, concludes nothing. */
+  OBSERVATION: 'observation',
+  /** A conclusion drawn from evidence already held. Makes no request. */
+  JUDGEMENT_ONLY: 'judgement-only',
+});
 
 /**
  * The outcomes that record attrition in the discovery method rather than a property of the

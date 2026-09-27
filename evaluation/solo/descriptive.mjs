@@ -168,7 +168,7 @@ const FRAME_FILES = [
  * exhaustion records at all. A manifest that misnames its own protocol is worse than one that
  * omits it: a reader checking which rules a corpus was sealed under would be told the wrong ones.
  */
-export const SOLO_PROTOCOL_TAG = 'solo-protocol-v1.0.5';
+export const SOLO_PROTOCOL_TAG = 'solo-protocol-v1.0.6';
 
 /**
  * Two resolutions, mirrored from the capture package and checked equal by a test.
@@ -676,6 +676,53 @@ export function sealCorpus({
             if (unassessed.length) {
               problems.push(`${where}: the log's ${category} set has ${unassessed.length} unassessed candidate(s)`);
             }
+          }
+        }
+
+        // solo-protocol-v1.0.6. Rendered discovery evidence, re-hashed at sealing time.
+        //
+        // The digests were written into the log and read by nothing. A render file that had been
+        // edited, truncated or deleted would leave a convincing hash-shaped claim behind, and every
+        // gate would pass - the same defect the capture files had before their bytes were compared,
+        // in the directory that had just become load-bearing for discovery. The seal is the last
+        // gate, so it checks rather than inherits.
+        const renderedRoot = join(logRoot, 'rendered');
+        const registered = Array.isArray(log.renders) ? log.renders : [];
+        const claims = [
+          ...registered.map((r) => ({ what: r.id, file: r.renderFile, sha256: r.renderedSha256, bytes: r.renderedBytes })),
+          // Records written before the registry carry the file and digest themselves.
+          ...attempts
+            .filter((a) => !a.renderId && a.renderFile)
+            .map((a) => ({ what: a.id, file: a.renderFile, sha256: a.renderedSha256, bytes: a.renderedBytes })),
+        ];
+        for (const claim of claims) {
+          const where = `renderedEvidence[${claim.what}]`;
+          if (!claim.file) { problems.push(`${where} names no file`); continue; }
+          let bytes = null;
+          try {
+            bytes = readFileSync(join(renderedRoot, claim.file));
+          } catch (error) {
+            problems.push(`${where}: ${claim.file} could not be read: ${error.message}`);
+            continue;
+          }
+          if (claim.bytes !== undefined && claim.bytes !== null && bytes.length !== claim.bytes) {
+            problems.push(`${where}: ${claim.file} is ${bytes.length} bytes, the log records ${claim.bytes}`);
+          }
+          if (claim.sha256 && sha256(bytes) !== claim.sha256) {
+            problems.push(
+              `${where}: ${claim.file} hashes to ${sha256(bytes).slice(0, 12)}, the log records ` +
+                `${String(claim.sha256).slice(0, 12)}. The discovery evidence on disk is not the ` +
+                'evidence that was observed.'
+            );
+          }
+        }
+        // A judgement must cite a render that exists, of the page it judges.
+        for (const a of attempts) {
+          if (!a.renderId) continue;
+          const render = registered.find((r) => r.id === a.renderId);
+          if (!render) { problems.push(`${a.id} cites render ${a.renderId}, which is not registered`); continue; }
+          if (render.url !== a.url) {
+            problems.push(`${a.id} is ${a.url} but cites render ${render.id} of ${render.url}`);
           }
         }
 

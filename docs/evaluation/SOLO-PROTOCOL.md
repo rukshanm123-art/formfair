@@ -2461,3 +2461,119 @@ Two exclusions were added after the first version of the backlog demanded work i
 No page has been re-inspected yet. Until the backlog is worked, every `no-candidates` record for the
 first three agencies rests on plain retrieval, and any script-inserted form on those pages is still
 undiscovered. That limitation is in the record and in the gate, not only in this paragraph.
+
+## Amendment 29: the evidence, then the judgement
+
+**Dated 27 September 2026.** `selection-v1.0.25` and `solo-protocol-v1.0.6`. Moves no earlier tag.
+No new capture tag: shared browser-capture behaviour is unchanged.
+
+Amendment 28 made the rendered DOM the authoritative discovery evidence. The workflow around it had
+four defects, and the first one had already caused a false record.
+
+### 1. Rendering and judgement are separate steps
+
+`render-discovery` required `--outcome` **before the page was rendered**. So the judgement was typed
+first and the evidence read afterwards — and that is exactly how `d-0306` came to record
+`no-candidates` about a page carrying First, Middle and Last name inputs.
+
+- **`render-discovery`** performs and records an **observation**. It concludes nothing, and
+  `--outcome` is now *refused* with the reason.
+- **`classify-render`** records a category-specific judgement afterwards, making no request.
+
+An observation may record only `rendered` or `retrieval-blocked` — the latter decided mechanically
+from the access barriers, never accepted as a label. A judgement may record only `candidates-found`
+or `no-candidates`, must state `navigationPerformed: false`, and **must not name a permit**: naming
+one would claim a second retrieval that did not happen.
+
+### 2. One render, several judgements
+
+Rendered evidence lived on the discovery record that produced it, so one render answered exactly one
+record. A page is routinely `no-candidates` for account registration and `candidates-found` for
+service application, and that was inexpressible.
+
+Observations now go into an append-only **render registry** (`log.renders`, `g-NNNN`), and judgements
+cite a render by id. The evidence is recorded once; as many category-specific judgements as the page
+supports rest on it.
+
+**A related defect, worse than the first.** The backlog cleared a record the moment any later record
+*named* it. That is why `d-0301` left the backlog while still reading `retrieval-inconclusive`, with
+no account-registration judgement ever made about it. **Naming is not answering.** A record is
+answered only by a judgement, for its own category, resting on a render of its page. The test that
+existed merely confirmed the grouping; it never proved one render cleared two records, and it now
+does — in both directions, including the case where it must *not*.
+
+### 3. `correct-discovery` was an integrity bypass
+
+It could mint a modern record with **no permit**, which the ledger read as a pre-permit legacy
+record, and it copied whatever evidence fields the target happened to carry — including none. A
+correction resting on nothing is not a correction; it is a fresh assertion wearing the target's
+provenance.
+
+A correction now requires all of: `supersedesDiscoveryId`; `evidenceFromDiscoveryId`; a registered
+render whose file is on disk with the recorded length **and** digest; that render's URL canonically
+equal to the target's; a target not already superseded; a category-specific outcome; and the explicit
+record type `judgement-only`.
+
+And the ledger no longer treats every permitless record as legacy. A record claiming a navigation
+with no permit is exempt **only if it predates the permit model** — which a new record cannot fake,
+because the five-second pacing check compares it against the latest navigation in the log.
+
+### 4. Render digests were written and never read
+
+Nothing re-hashed anything under `rendered/`. A file edited, truncated or deleted would leave a
+convincing hash-shaped claim in the log and every gate would pass — the same defect the corpus
+captures had before their bytes were compared, in the directory that had just become load-bearing for
+discovery.
+
+One shared validator, called from four places: classification and correction (before anything is
+concluded), `corpusBlockers`, provenance publication, and the seal. It verifies the file exists, its
+length matches, its digest matches, that no judgement rests on a challenge document, and that every
+citation names a registered render of the page it judges. Records written *before* the registry carry
+the file and digest on themselves and are checked the same way, because a hash nobody re-reads is
+decoration whether or not a registry holds it.
+
+**Fail-closed.** If renders exist and no capture root was supplied, the gate reports that the
+evidence *could not be verified* rather than passing. "Could not check" must not read as "checked and
+fine".
+
+### Also: the permit is checked before the browser opens
+
+`render-discovery` consumed its permit *after* the render, so an expired, closed or mismatched permit
+was discovered only once the request had been made. `assertPermitUsable` runs the same checks —
+existence, not consumed, not closed, scope, TTL, and a robots policy under 24 hours old — before
+`page.goto`. A permit is a precondition of traffic, not a comment on it.
+
+### The extractor
+
+Controls are counted across the whole document, because the NZSIS portal has no `<form>` element at
+all. Two further corrections: `type="hidden"` is compared **case-insensitively** (`type="HIDDEN"`
+would have been counted as a field a person fills in), and each control now carries its
+**accessible name** — `aria-label`, `aria-labelledby`, `<label for>`, a wrapping `<label>`, or, marked
+`nearby:`, the closest preceding text. Counts and ids alone showed `q7`, `q8`, `q9` without saying
+they mean First, Middle and Last name, which is the whole point of looking at a name field. No rule is
+applied to the text; it is recorded so a reader of the log can see what was asked for.
+
+### The NZSIS record as it stands
+
+`d-0306` and `d-0307` predate the registry. The render they carry is verified against disk and
+adopted as **`g-0001`** (`efe26268…`, 15,971 bytes, 224 DOM nodes, *"Reporting a national security
+concern"*), and both remain readable exactly as written.
+
+| record | category | outcome | evidence |
+| --- | --- | --- | --- |
+| `d-0301` | account-registration | `retrieval-inconclusive` | plain fetch; **preserved** |
+| `d-0308` | account-registration | `no-candidates` | `g-0001`, supersedes `d-0301` |
+| `d-0306` | service-application | `no-candidates` | **preserved**, superseded |
+| `d-0307` | service-application | `candidates-found` | supersedes `d-0306` |
+
+One render, two categories, opposite judgements — which is the case Amendment 28 could not express.
+The page is not an account registration: no sign-up, no credential field, no account, and the
+personal-information section is optional. It **is** a service-application candidate.
+
+The retrospective backlog is now **98 records across 58 URLs**.
+
+### What this does not establish
+
+Nothing about the NZSIS form's constraints. The `maxlength="100"` on its name fields is visible in the
+rendered evidence and is not a finding: it has not been captured, sealed or analysed, and the
+candidate set is not yet approved.

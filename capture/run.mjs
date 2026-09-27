@@ -25,6 +25,7 @@ import {
   DISCOVERY_KINDS, remainingBudget, MAX_CANDIDATES_PER_CATEGORY, MAX_CANDIDATES_PER_AGENCY,
   canonicalise, setKey, MAX_QUALIFIED_AGENCIES, CATEGORY_ORDER, lockCandidates, isSuperseded,
   DISCOVERY_METHODS, DISCOVERY_OUTCOMES, nextWork, isExhausted, TECHNICAL_ATTRITION_OUTCOMES,
+  JUDGEMENT_OUTCOMES, RECORD_TYPES,
 } from './selection.mjs';
 
 export const LOG_SCHEMA = 'formfair/capture-log@1';
@@ -139,6 +140,45 @@ function checkAttempt(attempt) {
     // this, `evidence: 'rendered-dom'` would be a word that satisfies the backlog gate while
     // resting on nothing - and the gate exists precisely because plain retrieval was being
     // treated as though it had read the page.
+    // selection-v1.0.25. Observation and judgement are different kinds of record and are held to
+    // different requirements. Leaving the distinction implicit is what let a judgement be supplied
+    // before the evidence was read.
+    if (attempt.recordType !== undefined) {
+      if (!Object.values(RECORD_TYPES).includes(attempt.recordType)) {
+        problems.push(`recordType must be ${Object.values(RECORD_TYPES).join(' or ')}, not ${JSON.stringify(attempt.recordType)}`);
+      }
+      if (attempt.recordType === RECORD_TYPES.OBSERVATION) {
+        if (!attempt.renderId) problems.push('an observation needs renderId, the render it recorded');
+        if (!attempt.permitId) problems.push('an observation needs the permit that authorised its request');
+        if (!['rendered', 'retrieval-blocked'].includes(attempt.outcome)) {
+          problems.push(
+            `an observation records ${JSON.stringify(attempt.outcome)}; it may only be rendered or ` +
+              'retrieval-blocked, because an observation concludes nothing'
+          );
+        }
+      }
+      if (attempt.recordType === RECORD_TYPES.JUDGEMENT_ONLY) {
+        if (!attempt.renderId) problems.push('a judgement needs renderId, the evidence it rests on');
+        if (!attempt.evidenceFromDiscoveryId) {
+          problems.push('a judgement needs evidenceFromDiscoveryId, the observation record it reads');
+        }
+        if (attempt.permitId) {
+          problems.push(
+            'a judgement makes no request, so it must not name a permit; naming one would claim a ' +
+              'second retrieval that did not happen'
+          );
+        }
+        if (attempt.navigationPerformed !== false) {
+          problems.push('a judgement must record navigationPerformed: false');
+        }
+        if (!JUDGEMENT_OUTCOMES.includes(attempt.outcome)) {
+          problems.push(`a judgement records ${JUDGEMENT_OUTCOMES.join(' or ')}, not ${JSON.stringify(attempt.outcome)}`);
+        }
+      }
+    }
+    if (attempt.outcome === 'rendered' && attempt.recordType !== RECORD_TYPES.OBSERVATION) {
+      problems.push('only an observation may record the outcome `rendered`');
+    }
     if (attempt.evidence !== undefined) {
       if (!['rendered-dom', 'plain-retrieval'].includes(attempt.evidence)) {
         problems.push(`evidence must be rendered-dom or plain-retrieval, not ${JSON.stringify(attempt.evidence)}`);
@@ -206,9 +246,16 @@ export function appendAttempt(log, attempt) {
   // Per AGENCY, not globally: a third-party form linked by two agencies is genuine
   // evidence for both, and refusing to record it for the second would hide that.
   if (attempt.status === 'discovery') {
+    // selection-v1.0.25. An observation and a judgement about the same page in the same round are
+    // two records for one URL BY DESIGN - the evidence and the reading of it. The duplicate rule
+    // exists to stop one page being recorded twice as two findings, and an observation is not a
+    // finding, so the two kinds are compared only against their own kind.
+    const kindOf = (a) => (a.recordType === RECORD_TYPES.OBSERVATION ? 'observation' : 'finding');
+    const incoming = kindOf(attempt);
     const sameRound = log.attempts.some(
       (a) => a.status === 'discovery' && a.agency === attempt.agency && a.url === attempt.url &&
-        a.category === attempt.category && a.candidateSetVersion === attempt.candidateSetVersion
+        a.category === attempt.category && a.candidateSetVersion === attempt.candidateSetVersion &&
+        kindOf(a) === incoming
     );
     if (sameRound && !attempt.supersedesDiscoveryId) {
       throw new Error(
@@ -1084,10 +1131,10 @@ export function agenciesAwaitingExhaustion(log) {
   return out;
 }
 
-export function deriveDraft(log, { frameSha256, drawOrderSha256, selectionLedgerFile = 'selection-ledger.csv', synthetic = false, frameAgencies = null }) {
+export function deriveDraft(log, { frameSha256, drawOrderSha256, selectionLedgerFile = 'selection-ledger.csv', synthetic = false, frameAgencies = null, capturesRoot = null }) {
   // selection-v1.0.17: one shared list, read by `status` too, so a gate and its report cannot
   // disagree about the same log.
-  const blockers = corpusBlockers(log);
+  const blockers = corpusBlockers(log, { capturesRoot });
   if (blockers.length) {
     throw new Error(
       `the corpus cannot be built while work is unfinished:\n` +
@@ -1207,12 +1254,25 @@ export function deriveDraft(log, { frameSha256, drawOrderSha256, selectionLedger
  * method, the outcome, the reason, and content hashes. Nothing here reproduces any part of
  * a captured page.
  */
-export function publishProvenance(log, { to }) {
+export function publishProvenance(log, { to, capturesRoot = null }) {
   const ledgerProblems = checkPermitLedger(log);
   if (ledgerProblems.length) {
     throw new Error(
       `the permit ledger is inconsistent and must not be published:\n  ${ledgerProblems.join('\n  ')}`
     );
+  }
+  // Rendered evidence is verified before its hashes are published. Publishing a digest for a file
+  // nobody re-read would put a checkable-looking claim into the audit that had never been checked.
+  if ((log.renders ?? []).length > 0) {
+    if (!capturesRoot) {
+      throw new Error('publishing provenance for a log with renders requires the capture root, so the evidence can be verified');
+    }
+    const renderProblems = checkRenderEvidence(log, join(resolve(capturesRoot), RENDERED_DIR));
+    if (renderProblems.length) {
+      throw new Error(
+        `rendered evidence does not match the log and must not be published:\n  ${renderProblems.join('\n  ')}`
+      );
+    }
   }
   const dir = resolve(to);
   mkdirSync(dir, { recursive: true });
@@ -1289,6 +1349,21 @@ export function publishProvenance(log, { to }) {
     // Deviations from the frozen protocol, published with the evidence they name so a reader does
     // not have to take the prose account on trust.
     deviations: (log.deviations ?? []).map((d) => ({ ...d })),
+    // The render registry: provenance and digests only. The rendered markup is third-party content
+    // and stays in the ignored data tree; nothing here reproduces any of it.
+    renders: (log.renders ?? []).map((r) => ({
+      id: r.id, url: r.url, finalUrl: r.finalUrl ?? null, navigatedAt: r.navigatedAt,
+      permitId: r.permitId ?? null, httpStatus: r.httpStatus ?? null, loadState: r.loadState ?? null,
+      renderFile: r.renderFile, renderedSha256: r.renderedSha256, renderedBytes: r.renderedBytes,
+      domNodes: r.domNodes ?? null, linkCount: r.linkCount ?? null, formCount: r.formCount ?? null,
+      controlCount: r.controlCount ?? null, buttonCount: r.buttonCount ?? null,
+      accessBarriers: r.accessBarriers ?? [], submissionProtection: r.submissionProtection ?? [],
+      browser: r.browser ?? null, browserMode: r.browserMode ?? null, settleMs: r.settleMs ?? null,
+    })),
+    renderBacklog: {
+      records: renderBacklog(log).length,
+      urls: renderBacklogByUrl(log).length,
+    },
     // The traffic audit. A duplicate-request permit covered a real request and is counted as
     // traffic; it produced no additional inspection, candidate, page or observation, and is
     // counted nowhere else.
@@ -1336,7 +1411,7 @@ export function writeDerived({ log, dir, frameSha256, drawOrderSha256, synthetic
   }
   let draftPath = null;
   try {
-    const draft = deriveDraft(log, { frameSha256, drawOrderSha256, synthetic });
+    const draft = deriveDraft(log, { frameSha256, drawOrderSha256, synthetic, capturesRoot: root });
     draftPath = join(root, 'corpus-draft.json');
     writeFileSync(draftPath, `${JSON.stringify(draft, null, 2)}\n`, 'utf8');
   } catch (error) {
@@ -1417,6 +1492,45 @@ export function findOpenPermit(log, { agency, category, candidateSetVersion, url
     (p) => p.consumedAt === null && !p.closedAt && p.agency === agency && p.category === category &&
       p.candidateSetVersion === candidateSetVersion && p.url === url
   ) ?? null;
+}
+
+/**
+ * Would this permit authorise this request? Checked BEFORE the browser opens.
+ *
+ * selection-v1.0.25. `render-discovery` consumed its permit after the render, so an expired, closed
+ * or mismatched permit was discovered only once the request had already been made - which makes the
+ * permit a comment on the traffic rather than a precondition of it, the exact defect the permit
+ * model was introduced to fix.
+ */
+export function assertPermitUsable(log, { agency, category, candidateSetVersion, url, permitId }) {
+  const permit = (log.discoveryPermits ?? []).find((p) => p.id === permitId);
+  if (!permit) throw new Error(`permit ${permitId} does not exist`);
+  if (permit.consumedAt) throw new Error(`permit ${permitId} was already consumed at ${permit.consumedAt}`);
+  if (permit.closedAt) throw new Error(`permit ${permitId} was closed at ${permit.closedAt} as ${permit.disposition}`);
+  if (permit.agency !== agency || permit.category !== category ||
+      permit.candidateSetVersion !== candidateSetVersion || permit.url !== url) {
+    throw new Error(
+      `permit ${permitId} is for ${permit.agency} / ${permit.category} round ` +
+        `${permit.candidateSetVersion} ${permit.url}, not this request`
+    );
+  }
+  const issued = Date.parse(permit.issuedAt);
+  if (Number.isNaN(issued)) throw new Error(`permit ${permitId} has no usable issuedAt`);
+  if (Date.now() - issued > PERMIT_TTL_MS) {
+    throw new Error(
+      `permit ${permitId} was issued at ${permit.issuedAt} and has expired; re-run ` +
+        '`preflight-discovery` before making the request'
+    );
+  }
+  const check = (log.robotsChecks ?? []).find((c) => c.id === permit.robotsCheckId);
+  if (!check) throw new Error(`permit ${permitId} names robots check ${permit.robotsCheckId}, which does not exist`);
+  if (!robotsCheckIsFresh(check)) {
+    throw new Error(
+      `the robots policy behind permit ${permitId} was fetched at ${check.fetchedAt}, more than 24 ` +
+        'hours ago; RFC 9309 section 2.4 does not support relying on it'
+    );
+  }
+  return permit;
 }
 
 export function consumeDiscoveryPermit(log, { agency, category, candidateSetVersion, url, navigatedAt = null, permitId = null }) {
@@ -1770,6 +1884,31 @@ export function checkPermitLedger(log) {
         try { origin = new URL(permit.url).origin; } catch { origin = null; }
         if (origin && check.origin !== origin) {
           problems.push(`${permit.id} is for ${origin} but names a robots check for ${check.origin}`);
+        }
+      }
+    }
+
+    // selection-v1.0.25. A permitless record that navigated is only exempt if it PREDATES the
+    // permit model. Treating every permitless record as legacy was a standing bypass: any new
+    // record could claim a navigation with no authorisation simply by omitting `permitId`, and
+    // `correct-discovery` could mint one. A record cannot backdate its way out of this - the
+    // five-second pacing check compares it against the latest navigation in the log.
+    const firstPermit = allPermits
+      .map((p) => ms(p.issuedAt))
+      .filter((t) => t !== null)
+      .sort((a, b) => a - b)[0] ?? null;
+    if (firstPermit !== null) {
+      for (const attempt of log.attempts) {
+        if (attempt.status !== 'discovery') continue;
+        if (attempt.permitId) continue;
+        if (attempt.navigationPerformed === false) continue; // requested nothing
+        const at = ms(attempt.navigatedAt);
+        if (at === null || at >= firstPermit) {
+          problems.push(
+            `${attempt.id ?? '(an unidentified record)'} records a navigation at ` +
+              `${attempt.navigatedAt ?? 'an unstated time'} with no permit. Only records predating ` +
+              'the permit model are exempt, and this one does not predate it.'
+          );
         }
       }
     }
@@ -2135,6 +2274,218 @@ export function checkDeviations(log) {
 }
 
 /**
+ * The render registry: one observation, cited by as many judgements as it supports.
+ *
+ * selection-v1.0.25. Rendered evidence lived on the discovery record that produced it, which made
+ * one render answer exactly one record - and a page is routinely `no-candidates` for account
+ * registration and `candidates-found` for service application. It also let a judgement be supplied
+ * before the evidence was read: `render-discovery` required `--outcome` up front, and that is
+ * literally how `d-0306` came to say `no-candidates` about a page carrying three name fields.
+ *
+ * So an observation is its own append-only record, and a judgement is a separate record citing it.
+ * The observation says what was retrieved; the judgement says what it means, per category, and can
+ * be corrected without re-requesting anything.
+ */
+export function recordRender(log, render) {
+  (log.renders ??= []);
+  const record = { ...render, id: `g-${String(log.renders.length + 1).padStart(4, '0')}` };
+  log.renders.push(record);
+  return record;
+}
+
+export function findRender(log, id) {
+  return (log.renders ?? []).find((r) => r.id === id) ?? null;
+}
+
+/** The most recent render of one canonical URL, whatever category it was made for. */
+export function findRenderForUrl(log, url) {
+  const wanted = canonicalise(url);
+  const all = (log.renders ?? []).filter((r) => canonicalise(r.url) === wanted);
+  return all.length ? all[all.length - 1] : null;
+}
+
+/**
+ * Every recorded render must still be on disk, byte for byte.
+ *
+ * selection-v1.0.25. The hashes were written and never read. Nothing re-hashed anything under
+ * `rendered/`, so a file that was edited, truncated or deleted would leave a convincing
+ * hash-shaped claim in the log and every gate would pass - the same defect `checkCaptureFiles`
+ * fixed for the corpus captures, in the directory that had just become load-bearing for discovery.
+ *
+ * One validator, called from classification, from `corpusBlockers`, from provenance publication and
+ * from the seal. A rule enforced where a value is written but not where it is trusted is the defect
+ * this scan keeps rediscovering.
+ */
+export function checkRenderEvidence(log, renderedDir) {
+  const problems = [];
+  const root = resolve(renderedDir);
+  const seen = new Set();
+  for (const render of log.renders ?? []) {
+    const where = render.id ?? '(a render with no id)';
+    if (!render.id) problems.push('a render has no id');
+    else if (seen.has(render.id)) problems.push(`render id ${render.id} appears more than once`);
+    seen.add(render.id);
+    for (const field of ['url', 'renderFile', 'renderedSha256', 'navigatedAt']) {
+      if (!render[field]) problems.push(`${where} has no ${field}`);
+    }
+    if (!/^[0-9a-f]{64}$/.test(render.renderedSha256 ?? '')) {
+      problems.push(`${where} has renderedSha256 ${JSON.stringify(render.renderedSha256)}`);
+    }
+    if (!Number.isInteger(render.renderedBytes) || render.renderedBytes < 0) {
+      problems.push(`${where} has renderedBytes ${JSON.stringify(render.renderedBytes)}`);
+    }
+    if (!render.renderFile) continue;
+    const file = join(root, render.renderFile);
+    let bytes = null;
+    try {
+      bytes = readFileSync(file);
+    } catch (error) {
+      problems.push(`${where} names ${render.renderFile}, which could not be read: ${error.message}`);
+      continue;
+    }
+    if (bytes.length !== render.renderedBytes) {
+      problems.push(
+        `${where}: ${render.renderFile} is ${bytes.length} bytes on disk, but the log records ` +
+          `${render.renderedBytes}`
+      );
+    }
+    const actual = sha256(bytes);
+    if (actual !== render.renderedSha256) {
+      problems.push(
+        `${where}: ${render.renderFile} hashes to ${actual.slice(0, 12)} but the log records ` +
+          `${String(render.renderedSha256).slice(0, 12)}. The evidence on disk is not the evidence ` +
+          'that was observed.'
+      );
+    }
+  }
+
+  // And every record that cites a render must cite one that exists, for the same page.
+  for (const a of log.attempts) {
+    if (!a.renderId) continue;
+    const render = findRender(log, a.renderId);
+    if (!render) {
+      problems.push(`${a.id} cites render ${a.renderId}, which does not exist`);
+      continue;
+    }
+    if (canonicalise(render.url) !== canonicalise(a.url)) {
+      problems.push(
+        `${a.id} is ${a.url} but cites render ${render.id} of ${render.url}; a judgement must rest ` +
+          'on evidence of the page it judges'
+      );
+    }
+  }
+
+  // A record carrying a digest but no registry entry is checked directly against disk. Two such
+  // records exist - written before the registry did - and a hash nobody re-reads is decoration
+  // whether or not a registry happens to hold it.
+  for (const a of log.attempts) {
+    if (a.renderId || !a.renderFile) continue;
+    const file = join(root, a.renderFile);
+    let bytes = null;
+    try {
+      bytes = readFileSync(file);
+    } catch (error) {
+      problems.push(`${a.id} names ${a.renderFile}, which could not be read: ${error.message}`);
+      continue;
+    }
+    if (a.renderedBytes !== undefined && bytes.length !== a.renderedBytes) {
+      problems.push(`${a.id}: ${a.renderFile} is ${bytes.length} bytes, the record says ${a.renderedBytes}`);
+    }
+    if (a.renderedSha256 && sha256(bytes) !== a.renderedSha256) {
+      problems.push(
+        `${a.id}: ${a.renderFile} hashes to ${sha256(bytes).slice(0, 12)}, the record says ` +
+          `${String(a.renderedSha256).slice(0, 12)}`
+      );
+    }
+  }
+  return problems;
+}
+
+/**
+ * Registers a render that was recorded before the registry existed.
+ *
+ * selection-v1.0.25. `d-0306` and `d-0307` carry a rendered file and its digest on the attempt
+ * record itself, because that is where rendered evidence lived when they were written. Adopting them
+ * verifies the file against the recorded digest first: a migration that trusted the log would carry
+ * an unverified claim into the registry and call it evidence.
+ */
+export function adoptRender(log, { fromAttemptId, capturesRoot }) {
+  const source = log.attempts.find((a) => a.id === fromAttemptId);
+  if (!source) throw new Error(`${fromAttemptId} matches no recorded attempt`);
+  if (!source.renderFile) throw new Error(`${fromAttemptId} carries no rendered file`);
+  if (findRenderForUrl(log, source.url)) {
+    throw new Error(`a render of ${source.url} is already registered; adoption would duplicate it`);
+  }
+  const file = join(resolve(capturesRoot), RENDERED_DIR, source.renderFile);
+  const bytes = readFileSync(file);
+  if (bytes.length !== source.renderedBytes) {
+    throw new Error(`${source.renderFile} is ${bytes.length} bytes, but ${fromAttemptId} records ${source.renderedBytes}`);
+  }
+  const actual = sha256(bytes);
+  if (actual !== source.renderedSha256) {
+    throw new Error(
+      `${source.renderFile} hashes to ${actual} but ${fromAttemptId} records ${source.renderedSha256}`
+    );
+  }
+  return recordRender(log, {
+    url: source.url, finalUrl: source.finalUrl ?? null, navigatedAt: source.navigatedAt,
+    permitId: source.permitId ?? null,
+    renderFile: source.renderFile, renderedSha256: source.renderedSha256,
+    renderedBytes: source.renderedBytes, httpStatus: source.httpStatus ?? null,
+    loadState: source.loadState ?? null, domNodes: source.domNodes ?? null,
+    linkCount: source.linkCount ?? null, formCount: source.formCount ?? null,
+    controlCount: source.controlCount ?? null, buttonCount: source.buttonCount ?? null,
+    accessBarriers: source.accessBarriers ?? [], submissionProtection: source.submissionProtection ?? [],
+    authenticationSignals: source.authenticationSignals ?? [],
+    browser: source.browser ?? null, browserMode: source.politeness?.browserMode ?? null,
+    userAgent: source.politeness?.userAgent ?? null, settleMs: source.politeness?.settleMs ?? null,
+    adoptedFrom: fromAttemptId,
+    adoptedAt: new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'),
+  });
+}
+
+/**
+ * One render's evidence, re-verified before anything is concluded from it.
+ *
+ * selection-v1.0.25. The shared validator, called from classification, from correction, and - as
+ * `checkRenderEvidence` over the whole registry - from the corpus gate, from provenance publication
+ * and from the seal. Reading a digest out of the log and trusting it is what made the hashes
+ * decorative.
+ */
+export function assertRenderEvidenceUsable(log, { renderId, capturesRoot }) {
+  const problems = [];
+  const render = findRender(log, renderId);
+  if (!render) return [`render ${renderId} does not exist`];
+  if (!capturesRoot) return ['no capture root was supplied, so the rendered file could not be verified'];
+  const file = join(resolve(capturesRoot), RENDERED_DIR, render.renderFile ?? '');
+  if (!render.renderFile) problems.push(`${render.id} names no rendered file`);
+  else if (!existsSync(file)) problems.push(`${render.id} names ${render.renderFile}, which is not on disk`);
+  else {
+    const bytes = readFileSync(file);
+    if (bytes.length !== render.renderedBytes) {
+      problems.push(`${render.id}: ${render.renderFile} is ${bytes.length} bytes, the log records ${render.renderedBytes}`);
+    }
+    const actual = sha256(bytes);
+    if (actual !== render.renderedSha256) {
+      problems.push(
+        `${render.id}: ${render.renderFile} hashes to ${actual.slice(0, 12)}, the log records ` +
+          `${String(render.renderedSha256).slice(0, 12)}`
+      );
+    }
+  }
+  if (render.accessBarriers?.length) {
+    problems.push(
+      `${render.id} was access-barred (${render.accessBarriers.join(', ')}); a judgement about a ` +
+        'page cannot rest on a challenge document'
+    );
+  }
+  return problems;
+}
+
+/** Where rendered evidence lives, relative to the capture root. Never beside the corpus captures. */
+export const RENDERED_DIR = 'rendered';
+
+/**
  * Navigation and internal-search records whose evidence is a plain fetch, not a rendered DOM.
  *
  * selection-v1.0.24. The backlog is DERIVED rather than written down, because a list I counted by
@@ -2158,21 +2509,40 @@ const NON_HTML = /\.(pdf|docx?|xlsx?|pptx?|csv|txt|xml|json|zip|jpe?g|png|gif|sv
  */
 const CONTENT_OUTCOMES = Object.freeze(['candidates-found', 'no-candidates', 'retrieval-inconclusive']);
 
+/**
+ * A judgement made on rendered evidence, keyed by the page and the category it judges.
+ *
+ * selection-v1.0.25. The backlog used to clear a record the moment any later record NAMED it. That
+ * is how `d-0301` left the backlog while still reading `retrieval-inconclusive`: the render named
+ * it, and no account-registration judgement was ever made about it. Naming is not answering. A
+ * record is answered only by a judgement, for its own category, resting on a render of its page.
+ */
+function renderedJudgements(log) {
+  const answered = new Set();
+  for (const a of log.attempts) {
+    if (a.status !== 'discovery') continue;
+    if (!a.renderId) continue;
+    if (!['candidates-found', 'no-candidates'].includes(a.outcome)) continue;
+    if (isDiscoverySuperseded(log, a.id)) continue;
+    answered.add(`${canonicalise(a.url)}\u0000${a.category}`);
+  }
+  return answered;
+}
+
 export function renderBacklog(log) {
-  const rendered = new Set(
-    log.attempts.map((a) => a.rendersDiscoveryId).filter((id) => id !== undefined && id !== null)
-  );
+  const answered = renderedJudgements(log);
   return log.attempts.filter((a) => {
     if (a.status !== 'discovery') return false;
     if (!RENDERED_METHODS.includes(a.discoveryKind)) return false;
     if (isDiscoverySuperseded(log, a.id)) return false;
     if (a.evidence === DISCOVERY_EVIDENCE.RENDERED_DOM) return false;
-    if (rendered.has(a.id)) return false;
     if (!CONTENT_OUTCOMES.includes(a.outcome)) return false;
     // A record that never navigated has no DOM to have rendered.
     if (a.navigationPerformed === false) return false;
     let url = null;
     try { url = new URL(a.url); } catch { return false; }
+    // Answered by a judgement for THIS page and THIS category, not merely mentioned by one.
+    if (answered.has(`${canonicalise(a.url)}\u0000${a.category}`)) return false;
     if (NON_HTML.test(url.pathname)) return false;
     // And the request must not be FORBIDDEN by the policy in force now. Without this the gate would
     // demand renders that politeness forbids - an obligation meetable only by breaching robots,
@@ -2227,7 +2597,7 @@ export function renderBacklogByUrl(log) {
  * the draw-order prefix, frame membership - stay in `deriveDraft`. Those ask whether a finished
  * sample is valid, not whether the work is finished.
  */
-export function corpusBlockers(log) {
+export function corpusBlockers(log, { capturesRoot = null } = {}) {
   const blockers = [];
   const add = (kind, summary, items = []) => blockers.push({ kind, summary, items });
 
@@ -2302,6 +2672,18 @@ export function corpusBlockers(log) {
   // selection-v1.0.24. Plain-fetch evidence for a page whose authoritative evidence is now the
   // rendered DOM. A gate rather than a note: the whole point is that a script-inserted form was
   // undiscoverable, so leaving the backlog optional would leave the bias in the corpus.
+  // Fail-closed: if renders exist and nobody told this gate where they live, the check could not be
+  // performed, and "could not check" must not read as "checked and fine".
+  if ((log.renders ?? []).length > 0 && !capturesRoot) {
+    add('render-evidence', 'rendered evidence could not be verified: no capture root was supplied', []);
+  } else if ((log.renders ?? []).length > 0) {
+    const renderProblems = checkRenderEvidence(log, join(resolve(capturesRoot), RENDERED_DIR));
+    if (renderProblems.length) {
+      add('render-evidence', `rendered evidence does not match the log: ${renderProblems.length} problem(s)`,
+        renderProblems);
+    }
+  }
+
   const backlog = renderBacklog(log);
   if (backlog.length) {
     add('render-backlog',

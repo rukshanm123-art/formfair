@@ -8,12 +8,14 @@
  * code recorded as a valid, permissive robots file. Six requests were authorised on that basis.
  */
 
-import { test, describe } from 'node:test';
+import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, readdirSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, readdirSync, existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { createServer } from 'node:http';
+import { chromium } from 'playwright';
 import {
   DISPOSITION, dispositionForStatus, classifyResponse, classifyRepresentation, evaluatePolicy,
   fetchRobotsPolicy,
@@ -25,12 +27,15 @@ import {
   PERMIT_TTL_MS, sha256, approveCandidateSet, exhaustAgency, agencyResolution, agencyResolutions,
   AGENCY_RESOLUTIONS, BOUNDED_COMPLETE_REASON, ATTRITION_REASON, reResolveExhaustion,
   renderBacklog, renderBacklogByUrl, renderPrerequisite, SUPERSEDED_COMPLETE_REASONS,
+  recordRender, findRender, findRenderForUrl, checkRenderEvidence, assertRenderEvidenceUsable,
+  assertPermitUsable, adoptRender, publishProvenance, checkPermitLedger,
 } from '../run.mjs';
 import {
   DISCOVERY_OUTCOMES, TECHNICAL_ATTRITION_OUTCOMES, CATEGORY_ORDER, parseDrawOrder,
 } from '../selection.mjs';
 import { captureDisposition, needsHeadedFallback } from '../capture.mjs';
 import { buildPacket, renderPacket } from '../packet.mjs';
+import { renderDiscoveryPage } from '../render-discovery.mjs';
 
 /** The real thing, byte for byte, from https://www.nzsis.govt.nz/robots.txt on 2026-09-26. */
 const INCAPSULA = Buffer.from(
@@ -866,7 +871,11 @@ describe('the rendered DOM is the authoritative discovery evidence', () => {
     assert.equal(renderPrerequisite(log, renderBacklog(log)[0]), null, 'and is renderable now');
   });
 
-  test('a rendered record is not, and neither is the record it answers', () => {
+  test('a rendered record is not in the backlog, but NAMING one does not clear it', () => {
+    // selection-v1.0.25 corrected this test as well as the code. It used to assert that a rendered
+    // record naming an earlier one cleared both - which is exactly the defect that let `d-0301`
+    // leave the backlog while still reading `retrieval-inconclusive` with no judgement ever made
+    // about it. A render is evidence; only a judgement for the record's own category answers it.
     const log = withPolicy(emptyLog());
     appendAttempt(log, recordFor());
     const original = log.attempts.at(-1).id;
@@ -875,7 +884,8 @@ describe('the rendered DOM is the authoritative discovery evidence', () => {
       navigatedAt: '2026-09-26T19:01:00Z', examinedAt: '2026-09-26T19:01:00Z',
       evidence: 'rendered-dom', rendersDiscoveryId: original,
     }));
-    assert.deepEqual(renderBacklog(log).map((a) => a.id), [], 'both are answered');
+    assert.deepEqual(renderBacklog(log).map((a) => a.id), [original],
+      'the named record is still unanswered: nothing has judged its category');
   });
 
   test('a render may cross categories, because the page is the same page', () => {
@@ -970,5 +980,343 @@ describe('the rendered DOM is the authoritative discovery evidence', () => {
     const log = withPolicy(emptyLog());
     appendAttempt(log, recordFor());
     assert.ok(corpusBlockers(log).some((b) => b.kind === 'render-backlog'));
+  });
+});
+
+describe('a form without a <form> element is still a form', () => {
+  // selection-v1.0.25. The extractor counted controls only inside `<form>`, and the NZSIS
+  // reporting portal has none - it is a JavaScript application with bare inputs and a submit
+  // button. So a page carrying First, Middle and Last name fields was summarised as having no
+  // form, and the summary was written down instead of the DOM. Assuming classic markup is the same
+  // mistake as assuming server-rendered markup, one level further in.
+  const FORMLESS = `<!doctype html><html><head><title>Reporting a concern</title></head><body>
+    <div class="question-label">First name</div><input id="q7" type="text" maxlength="100">
+    <div class="question-label">Middle name</div><input id="q8" type="text" maxlength="100">
+    <div class="question-label">Last name</div><input id="q9" type="text" maxlength="100">
+    <textarea id="q1" maxlength="2001"></textarea>
+    <input type="hidden" name="csrf" value="x">
+    <button class="button">ENCRYPT AND SUBMIT</button>
+    </body></html>`;
+
+  let server;
+  let origin;
+  before(async () => {
+    server = createServer((req, res) => {
+      if (req.url === '/robots.txt') {
+        res.writeHead(200, { 'content-type': 'text/plain' });
+        return res.end('User-agent: *\nDisallow: /nothing\n');
+      }
+      res.writeHead(200, { 'content-type': 'text/html' });
+      res.end(FORMLESS);
+    });
+    await new Promise((r) => server.listen(0, '127.0.0.1', r));
+    origin = `http://127.0.0.1:${server.address().port}`;
+  });
+  after(() => { server?.closeAllConnections?.(); server?.close(); });
+
+  test('the render counts controls across the document, not only inside <form>', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ff-render-'));
+    const rendered = await renderDiscoveryPage({
+      browserFactory: () => chromium.launch({ headless: true }),
+      url: `${origin}/report`, outDir: dir, recordId: 'formless', settleMs: 50,
+    });
+    assert.equal(rendered.forms.length, 0, 'there genuinely is no <form> element');
+    // The count that matters, and the one the first version got wrong.
+    assert.equal(rendered.controls.length, 4, '3 text inputs and 1 textarea, hidden input excluded');
+    assert.ok(rendered.buttons >= 1);
+    assert.deepEqual(
+      rendered.controls.map((c) => c.id).sort(),
+      ['q1', 'q7', 'q8', 'q9']
+    );
+    assert.equal(rendered.controls.find((c) => c.id === 'q7').maxlength, '100');
+    assert.equal(rendered.evidence, 'rendered-dom');
+    assert.match(rendered.renderedSha256, /^[0-9a-f]{64}$/);
+    assert.ok(existsSync(join(dir, 'formless.html')), 'the bytes are retained privately');
+  });
+});
+
+describe('observation and judgement are separate records', () => {
+  // selection-v1.0.25. `render-discovery` required `--outcome` before the page had been rendered,
+  // and that is literally how d-0306 came to say `no-candidates` about a page carrying First,
+  // Middle and Last name inputs: the judgement was typed first and the evidence read afterwards.
+  const cli = new URL('../cli-capture.mjs', import.meta.url).pathname;
+  const runCli = (args) => spawnSync('node', [cli, ...args], { encoding: 'utf8' });
+
+  test('render-discovery REFUSES an outcome', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ff-ro-'));
+    mkdirSync(join(dir, 'captures'), { recursive: true });
+    writeFileSync(join(dir, 'capture-log.json'), JSON.stringify(emptyLog()));
+    const r = runCli(['render-discovery', '--out', dir, '--agency', 'A', '--website', 'https://a.govt.nz/',
+      '--url', 'https://a.govt.nz/x', '--category', 'service-application', '--set-version', '1',
+      '--permit-id', 'p-0001', '--outcome', 'no-candidates']);
+    assert.notEqual(r.status, 0);
+    assert.match(r.stderr, /--outcome cannot be given to render-discovery/);
+    assert.match(r.stderr, /is what produced d-0306/);
+  });
+
+  const base = (over = {}) => ({
+    examinedAt: '2026-09-26T19:00:00Z', agency: 'A', website: 'https://a.govt.nz/',
+    url: 'https://a.govt.nz/apply', status: 'discovery', discoveryKind: 'navigation',
+    category: 'service-application', candidateSetVersion: 1, approval: 'approved', ...over,
+  });
+
+  test('an observation may conclude nothing', () => {
+    const log = emptyLog();
+    assert.throws(() => appendAttempt(log, base({
+      recordType: 'observation', renderId: 'g-0001', permitId: 'p-0001',
+      outcome: 'candidates-found', navigatedAt: '2026-09-26T19:00:00Z',
+    })), /an observation records "candidates-found"/);
+  });
+
+  test('only an observation may record `rendered`', () => {
+    const log = emptyLog();
+    assert.throws(() => appendAttempt(log, base({
+      outcome: 'rendered', navigatedAt: '2026-09-26T19:00:00Z',
+    })), /only an observation may record the outcome `rendered`/);
+  });
+
+  test('a judgement must not claim a permit, and must say it navigated nothing', () => {
+    const log = emptyLog();
+    assert.throws(() => appendAttempt(log, base({
+      recordType: 'judgement-only', renderId: 'g-0001', evidenceFromDiscoveryId: 'd-0001',
+      outcome: 'no-candidates', permitId: 'p-0001', navigationPerformed: false,
+      checkedAt: '2026-09-26T19:00:00Z',
+    })), /must not name a permit/);
+    assert.throws(() => appendAttempt(log, base({
+      recordType: 'judgement-only', renderId: 'g-0001', evidenceFromDiscoveryId: 'd-0001',
+      outcome: 'no-candidates', navigatedAt: '2026-09-26T19:00:00Z',
+    })), /navigationPerformed: false/);
+  });
+
+  test('a judgement needs the evidence it rests on, by both names', () => {
+    const log = emptyLog();
+    for (const [missing, pattern] of [['renderId', /needs renderId/], ['evidenceFromDiscoveryId', /needs evidenceFromDiscoveryId/]]) {
+      const rec = base({
+        recordType: 'judgement-only', renderId: 'g-0001', evidenceFromDiscoveryId: 'd-0001',
+        outcome: 'no-candidates', navigationPerformed: false, checkedAt: '2026-09-26T19:00:00Z',
+      });
+      delete rec[missing];
+      assert.throws(() => appendAttempt(emptyLog(), rec), pattern, missing);
+    }
+  });
+
+  test('a judgement may not record an attrition outcome', () => {
+    assert.throws(() => appendAttempt(emptyLog(), base({
+      recordType: 'judgement-only', renderId: 'g-0001', evidenceFromDiscoveryId: 'd-0001',
+      outcome: 'retrieval-blocked', navigationPerformed: false, checkedAt: '2026-09-26T19:00:00Z',
+    })), /a judgement records candidates-found or no-candidates/);
+  });
+
+  test('THE BYPASS: a modern permitless navigation record is flagged by the ledger', () => {
+    // Permitless records were read as pre-permit legacy, so any new record could claim a
+    // navigation with no authorisation simply by omitting permitId.
+    const log = emptyLog();
+    recordRobotsCheck(log, {
+      origin: 'https://a.govt.nz', url: 'https://a.govt.nz/robots.txt',
+      fetchedAt: new Date(Date.now() - 60_000).toISOString().replace(/\.\d{3}Z$/, 'Z'),
+      httpStatus: 200, disposition: 'rules', sha256: sha256(''), bytes: 0, body: '',
+    });
+    issueDiscoveryPermit(log, {
+      agency: 'A', category: 'service-application', candidateSetVersion: 1,
+      url: 'https://a.govt.nz/other', robotsCheckId: 'r-0001',
+    });
+    appendAttempt(log, base({ outcome: 'no-candidates', navigatedAt: new Date().toISOString().replace(/\.\d{3}Z$/, 'Z') }));
+    const problems = checkPermitLedger(log);
+    assert.ok(problems.some((p) => /records a navigation at .* with no permit/.test(p)), problems.join('; '));
+    assert.ok(problems.some((p) => /does not predate it/.test(p)));
+  });
+});
+
+describe('one render answers several categories, and answering is not naming', () => {
+  const setup = () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ff-multi-'));
+    const renderedDir = join(dir, 'rendered');
+    mkdirSync(renderedDir, { recursive: true });
+    const html = '<html><body><input id="q7" type="text"></body></html>';
+    writeFileSync(join(renderedDir, 'g1.html'), html);
+    const log = emptyLog();
+    recordRobotsCheck(log, {
+      origin: 'https://a.govt.nz', url: 'https://a.govt.nz/robots.txt',
+      fetchedAt: new Date(Date.now() - 60_000).toISOString().replace(/\.\d{3}Z$/, 'Z'),
+      httpStatus: 200, disposition: 'rules', sha256: sha256(''), bytes: 0, body: '',
+    });
+    const render = recordRender(log, {
+      url: 'https://a.govt.nz/apply', navigatedAt: '2026-09-26T19:00:00Z', permitId: 'p-0001',
+      renderFile: 'g1.html', renderedSha256: sha256(html), renderedBytes: Buffer.byteLength(html),
+      accessBarriers: [],
+    });
+    return { dir, log, render, html };
+  };
+
+  const plain = (log, category, at) => {
+    appendAttempt(log, {
+      examinedAt: at, agency: 'A', website: 'https://a.govt.nz/', url: 'https://a.govt.nz/apply',
+      status: 'discovery', discoveryKind: 'navigation', outcome: 'no-candidates',
+      category, candidateSetVersion: 1, navigatedAt: at, approval: 'approved',
+    });
+    return log.attempts.at(-1);
+  };
+  const judge = (log, { render, category, outcome, answers, at }) => {
+    appendAttempt(log, {
+      recordType: 'judgement-only', renderId: render.id, evidenceFromDiscoveryId: 'd-0001',
+      ...(answers ? { rendersDiscoveryId: answers } : {}),
+      examinedAt: at, agency: 'A', website: 'https://a.govt.nz/', url: render.url,
+      status: 'discovery', discoveryKind: 'navigation', outcome, category, candidateSetVersion: 1,
+      navigationPerformed: false, checkedAt: at, evidence: 'rendered-dom',
+      renderFile: render.renderFile, renderedSha256: render.renderedSha256,
+      renderedBytes: render.renderedBytes, approval: 'approved',
+      supersedesDiscoveryId: answers,
+    });
+    return log.attempts.at(-1);
+  };
+
+  test('THE GAP: naming a record does not clear it; only a judgement for its category does', () => {
+    // d-0301 left the backlog because the render NAMED it, while its own outcome stayed
+    // `retrieval-inconclusive` and no account-registration judgement was ever made.
+    const { dir, log } = setup();
+    const ar = plain(log, 'account-registration', '2026-09-26T19:00:00Z');
+    assert.equal(renderBacklog(log).length, 1);
+
+    // A record that merely mentions it, in another category, clears nothing.
+    const { render } = { render: log.renders[0] };
+    judge(log, { render, category: 'service-application', outcome: 'candidates-found', at: '2026-09-26T19:01:00Z' });
+    assert.deepEqual(renderBacklog(log).map((a) => a.id), [ar.id],
+      'the account-registration record is still unanswered');
+    assert.equal(checkRenderEvidence(log, join(dir, 'rendered')).length, 0);
+  });
+
+  test('one render supports a judgement per category, and each clears its own', () => {
+    const { dir, log } = setup();
+    const render = log.renders[0];
+    const ar = plain(log, 'account-registration', '2026-09-26T19:00:00Z');
+    const sa = plain(log, 'service-application', '2026-09-26T19:01:00Z');
+    assert.equal(renderBacklog(log).length, 2);
+    assert.equal(renderBacklogByUrl(log).length, 1, 'one page, so one render answers both');
+
+    judge(log, { render, category: 'account-registration', outcome: 'no-candidates', answers: ar.id, at: '2026-09-26T19:02:00Z' });
+    assert.deepEqual(renderBacklog(log).map((a) => a.id), [sa.id]);
+
+    judge(log, { render, category: 'service-application', outcome: 'candidates-found', answers: sa.id, at: '2026-09-26T19:03:00Z' });
+    assert.deepEqual(renderBacklog(log), [], 'one render, two categories, both cleared');
+    assert.equal(checkRenderEvidence(log, join(dir, 'rendered')).length, 0);
+  });
+
+  test('the same page can be no-candidates for one category and candidates-found for another', () => {
+    const { log } = setup();
+    const render = log.renders[0];
+    const a = judge(log, { render, category: 'account-registration', outcome: 'no-candidates', at: '2026-09-26T19:00:00Z' });
+    const b = judge(log, { render, category: 'service-application', outcome: 'candidates-found', at: '2026-09-26T19:01:00Z' });
+    assert.equal(a.outcome, 'no-candidates');
+    assert.equal(b.outcome, 'candidates-found');
+    assert.equal(a.renderId, b.renderId, 'both rest on the same observation');
+  });
+});
+
+describe('rendered evidence is re-verified, not trusted', () => {
+  const setup = () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ff-ev-'));
+    const renderedDir = join(dir, 'rendered');
+    mkdirSync(renderedDir, { recursive: true });
+    mkdirSync(join(dir, 'captures'), { recursive: true });
+    const html = '<html><body><input id="q7"></body></html>';
+    writeFileSync(join(renderedDir, 'g1.html'), html);
+    const log = emptyLog();
+    const render = recordRender(log, {
+      url: 'https://a.govt.nz/apply', navigatedAt: '2026-09-26T19:00:00Z', permitId: 'p-0001',
+      renderFile: 'g1.html', renderedSha256: sha256(html), renderedBytes: Buffer.byteLength(html),
+      accessBarriers: [],
+    });
+    return { dir, renderedDir, log, render, html };
+  };
+
+  test('an untouched render verifies', () => {
+    const { dir, log, render } = setup();
+    assert.deepEqual(checkRenderEvidence(log, join(dir, 'rendered')), []);
+    assert.deepEqual(assertRenderEvidenceUsable(log, { renderId: render.id, capturesRoot: dir }), []);
+  });
+
+  test('a tampered render file is caught, and blocks the gate and publication', () => {
+    const { dir, renderedDir, log, render, html } = setup();
+    writeFileSync(join(renderedDir, 'g1.html'), `${html}<!-- edited -->`);
+    const problems = checkRenderEvidence(log, renderedDir);
+    assert.ok(problems.some((p) => /is not the evidence that was observed/.test(p)), problems.join('; '));
+    assert.ok(problems.some((p) => /bytes on disk/.test(p)));
+    assert.ok(assertRenderEvidenceUsable(log, { renderId: render.id, capturesRoot: dir }).length > 0);
+    assert.ok(corpusBlockers(log, { capturesRoot: dir }).some((b) => b.kind === 'render-evidence'));
+    assert.throws(() => publishProvenance(log, { to: join(dir, 'out'), capturesRoot: dir }),
+      /rendered evidence does not match the log and must not be published/);
+  });
+
+  test('a missing render file is caught', () => {
+    const { dir, renderedDir, log } = setup();
+    rmSync(join(renderedDir, 'g1.html'));
+    assert.ok(checkRenderEvidence(log, renderedDir).some((p) => /could not be read/.test(p)));
+  });
+
+  test('a record carrying a digest but no registry entry is checked too', () => {
+    // d-0306 and d-0307 predate the registry and carry the file and digest on the record itself.
+    const { dir, renderedDir, log, html } = setup();
+    log.renders = [];
+    appendAttempt(log, {
+      examinedAt: '2026-09-26T19:00:00Z', agency: 'A', website: 'https://a.govt.nz/',
+      url: 'https://a.govt.nz/apply', status: 'discovery', discoveryKind: 'navigation',
+      outcome: 'no-candidates', category: 'service-application', candidateSetVersion: 1,
+      navigatedAt: '2026-09-26T19:00:00Z', approval: 'approved',
+      evidence: 'rendered-dom', renderFile: 'g1.html', renderedSha256: sha256(html),
+      renderedBytes: Buffer.byteLength(html),
+    });
+    assert.deepEqual(checkRenderEvidence(log, renderedDir), []);
+    writeFileSync(join(renderedDir, 'g1.html'), 'changed');
+    assert.ok(checkRenderEvidence(log, renderedDir).some((p) => /hashes to/.test(p)));
+  });
+
+  test('a judgement may not rest on a challenge document', () => {
+    const { dir, log } = setup();
+    log.renders[0].accessBarriers = ['cloudflare interstitial'];
+    assert.ok(assertRenderEvidenceUsable(log, { renderId: 'g-0001', capturesRoot: dir })
+      .some((p) => /cannot rest on a challenge document/.test(p)));
+  });
+
+  test('FAIL-CLOSED: renders present and no capture root is a blocker, not a pass', () => {
+    const { log } = setup();
+    const blocker = corpusBlockers(log).find((b) => b.kind === 'render-evidence');
+    assert.ok(blocker, '"could not check" must not read as "checked and fine"');
+    assert.match(blocker.summary, /could not be verified/);
+  });
+
+  test('a citation to a render of a different page is refused', () => {
+    const { dir, log, render } = setup();
+    appendAttempt(log, {
+      recordType: 'judgement-only', renderId: render.id, evidenceFromDiscoveryId: 'd-0001',
+      examinedAt: '2026-09-26T19:00:00Z', agency: 'A', website: 'https://a.govt.nz/',
+      url: 'https://a.govt.nz/elsewhere', status: 'discovery', discoveryKind: 'navigation',
+      outcome: 'no-candidates', category: 'service-application', candidateSetVersion: 1,
+      navigationPerformed: false, checkedAt: '2026-09-26T19:00:00Z', approval: 'approved',
+    });
+    assert.ok(checkRenderEvidence(log, join(dir, 'rendered'))
+      .some((p) => /must rest on evidence of the page it judges/.test(p)));
+  });
+
+  test('adopting a render verifies the bytes first', () => {
+    const { dir, renderedDir, log, html } = setup();
+    log.renders = [];
+    appendAttempt(log, {
+      examinedAt: '2026-09-26T19:00:00Z', agency: 'A', website: 'https://a.govt.nz/',
+      url: 'https://a.govt.nz/apply', status: 'discovery', discoveryKind: 'navigation',
+      outcome: 'no-candidates', category: 'service-application', candidateSetVersion: 1,
+      navigatedAt: '2026-09-26T19:00:00Z', approval: 'approved',
+      evidence: 'rendered-dom', renderFile: 'g1.html', renderedSha256: sha256(html),
+      renderedBytes: Buffer.byteLength(html),
+    });
+    const id = log.attempts.at(-1).id;
+    // A shorter file trips the length check; a same-length edit trips the digest. Both must refuse.
+    writeFileSync(join(renderedDir, 'g1.html'), 'tampered');
+    assert.throws(() => adoptRender(log, { fromAttemptId: id, capturesRoot: dir }), /is 8 bytes, but/);
+    writeFileSync(join(renderedDir, 'g1.html'), html.replace('q7', 'q8'));
+    assert.throws(() => adoptRender(log, { fromAttemptId: id, capturesRoot: dir }), /hashes to/);
+    writeFileSync(join(renderedDir, 'g1.html'), html);
+    const adopted = adoptRender(log, { fromAttemptId: id, capturesRoot: dir });
+    assert.equal(adopted.adoptedFrom, id);
+    assert.throws(() => adoptRender(log, { fromAttemptId: id, capturesRoot: dir }), /already registered/);
   });
 });

@@ -80,22 +80,79 @@ export async function renderDiscoveryPage({
     const blocking = await detectBlocking(page, httpStatus);
     const userAgent = await page.evaluate(() => navigator.userAgent);
 
-    const found = await page.evaluate(() => ({
-      title: document.title ?? '',
-      links: [...document.querySelectorAll('a[href]')].map((a) => a.href),
-      forms: [...document.querySelectorAll('form')].map((f) => ({
-        action: f.getAttribute('action') ?? '',
-        method: (f.getAttribute('method') ?? 'get').toLowerCase(),
-        controls: [...f.querySelectorAll('input,select,textarea')].map((c) => ({
-          tag: c.tagName.toLowerCase(),
-          type: c.getAttribute('type') ?? null,
-          name: c.getAttribute('name') ?? null,
+    const found = await page.evaluate(() => {
+      // The accessible name, by the routes a person actually gets one from. Counts and ids alone
+      // showed `q7`, `q8`, `q9` without saying they mean First, Middle and Last name - which is the
+      // whole point of looking at a name field. No rule is applied to the text; it is recorded so a
+      // reader of the log can see what the control asked for.
+      const accessibleName = (c) => {
+        const aria = c.getAttribute('aria-label');
+        if (aria && aria.trim()) return aria.trim();
+        const labelledBy = c.getAttribute('aria-labelledby');
+        if (labelledBy) {
+          const text = labelledBy.split(/\s+/)
+            .map((id) => document.getElementById(id)?.textContent ?? '')
+            .join(' ').trim();
+          if (text) return text;
+        }
+        const id = c.getAttribute('id');
+        if (id) {
+          const forLabel = document.querySelector(`label[for="${CSS.escape(id)}"]`);
+          if (forLabel?.textContent?.trim()) return forLabel.textContent.trim();
+        }
+        const wrapping = c.closest('label');
+        if (wrapping?.textContent?.trim()) return wrapping.textContent.trim();
+        // A form-less application labels its controls with ordinary elements. The nearest preceding
+        // text in document order is what a sighted person reads as the label, so it is reported -
+        // marked `nearby`, because it is weaker evidence than a real label and must not be mistaken
+        // for one.
+        const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+        let previous = null;
+        while (walker.nextNode()) {
+          const node = walker.currentNode;
+          if (node.compareDocumentPosition(c) & Node.DOCUMENT_POSITION_FOLLOWING) {
+            const text = node.textContent.trim();
+            if (text) previous = text;
+          } else break;
+        }
+        return previous ? `nearby: ${previous}` : null;
+      };
+      const describe = (c) => ({
+        tag: c.tagName.toLowerCase(),
+        type: c.getAttribute('type') ?? null,
+        name: c.getAttribute('name') ?? null,
+        id: c.getAttribute('id') ?? null,
+        maxlength: c.getAttribute('maxlength') ?? null,
+        placeholder: c.getAttribute('placeholder') ?? null,
+        accessibleName: accessibleName(c),
+      });
+      return {
+        title: document.title ?? '',
+        links: [...document.querySelectorAll('a[href]')].map((a) => a.href),
+        forms: [...document.querySelectorAll('form')].map((f) => ({
+          action: f.getAttribute('action') ?? '',
+          method: (f.getAttribute('method') ?? 'get').toLowerCase(),
+          controls: [...f.querySelectorAll('input,select,textarea')].map(describe),
         })),
-      })),
-      // Whether script actually changed the document is the fact that justifies this whole
-      // command, so it is measured rather than assumed.
-      domNodes: document.getElementsByTagName('*').length,
-    }));
+        // selection-v1.0.24, corrected. Controls are counted across the WHOLE DOCUMENT, not only
+        // inside `<form>` elements. The NZSIS reporting portal has no `<form>` at all - it is a
+        // JavaScript application with bare inputs and a submit button - so the first version of
+        // this reported "0 forms" for a page carrying First, Middle and Last name fields, and the
+        // operator wrote `no-candidates` off that summary. Assuming classic markup is the same
+        // mistake as assuming server-rendered markup, one level further in: the rule renders the
+        // DOM, so the extraction has to read the DOM as it is.
+        controls: [...document.querySelectorAll('input,select,textarea')]
+          // Case-insensitively: HTML attribute values are not case-sensitive here, so
+          // `type="HIDDEN"` slipped through the first version and would have been counted as a
+          // control a person fills in.
+          .filter((c) => (c.getAttribute('type') ?? 'text').trim().toLowerCase() !== 'hidden')
+          .map(describe),
+        buttons: document.querySelectorAll('button,input[type=submit]').length,
+        // Whether script actually changed the document is the fact that justifies this whole
+        // command, so it is measured rather than assumed.
+        domNodes: document.getElementsByTagName('*').length,
+      };
+    });
 
     const html = await page.evaluate(() => document.documentElement.outerHTML);
     writeFileSync(target, html, 'utf8');
@@ -125,6 +182,8 @@ export async function renderDiscoveryPage({
       domNodes: found.domNodes,
       links: [...new Set(found.links)],
       forms: found.forms,
+      controls: found.controls,
+      buttons: found.buttons,
     };
   } finally {
     await context.close();

@@ -582,6 +582,71 @@ describe('the corpus seal requires the exhaustion records', () => {
     });
   });
 
+  /** A render registered in the log, with its bytes on disk under the capture root. */
+  const withRender = (log, dir, { tamper = null } = {}) => {
+    const html = '<html><body><input id="q7" type="text"></body></html>';
+    const renderedRoot = join(dir, 'rendered');
+    mkdirSync(renderedRoot, { recursive: true });
+    writeFileSync(join(renderedRoot, 'g1.html'), tamper ?? html);
+    log.renders = [{
+      id: 'g-0001', url: 'https://example.invalid/apply', navigatedAt: '2026-09-25T03:30:00Z',
+      permitId: 'p-0001', renderFile: 'g1.html',
+      renderedSha256: createHash('sha256').update(html).digest('hex'),
+      renderedBytes: Buffer.byteLength(html),
+    }];
+    return log;
+  };
+
+  test('rendered discovery evidence is re-hashed at sealing time', async () => {
+    // solo-protocol-v1.0.6. The digests were written and read by nothing, so an edited or deleted
+    // render file would leave a convincing hash-shaped claim and every gate would pass.
+    await inTemp(async (dir) => {
+      const d = realDraft({ pageCount: 2, exhaustedCount: order.length - 2 });
+      const clean = withRender(captureLogFor(d), dir);
+      const prepared = prepareReal(dir, d, { log: clean });
+      const ok = sealCorpus({ draft: d, capturesDir: prepared.capturesDir, instrument: identity, frameDir, captureLogPath: prepared.captureLogPath });
+      assert.ok(ok.manifest, ok.problems.join('; '));
+
+      // Same length, different bytes: only a digest catches it.
+      writeFileSync(join(dir, 'rendered', 'g1.html'), '<html><body><input id="q8" type="text"></body></html>');
+      const tampered = sealCorpus({ draft: d, capturesDir: prepared.capturesDir, instrument: identity, frameDir, captureLogPath: prepared.captureLogPath });
+      assert.equal(tampered.manifest, null);
+      assert.ok(
+        tampered.problems.some((p) => /is not the evidence that was observed/.test(p)),
+        tampered.problems.join('; ')
+      );
+    });
+  });
+
+  test('a missing render file does not seal', async () => {
+    await inTemp(async (dir) => {
+      const d = realDraft({ pageCount: 2, exhaustedCount: order.length - 2 });
+      const log = withRender(captureLogFor(d), dir);
+      const prepared = prepareReal(dir, d, { log });
+      rmSync(join(dir, 'rendered', 'g1.html'));
+      const sealed = sealCorpus({ draft: d, capturesDir: prepared.capturesDir, instrument: identity, frameDir, captureLogPath: prepared.captureLogPath });
+      assert.equal(sealed.manifest, null);
+      assert.ok(sealed.problems.some((p) => /could not be read/.test(p)), sealed.problems.join('; '));
+    });
+  });
+
+  test('a judgement citing an unregistered render does not seal', async () => {
+    await inTemp(async (dir) => {
+      const d = realDraft({ pageCount: 2, exhaustedCount: order.length - 2 });
+      const log = withRender(captureLogFor(d), dir);
+      log.attempts.push({
+        id: 'd-9500', agency: d.exhaustedAgencies[0].agency, category: 'account-registration',
+        status: 'discovery', discoveryKind: 'navigation', outcome: 'no-candidates',
+        candidateSetVersion: 1, approval: 'approved', url: 'https://example.invalid/apply',
+        renderId: 'g-9999', navigationPerformed: false, checkedAt: '2026-09-25T03:40:00Z',
+      });
+      const prepared = prepareReal(dir, d, { log });
+      const sealed = sealCorpus({ draft: d, capturesDir: prepared.capturesDir, instrument: identity, frameDir, captureLogPath: prepared.captureLogPath });
+      assert.equal(sealed.manifest, null);
+      assert.ok(sealed.problems.some((p) => /cites render g-9999, which is not registered/.test(p)));
+    });
+  });
+
   test('an exhaustion bound to nothing does not seal, in either resolution', async () => {
     // With no bound record, `bounded-discovery-complete` is derivable from nothing at all - the stronger of
     // the two claims, on no evidence. The absence of attrition only means something where there

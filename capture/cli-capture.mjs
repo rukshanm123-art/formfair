@@ -34,13 +34,14 @@ import {
   unresolvedDiscoveryRounds, openDiscoveryPermits, robotsCheckIsFresh, isDiscoverySuperseded,
   reopenCandidateSet, closeDiscoveryPermit, permitAudit, PERMIT_DISPOSITIONS, corpusBlockers,
   quarantineCapture, recordDeviation, agencyResolutions, agencyResolution, reResolveExhaustion,
-  renderBacklog, renderBacklogByUrl, renderPrerequisite,
+  renderBacklog, renderBacklogByUrl, renderPrerequisite, recordRender, findRender,
+  findRenderForUrl, assertRenderEvidenceUsable, assertPermitUsable, adoptRender,
 } from './run.mjs';
 import { fetchRobotsPolicy, evaluatePolicy, DISPOSITION } from './robots-policy.mjs';
 import {
   DISCOVERY_KINDS, DISCOVERY_METHODS, DISCOVERY_OUTCOMES, remainingBudget, canonicalise,
   SEARCH_TERMS, parseDrawOrder, nextWork, isSuperseded, MAX_QUALIFIED_AGENCIES,
-  TECHNICAL_ATTRITION_OUTCOMES,
+  TECHNICAL_ATTRITION_OUTCOMES, JUDGEMENT_OUTCOMES,
 } from './selection.mjs';
 import { readFileSync as readFile } from 'node:fs';
 import { buildPacket, renderPacket } from './packet.mjs';
@@ -496,7 +497,7 @@ function doStatus() {
   // selection-v1.0.17. The same list the corpus gate reads. Computing it separately here is how
   // `status` came to report "nothing outstanding" while `next` named four unassessed candidates
   // and the draft refused for exactly that reason - three commands, three states, one log.
-  const blockers = corpusBlockers(log);
+  const blockers = corpusBlockers(log, { capturesRoot: resolve(require_('out')) });
   for (const b of blockers) {
     console.log(b.summary);
     for (const item of b.items.slice(0, 6)) console.log(`  - ${item}`);
@@ -593,7 +594,7 @@ function doSupersedeSet() {
 function doPublish() {
   const dir = require_('out');
   const log = readLog(logPathFor(dir));
-  const r = publishProvenance(log, { to: require_('to') });
+  const r = publishProvenance(log, { to: require_('to'), capturesRoot: resolve(dir) });
   console.log(`ledger:     ${r.ledgerPath}`);
   console.log(`provenance: ${r.provenancePath}`);
   console.log('These carry no markup and are safe to track.');
@@ -874,11 +875,16 @@ async function doRecheckRobots() {
 }
 
 /**
- * Records a discovery inspection from the RENDERED DOM, which is its authoritative evidence.
+ * Records an OBSERVATION from the rendered DOM. It concludes nothing.
  *
- * selection-v1.0.24. Consumes a fresh permit, paces like every other navigation, and writes the
- * rendered markup into the private data tree rather than beside the corpus captures - it is
- * third-party markup and only its hash and provenance are published. Nothing is typed, clicked or
+ * selection-v1.0.25. `--outcome` used to be required here, before the page had been rendered — and
+ * that is precisely how `d-0306` came to record `no-candidates` about a page carrying First, Middle
+ * and Last name inputs: the judgement was supplied first and the evidence read afterwards, so the
+ * render summary was written down instead of the DOM. Observation and judgement are now two steps,
+ * and the second one makes no request.
+ *
+ * Consumes a fresh permit, paces like every other navigation, and writes the rendered markup into
+ * the private data tree rather than beside the corpus captures. Nothing is typed, clicked or
  * submitted, and no challenge is answered.
  */
 async function doRenderDiscovery() {
@@ -889,17 +895,22 @@ async function doRenderDiscovery() {
   const category = require_('category');
   const setVersion = Number(require_('set-version'));
   const method = flag('method') ?? 'navigation';
-  const outcome = require_('outcome');
   const permitId = require_('permit-id');
   const settleMs = Number(flag('settle-ms') ?? POLICY.postLoadSettleMs);
 
+  if (flag('outcome') !== null) {
+    die(
+      '--outcome cannot be given to render-discovery. A render records what was retrieved and ' +
+        'concludes nothing; run `classify-render` once you have read the evidence. Supplying the ' +
+        'judgement first is what produced d-0306.'
+    );
+  }
   if (!RENDERED_METHODS.includes(method)) {
     die(
       `--method must be one of ${RENDERED_METHODS.join(', ')}. A rendered DOM is the authoritative ` +
         'evidence for a page; robots.txt, sitemaps, status codes and non-HTML files are read plainly.'
     );
   }
-  if (!DISCOVERY_OUTCOMES.includes(outcome)) die(`--outcome must be one of ${DISCOVERY_OUTCOMES.join(', ')}`);
   if (!CATEGORIES.includes(category)) die(`--category must be one of ${CATEGORIES.join(', ')}`);
   if (!Number.isInteger(setVersion) || setVersion < 1) die('--set-version must be a positive integer');
 
@@ -908,30 +919,41 @@ async function doRenderDiscovery() {
   const log = readLog(logPath);
   const renderedDir = join(resolve(dir), 'rendered');
 
+  // The permit is checked BEFORE the browser opens. It used to be consumed after the render, so an
+  // expired, closed or mismatched permit was discovered only once the request had already been made.
+  // A permit is meant to be a precondition of traffic, not a comment on it.
+  assertPermitUsable(log, { agency, category, candidateSetVersion: setVersion, url, permitId });
+
   await pacer.beforeNavigation(null);
   const rendered = await renderDiscoveryPage({
     browserFactory: () => chromium.launch({ headless: true }),
-    url, outDir: renderedDir, recordId: `r${Date.now()}`, settleMs,
+    url, outDir: renderedDir, recordId: `g${Date.now()}`, settleMs,
     browserMode: 'headless',
   });
-
-  // A challenge is a mechanical fact, so the harness decides it rather than accepting a label.
-  const barred = rendered.accessBarriers.length > 0;
-  if (barred && outcome !== 'retrieval-blocked') {
-    die(
-      `the render was access-barred (${rendered.accessBarriers.join(', ')}), so the outcome must be ` +
-        `retrieval-blocked, not ${outcome}. The rendered bytes are kept at ${rendered.renderFile}.`
-    );
-  }
 
   const permit = consumeDiscoveryPermit(log, {
     agency, category, candidateSetVersion: setVersion, url,
     navigatedAt: rendered.navigatedAt, permitId,
   });
+  const render = recordRender(log, {
+    url, finalUrl: rendered.finalUrl, navigatedAt: rendered.navigatedAt, permitId: permit.id,
+    renderFile: rendered.renderFile, renderedSha256: rendered.renderedSha256,
+    renderedBytes: rendered.renderedBytes, httpStatus: rendered.httpStatus,
+    loadState: rendered.loadState, domNodes: rendered.domNodes,
+    linkCount: rendered.links.length, formCount: rendered.forms.length,
+    controlCount: rendered.controls.length, buttonCount: rendered.buttons,
+    accessBarriers: rendered.accessBarriers, submissionProtection: rendered.submissionProtection,
+    authenticationSignals: rendered.authenticationSignals, title: rendered.title,
+    browser: rendered.browser, browserMode: rendered.browserMode, userAgent: rendered.userAgent,
+    viewport: rendered.viewport, locale: rendered.locale, settleMs: rendered.settleMs,
+  });
 
+  // A challenge is mechanical, so the harness states it. Everything else is left unjudged.
+  const outcome = rendered.accessBarriers.length > 0 ? 'retrieval-blocked' : 'rendered';
   appendAttempt(log, {
+    recordType: 'observation',
     permitId: permit.id,
-    ...(flag('renders') ? { rendersDiscoveryId: flag('renders') } : {}),
+    renderId: render.id,
     examinedAt: now(), agency, website, url,
     status: 'discovery', discoveryKind: method, outcome, category, candidateSetVersion: setVersion,
     navigatedAt: rendered.navigatedAt,
@@ -945,6 +967,8 @@ async function doRenderDiscovery() {
     domNodes: rendered.domNodes,
     linkCount: rendered.links.length,
     formCount: rendered.forms.length,
+    controlCount: rendered.controls.length,
+    buttonCount: rendered.buttons,
     accessBarriers: rendered.accessBarriers,
     submissionProtection: rendered.submissionProtection,
     authenticationSignals: rendered.authenticationSignals,
@@ -956,17 +980,189 @@ async function doRenderDiscovery() {
   writeDerived({ log, dir, frameSha256: flag('frame-sha256'), drawOrderSha256: flag('draw-order-sha256'), synthetic: has('synthetic') });
 
   const record = log.attempts.at(-1);
-  console.log(`recorded ${record.id}: rendered ${method} / ${outcome} (${category} v${setVersion})`);
-  console.log(`HTTP ${rendered.httpStatus ?? "-"}  ${rendered.domNodes} DOM nodes, ${rendered.links.length} link(s), ${rendered.forms.length} form(s)`);
+  console.log(`recorded ${record.id}: observation ${render.id} (${method}, ${category} v${setVersion}) -> ${outcome}`);
+  console.log(
+    `HTTP ${rendered.httpStatus ?? '-'}  ${rendered.domNodes} DOM nodes, ${rendered.links.length} link(s), ` +
+      `${rendered.forms.length} form element(s), ${rendered.controls.length} control(s), ${rendered.buttons} button(s)`
+  );
   console.log(`rendered bytes: ${rendered.renderedBytes} sha256 ${rendered.renderedSha256.slice(0, 16)} (private: rendered/${rendered.renderFile})`);
   if (rendered.title) console.log(`title: ${rendered.title}`);
-  if (rendered.accessBarriers.length) console.log(`accessBarriers: ${rendered.accessBarriers.join(", ")}`);
-  if (rendered.submissionProtection.length) console.log(`submissionProtection: ${rendered.submissionProtection.join(", ")}`);
+  if (rendered.accessBarriers.length) console.log(`accessBarriers: ${rendered.accessBarriers.join(', ')}`);
+  if (rendered.submissionProtection.length) console.log(`submissionProtection: ${rendered.submissionProtection.join(', ')}`);
   for (const f of rendered.forms.slice(0, 6)) {
-    console.log(`  form ${f.method} ${f.action || "(self)"} -> ${f.controls.map((c) => `${c.tag}${c.type ? `[${c.type}]` : ""}${c.name ? ` name=${c.name}` : ""}`).join(", ")}`);
+    console.log(`  form ${f.method} ${f.action || '(self)'} -> ${f.controls.length} control(s)`);
   }
+  // Printed whether or not a `<form>` element exists: a page with none can still be a form. The
+  // accessible name is printed because `q7` does not tell a reader it means "First name".
+  for (const c of rendered.controls.slice(0, 30)) {
+    console.log(
+      `  control ${c.tag}${c.type ? `[${c.type}]` : ''}${c.name ? ` name=${c.name}` : ''}` +
+        `${c.id ? ` id=${c.id}` : ''}${c.maxlength ? ` maxlength=${c.maxlength}` : ''}` +
+        `${c.accessibleName ? `  <- ${JSON.stringify(c.accessibleName.slice(0, 60))}` : ''}`
+    );
+  }
+  if (rendered.controls.length > 30) console.log(`  ... and ${rendered.controls.length - 30} more control(s)`);
   for (const l of rendered.links.slice(0, 40)) console.log(`  link ${l}`);
   if (rendered.links.length > 40) console.log(`  ... and ${rendered.links.length - 40} more link(s)`);
+  console.log('');
+  console.log(`Nothing is judged yet. Run \`classify-render --render ${render.id} --category <c> --outcome <o>\`.`);
+}
+
+/** Registers a render recorded before the registry existed, verifying its bytes first. */
+function doAdoptRender() {
+  const dir = require_('out');
+  const logPath = logPathFor(dir);
+  const log = readLog(logPath);
+  const render = adoptRender(log, { fromAttemptId: require_('from'), capturesRoot: resolve(dir) });
+  writeLog(logPath, log);
+  console.log(`registered ${render.id} from ${render.adoptedFrom}: ${render.renderFile}`);
+  console.log(`verified ${render.renderedBytes} bytes, sha256 ${render.renderedSha256.slice(0, 16)}`);
+}
+
+/**
+ * Records a category-specific judgement on evidence already held. Makes no request.
+ *
+ * One render supports as many judgements as it has categories: a page is routinely `no-candidates`
+ * for account registration and `candidates-found` for service application, and tying the judgement
+ * to the observation record made that impossible to express.
+ */
+function doClassifyRender() {
+  const dir = require_('out');
+  const logPath = logPathFor(dir);
+  const log = readLog(logPath);
+  const renderId = require_('render');
+  const category = require_('category');
+  const outcome = require_('outcome');
+  const setVersion = Number(require_('set-version'));
+
+  if (!JUDGEMENT_OUTCOMES.includes(outcome)) {
+    die(`--outcome must be ${JUDGEMENT_OUTCOMES.join(' or ')}; a judgement says whether the page yields candidates`);
+  }
+  if (!CATEGORIES.includes(category)) die(`--category must be one of ${CATEGORIES.join(', ')}`);
+  if (!Number.isInteger(setVersion) || setVersion < 1) die('--set-version must be a positive integer');
+
+  const problems = assertRenderEvidenceUsable(log, { renderId, capturesRoot: resolve(dir) });
+  if (problems.length) die(`the render evidence cannot be relied on:\n  ${problems.join('\n  ')}`);
+  const render = findRender(log, renderId);
+  const observation = log.attempts.find(
+    (a) => a.renderId === renderId && a.recordType === 'observation'
+  ) ?? log.attempts.find((a) => a.renderFile === render.renderFile);
+  if (!observation) die(`no observation record names render ${renderId}`);
+
+  const answers = flag('answers');
+  if (answers) {
+    const target = log.attempts.find((a) => a.id === answers);
+    if (!target) die(`--answers ${answers} matches no recorded attempt`);
+    if (target.category !== category) {
+      die(
+        `--answers ${answers} is a ${target.category} record, but this judgement is for ${category}. ` +
+          'A judgement answers a record in its own category; one render supports one judgement per category.'
+      );
+    }
+  }
+
+  appendAttempt(log, {
+    recordType: 'judgement-only',
+    renderId,
+    evidenceFromDiscoveryId: observation.id,
+    ...(answers ? { rendersDiscoveryId: answers } : {}),
+    examinedAt: now(), agency: observation.agency, website: observation.website, url: render.url,
+    status: 'discovery', discoveryKind: observation.discoveryKind, outcome,
+    category, candidateSetVersion: setVersion,
+    navigationPerformed: false,
+    checkedAt: now(),
+    evidence: 'rendered-dom',
+    renderFile: render.renderFile,
+    renderedSha256: render.renderedSha256,
+    renderedBytes: render.renderedBytes,
+    note: require_('note'),
+    approval: APPROVAL.APPROVED,
+  });
+  writeLog(logPath, log);
+  writeDerived({ log, dir, frameSha256: flag('frame-sha256'), drawOrderSha256: flag('draw-order-sha256'), synthetic: has('synthetic') });
+  const record = log.attempts.at(-1);
+  console.log(`recorded ${record.id}: ${category} ${outcome} from ${renderId} (${observation.id})`);
+  if (answers) console.log(`answers ${answers}, which is preserved unchanged`);
+  console.log('No request was made for this judgement.');
+}
+
+/**
+ * Corrects the JUDGEMENT on a discovery record, from evidence already held and re-verified.
+ *
+ * selection-v1.0.25. The first version of this was an integrity bypass. It could mint a modern
+ * record with no permit — which the ledger read as a pre-permit legacy record — and it copied
+ * whatever evidence fields the target happened to carry, including none at all. A correction that
+ * rests on nothing is not a correction; it is a fresh assertion wearing the target's provenance.
+ *
+ * So a correction now requires a render that exists, whose file is on disk with the recorded length
+ * and digest, and whose URL is the target's page; it names both the record it supersedes and the
+ * observation its evidence comes from; it is explicitly a `judgement-only` record; and the target
+ * must not already have been superseded.
+ *
+ * The correction this was written for is one of mine: the NZSIS reporting portal was recorded
+ * `no-candidates` because the extractor counted controls only inside `<form>` elements and that page
+ * has none, so a page carrying First, Middle and Last name fields was summarised as having no form
+ * and I wrote the summary down instead of reading the DOM.
+ */
+function doCorrectDiscovery() {
+  const dir = require_('out');
+  const logPath = logPathFor(dir);
+  const log = readLog(logPath);
+  const targetId = require_('supersedes');
+  const outcome = require_('outcome');
+
+  if (!JUDGEMENT_OUTCOMES.includes(outcome)) {
+    die(`--outcome must be ${JUDGEMENT_OUTCOMES.join(' or ')}; a correction corrects a judgement`);
+  }
+  const target = log.attempts.find((a) => a.id === targetId);
+  if (!target) die(`${targetId} matches no recorded attempt`);
+  if (target.status !== 'discovery') die(`${targetId} is a ${target.status} attempt`);
+  if (target.outcome === outcome) {
+    die(`${targetId} already records ${outcome}; a correction must change the judgement`);
+  }
+  if (isDiscoverySuperseded(log, targetId)) {
+    die(`${targetId} has already been corrected; correct the correction instead`);
+  }
+  const renderId = target.renderId ?? findRenderForUrl(log, target.url)?.id ?? null;
+  if (!renderId) {
+    die(
+      `${targetId} rests on no rendered evidence, so its judgement cannot be corrected from evidence ` +
+        'already held. Render the page under a fresh permit and use `classify-render`.'
+    );
+  }
+  const problems = assertRenderEvidenceUsable(log, { renderId, capturesRoot: resolve(dir) });
+  if (problems.length) die(`the render evidence cannot be relied on:\n  ${problems.join('\n  ')}`);
+  const render = findRender(log, renderId);
+  if (canonicalise(render.url) !== canonicalise(target.url)) {
+    die(`render ${renderId} is of ${render.url}, not ${target.url}`);
+  }
+  const observation = log.attempts.find(
+    (a) => a.renderId === renderId && a.recordType === 'observation'
+  ) ?? target;
+
+  appendAttempt(log, {
+    recordType: 'judgement-only',
+    supersedesDiscoveryId: targetId,
+    evidenceFromDiscoveryId: observation.id,
+    renderId,
+    examinedAt: now(), agency: target.agency, website: target.website, url: target.url,
+    status: 'discovery', discoveryKind: target.discoveryKind, outcome,
+    category: target.category, candidateSetVersion: target.candidateSetVersion,
+    navigationPerformed: false,
+    checkedAt: now(),
+    evidence: 'rendered-dom',
+    renderFile: render.renderFile,
+    renderedSha256: render.renderedSha256,
+    renderedBytes: render.renderedBytes,
+    note: require_('note'),
+    approval: APPROVAL.APPROVED,
+  });
+  writeLog(logPath, log);
+  writeDerived({ log, dir, frameSha256: flag('frame-sha256'), drawOrderSha256: flag('draw-order-sha256'), synthetic: has('synthetic') });
+  const record = log.attempts.at(-1);
+  console.log(`recorded ${record.id}: corrects ${targetId}, ${target.outcome} -> ${outcome}`);
+  console.log(`evidence: ${renderId} ${render.renderFile} sha256 ${render.renderedSha256.slice(0, 16)} (re-verified)`);
+  console.log(`${targetId} is preserved unchanged; no request was made for this correction`);
 }
 
 /**
@@ -1055,7 +1251,8 @@ function doClosePermit() {
 const commands = { packet: doPacket, candidates: doCandidates, lock: doLock, 'approve-set': doApproveSet,
   'supersede-set': doSupersedeSet, publish: doPublish, next: doNext, capture: doCapture, exclude: doExclude, discovery: doDiscovery, budget: doBudget, approve: doApprove, status: doStatus, build: doBuild, exhaust: doExhaust, 'preflight-discovery': doPreflightDiscovery, 'reopen-set': doReopenSet, 'close-permit': doClosePermit,
   deviation: doDeviation, 'recheck-robots': doRecheckRobots, 're-resolve': doReResolve,
-  'render-discovery': doRenderDiscovery };
+  'render-discovery': doRenderDiscovery, 'correct-discovery': doCorrectDiscovery,
+  'classify-render': doClassifyRender, 'adopt-render': doAdoptRender };
 if (!commands[command]) die(USAGE);
 try {
   await commands[command]();

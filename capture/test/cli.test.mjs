@@ -143,11 +143,19 @@ const lockSet = async (dir, agency, category, urls) => {
   // the protocol no longer permits - and the render backlog gate correctly withheld the draft,
   // which is how this fixture came to fail. It needs no `--navigated-at`: the render navigates now
   // and stamps its own time.
+  // selection-v1.0.25: two steps. The render observes and concludes nothing; the judgement follows,
+  // from evidence already held. Passing `--outcome` to the render is now refused, because supplying
+  // the judgement before reading the DOM is exactly what produced d-0306.
   const disc = await run(['render-discovery', '--out', dir, '--agency', agency, '--website', origin,
     '--url', discoveryUrl, '--method', 'navigation',
-    '--outcome', 'candidates-found', '--category', category, '--set-version', '1',
-    '--permit-id', permitId]);
+    '--category', category, '--set-version', '1', '--permit-id', permitId]);
   assert.equal(disc.status, 0, disc.stderr);
+  const renderId = disc.stdout.match(/observation (g-\d+)/)?.[1];
+  assert.ok(renderId, `no render id in: ${disc.stdout}`);
+  const judged = await run(['classify-render', '--out', dir, '--render', renderId,
+    '--category', category, '--set-version', '1', '--outcome', 'candidates-found',
+    '--note', 'fixture judgement on rendered evidence']);
+  assert.equal(judged.status, 0, judged.stderr);
   const add = await run(['candidates', '--out', dir, '--agency', agency, '--category', category, '--add', urls.join(',')]);
   assert.equal(add.status, 0, add.stderr);
   const locked = await run(['lock', '--out', dir, '--agency', agency, '--category', category]);

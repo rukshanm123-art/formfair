@@ -60,6 +60,9 @@ describe('a discovery record identifies its round', () => {
     assert.deepEqual([...DISCOVERY_OUTCOMES], [
       'candidates-found', 'no-candidates', 'unavailable', 'disallowed',
       'robots-unestablished', 'retrieval-blocked', 'retrieval-inconclusive',
+      // selection-v1.0.25: an observation, not a judgement. It exists because requiring an outcome
+      // before the page was rendered is how a page with three name fields got `no-candidates`.
+      'rendered',
     ]);
     const log = emptyLog();
     appendAttempt(log, discovery('https://w.govt.nz/s1', { outcome: 'unavailable', at: clock(), note: 'no search form' }));
