@@ -2649,7 +2649,8 @@ active observation per render (and none orphaned); the exact answered record wit
 round and page agreement; and no judgement resting on an access-barred render.
 
 Because `evaluation/` must not import `capture/`, the rules still exist twice — but a **conformance
-test drives both implementations over one table of 24 adversarial ledgers and requires identical
+test drives both implementations over one table of 24 adversarial ledgers [**25** — see the Count
+erratum of 27 September 2026] and requires identical
 verdicts**. Verdicts are compared, not wording: two packages phrasing a problem differently is fine,
 two disagreeing about whether it *is* a problem is the defect the test exists to catch.
 
@@ -2732,10 +2733,11 @@ where it is written and not where it is trusted", and it is now the fourth place
 
 ### The conformance table
 
-Twenty-one further cases, bringing it to **47**: the relabelling attack itself, each observation
-constraint, each judgement constraint, the three permit cases, and the three disagreeing-copy cases
-plus a matching copy that must be *accepted*. The floor assertion rises from 15 refusals to 35, so the
-table cannot quietly become permissive.
+Nineteen further cases, bringing it to **44** — the figures first published here were "twenty-one"
+and "47" and were both wrong; see the Count erratum of 27 September 2026. The new cases are the
+relabelling attack itself, each observation constraint, each judgement constraint, the three permit
+cases, and the three disagreeing-copy cases plus a matching copy that must be *accepted*. The floor
+assertion rises from 15 refusals to 35, so the table cannot quietly become permissive.
 
 ### What this does not establish
 
@@ -2745,3 +2747,46 @@ preserve a page that the retrospective renders later show should not have been s
 is robots checks, then all 57 renders, then the 66 category judgements, then re-binding and
 re-approving affected sets, then re-confirming the selected page and category ordering for agencies
 1–4 — and only then the NZSIS capture.
+
+## Count erratum, 27 September 2026
+
+**`solo-protocol-v1.0.9`.** Moves no earlier tag. No selection or capture tag: nothing about the
+scan's behaviour changes, and no evidence was collected under the wrong figures.
+
+Four published counts of the render-ledger conformance table were wrong. The table is checked by
+machine; the *number* of cases in it was not, so it was repeatedly asserted from memory.
+
+**The table as it actually stands:**
+
+| | |
+| --- | --- |
+| cases | **44** |
+| of which acceptable | 5 |
+| of which refused | **39** |
+| tests Node reports | **45** — the 44 cases plus the non-vacuity test |
+
+**And as it stood at Amendment 30 (`8b263c1`):** 25 cases, 21 refused. So Amendment 31 added
+**19** cases, not twenty-one.
+
+**Every wrong figure, and where it is:**
+
+| where | said | actual |
+| --- | --- | --- |
+| Amendment 30, in this document | 24 adversarial ledgers | 25 |
+| commit `8b263c1` message | 26 adversarial ledgers | 25 |
+| Amendment 31, in this document | twenty-one further cases | 19 |
+| Amendment 31, in this document | bringing it to 47 | 44 |
+| tag message `solo-protocol-v1.0.8` | 47 conformance cases | 44 |
+
+The two figures in this document are corrected in place with the superseded values quoted. **The
+commit message and the tag message are not rewritten and the tags are not moved** — they are the
+record of what was said at the time, and correcting them by force would defeat the point of freezing
+them. This table is where a reader finds the true counts.
+
+Nothing else in Amendments 30 or 31 is affected: the rules, the attacks and the verdicts are
+unchanged, and the floor assertion of 35 refusals still holds with room to spare at 39.
+
+**The guard that was missing.** A count printed in prose and checked by nobody is decoration, which
+is the same objection this protocol has made to unread hashes and unread digests. The conformance
+suite now asserts its own size — the number of cases, the number of refusals, and that the two halves
+sum to the whole — so a future miscount fails a test instead of reaching a tag message.

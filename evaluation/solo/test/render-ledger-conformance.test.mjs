@@ -426,8 +426,19 @@ describe('the two render-ledger implementations agree', () => {
     });
   }
 
-  test('the table is not vacuous', () => {
-    assert.ok(CASES.filter((c) => c.acceptable).length >= 3, 'some ledgers must be acceptable');
-    assert.ok(CASES.filter((c) => !c.acceptable).length >= 35, 'and most must be refused');
+  test('the table is not vacuous, and is exactly the size the protocol claims', () => {
+    const accepted = CASES.filter((c) => c.acceptable).length;
+    const refused = CASES.filter((c) => !c.acceptable).length;
+    assert.ok(accepted >= 3, 'some ledgers must be acceptable');
+    assert.ok(refused >= 35, 'and most must be refused');
+
+    // The Count erratum of 27 September 2026. Four published figures for this table were wrong -
+    // 24, 26, twenty-one and 47 - because the table was checked by machine and its SIZE was
+    // asserted from memory. A count printed in prose and checked by nobody is decoration, which is
+    // the same objection this protocol makes to an unread digest. Update these numbers deliberately
+    // when adding a case, and update the protocol with them.
+    assert.equal(CASES.length, 44, 'the protocol states 44 conformance cases');
+    assert.equal(refused, 39, 'the protocol states 39 refusal cases');
+    assert.equal(accepted + refused, CASES.length, 'every case must state a verdict');
   });
 });
