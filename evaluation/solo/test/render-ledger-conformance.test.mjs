@@ -17,7 +17,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { renderLedgerProblems } from '../descriptive.mjs';
 
@@ -58,6 +58,68 @@ function clean() {
       },
     ],
   };
+}
+
+/**
+ * A clean headless-barred / headed-successful fallback pair, appended to the clean ledger.
+ *
+ * selection-v1.0.33 / solo-protocol-v1.0.14. Three attacks against a SUCCESSFUL headed render left
+ * both validators silent: deleting `followsDiscoveryId`, pointing it at a record for another page,
+ * and deleting `attemptedModes`. The relationship was checked where it was written and once more when
+ * `renderBarred` made it terminal - never when a successful headed render was relied on.
+ */
+const BARRED = '<html><head><title>Just a moment...</title></head><body>challenge</body></html>';
+const PAGE = '<html><head><title>Feedback</title></head><body><input id="n" type="text"></body></html>';
+
+function withFallback(l) {
+  l.discoveryPermits.push(
+    {
+      id: 'p-0010', agency: 'A', category: 'service-application', candidateSetVersion: 1,
+      url: 'https://a.govt.nz/barred', robotsCheckId: 'r-0001',
+      issuedAt: '2026-09-28T04:00:00Z', consumedAt: '2026-09-28T04:00:20Z',
+    },
+    {
+      id: 'p-0011', agency: 'A', category: 'service-application', candidateSetVersion: 1,
+      url: 'https://a.govt.nz/barred', robotsCheckId: 'r-0001',
+      issuedAt: '2026-09-28T04:00:30Z', consumedAt: '2026-09-28T04:00:50Z',
+    }
+  );
+  l.renders.push(
+    {
+      id: 'g-0010', url: 'https://a.govt.nz/barred', navigatedAt: '2026-09-28T04:00:10Z',
+      permitId: 'p-0010', renderFile: 'barred.html', renderedSha256: sha256(BARRED),
+      renderedBytes: Buffer.byteLength(BARRED), httpStatus: 403, browserMode: 'headless',
+      accessBarriers: ['http 403', 'cloudflare interstitial'],
+    },
+    {
+      id: 'g-0011', url: 'https://a.govt.nz/barred', navigatedAt: '2026-09-28T04:00:40Z',
+      permitId: 'p-0011', renderFile: 'page.html', renderedSha256: sha256(PAGE),
+      renderedBytes: Buffer.byteLength(PAGE), httpStatus: 200, browserMode: 'headed',
+      accessBarriers: [],
+    }
+  );
+  l.attempts.push(
+    {
+      id: 'd-0100', agency: 'A', category: 'service-application', status: 'discovery',
+      discoveryKind: 'navigation', outcome: 'retrieval-blocked', recordType: 'observation',
+      renderId: 'g-0010', permitId: 'p-0010', candidateSetVersion: 1,
+      url: 'https://a.govt.nz/barred', navigatedAt: '2026-09-28T04:00:10Z', approval: 'approved',
+      accessBarriers: ['http 403', 'cloudflare interstitial'],
+      attemptedModes: [{ browserMode: 'headless', httpStatus: 403, accessBarriers: ['http 403', 'cloudflare interstitial'] }],
+    },
+    {
+      id: 'd-0101', agency: 'A', category: 'service-application', status: 'discovery',
+      discoveryKind: 'navigation', outcome: 'rendered', recordType: 'observation',
+      renderId: 'g-0011', permitId: 'p-0011', candidateSetVersion: 1,
+      url: 'https://a.govt.nz/barred', navigatedAt: '2026-09-28T04:00:40Z', approval: 'approved',
+      followsDiscoveryId: 'd-0100', accessBarriers: [],
+      attemptedModes: [
+        { browserMode: 'headless', httpStatus: 403, accessBarriers: ['http 403', 'cloudflare interstitial'] },
+        { browserMode: 'headed', httpStatus: 200, accessBarriers: [] },
+      ],
+    }
+  );
+  return l;
 }
 
 /** Each case mutates the clean ledger; `acceptable` says what both must conclude. */
@@ -400,6 +462,85 @@ const CASES = [
       l.attempts[0].redirectChain = [{ from: 'https://a.govt.nz/apply', to: 'https://a.govt.nz/no', httpStatus: 302, allowed: false, reason: 'Disallow: /no' }];
     },
   },
+  // The headed fallback relationship, at trust time.
+  {
+    name: 'FALLBACK: a clean headless-barred / headed-successful pair is accepted',
+    acceptable: true,
+    mutate: (l) => { withFallback(l); },
+  },
+  {
+    name: 'FALLBACK: THE ATTACK - followsDiscoveryId deleted from a successful headed render',
+    acceptable: false,
+    mutate: (l) => { withFallback(l); delete l.attempts[3].followsDiscoveryId; },
+  },
+  {
+    name: 'FALLBACK: THE ATTACK - it follows a record for another page, category and round',
+    acceptable: false,
+    mutate: (l) => { withFallback(l); l.attempts[3].followsDiscoveryId = 'd-0001'; },
+  },
+  {
+    name: 'FALLBACK: THE ATTACK - attemptedModes deleted',
+    acceptable: false,
+    mutate: (l) => { withFallback(l); delete l.attempts[3].attemptedModes; },
+  },
+  {
+    name: 'FALLBACK: attemptedModes disagreeing with the renders it summarises',
+    acceptable: false,
+    mutate: (l) => { withFallback(l); l.attempts[3].attemptedModes[1].accessBarriers = ['http 403']; },
+  },
+  {
+    name: 'FALLBACK: two active followers of one barred attempt',
+    acceptable: false,
+    mutate: (l) => {
+      withFallback(l);
+      l.attempts.push({ ...l.attempts[3], id: 'd-0102', renderId: 'g-0011' });
+    },
+  },
+  {
+    name: 'FALLBACK: a HEADLESS observation claiming to follow another',
+    acceptable: false,
+    mutate: (l) => { withFallback(l); l.renders[2].browserMode = 'headed'; l.renders[1].browserMode = 'headless'; l.attempts[2].followsDiscoveryId = 'd-0001'; },
+  },
+  {
+    name: 'FALLBACK: the wrong browser mode on the predecessor',
+    acceptable: false,
+    mutate: (l) => { withFallback(l); l.renders[1].browserMode = 'headed'; },
+  },
+  {
+    name: 'FALLBACK: following an attempt that was not barred',
+    acceptable: false,
+    mutate: (l) => { withFallback(l); l.attempts[2].outcome = 'rendered'; l.renders[1].accessBarriers = []; },
+  },
+  {
+    name: 'FALLBACK: a sign-in wall does not warrant a headed retry',
+    acceptable: false,
+    mutate: (l) => {
+      withFallback(l);
+      l.renders[1].accessBarriers = ['sign-in wall'];
+      l.attempts[2].accessBarriers = ['sign-in wall'];
+      l.attempts[2].attemptedModes = [{ browserMode: 'headless', httpStatus: 403, accessBarriers: ['sign-in wall'] }];
+      l.attempts[3].attemptedModes[0].accessBarriers = ['sign-in wall'];
+    },
+  },
+  {
+    name: 'FALLBACK: both attempts sharing one permit',
+    acceptable: false,
+    mutate: (l) => { withFallback(l); l.attempts[3].permitId = 'p-0010'; l.renders[2].permitId = 'p-0010'; },
+  },
+  {
+    name: 'FALLBACK: the headed permit issued before the headless attempt was recorded',
+    acceptable: false,
+    mutate: (l) => { withFallback(l); l.discoveryPermits[2].issuedAt = '2026-09-28T04:00:05Z'; },
+  },
+  {
+    name: 'FALLBACK: the headed attempt navigating before the one it follows',
+    acceptable: false,
+    mutate: (l) => {
+      withFallback(l);
+      l.attempts[3].navigatedAt = '2026-09-28T04:00:05Z';
+      l.renders[2].navigatedAt = '2026-09-28T04:00:05Z';
+    },
+  },
   {
     name: 'AUTHORITY: a copy that MATCHES the registry is fine',
     acceptable: true,
@@ -461,9 +602,22 @@ describe('the two render-ledger implementations agree', () => {
       try {
         const renderedDir = join(dir, 'rendered');
         mkdirSync(renderedDir, { recursive: true });
-        writeFileSync(join(renderedDir, 'g1.html'), HTML);
         const ledger = clean();
         testCase.mutate(ledger);
+
+        // The directory follows the ledger, as a real one does: every plain file name the mutated
+        // ledger claims is written, and nothing else - so a case that does not use the fallback pair
+        // does not inherit its bytes as orphans.
+        const CONTENT = { 'g1.html': HTML, 'barred.html': BARRED, 'page.html': PAGE };
+        const claimed = new Set([
+          ...ledger.renders.map((r) => r.renderFile),
+          ...ledger.attempts.map((a) => a.renderFile),
+        ].filter((f) => typeof f === 'string' && f === basename(f)));
+        for (const file of claimed) {
+          if (CONTENT[file] !== undefined) writeFileSync(join(renderedDir, file), CONTENT[file]);
+        }
+        // `g1.html` is the digest every non-fallback case is written against, so it always exists.
+        writeFileSync(join(renderedDir, 'g1.html'), HTML);
 
         const fromCapture = capture.checkRenderLedger(ledger, renderedDir);
         const fromSealer = renderLedgerProblems(ledger, renderedDir);
@@ -493,8 +647,8 @@ describe('the two render-ledger implementations agree', () => {
     // asserted from memory. A count printed in prose and checked by nobody is decoration, which is
     // the same objection this protocol makes to an unread digest. Update these numbers deliberately
     // when adding a case, and update the protocol with them.
-    assert.equal(CASES.length, 51, 'the protocol states 51 conformance cases');
-    assert.equal(refused, 45, 'the protocol states 45 refusal cases');
+    assert.equal(CASES.length, 64, 'the protocol states 64 conformance cases');
+    assert.equal(refused, 57, 'the protocol states 57 refusal cases');
     assert.equal(accepted + refused, CASES.length, 'every case must state a verdict');
   });
 });

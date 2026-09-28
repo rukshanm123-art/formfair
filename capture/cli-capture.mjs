@@ -1503,6 +1503,83 @@ function doCorrectDiscovery() {
 }
 
 /**
+ * Runs the one headed attempt for a page whose headless render was access-barred.
+ *
+ * selection-v1.0.33. Five `www.health.govt.nz` URLs were rendered before the fallback existed, so
+ * their only evidence is a Cloudflare interstitial - which `assertRenderEvidenceUsable` rightly
+ * refuses as a basis for any judgement. Re-running `render-discovery` cannot reach them: it begins
+ * with a headless attempt, and a second headless observation of one page in one round names no barred
+ * predecessor, so the duplicate rule refuses it before the fallback is reached. That was measured,
+ * not assumed: the attempt under `p-0154` was refused and its bytes quarantined.
+ *
+ * So the continuation is EXPLICIT - it names the barred observation it continues, rather than a
+ * command silently picking one - and it skips the redundant headless request. Seven observations
+ * already show that host bars headless; re-proving it five more times would be traffic spent on a
+ * question already answered.
+ */
+async function doContinueHeaded() {
+  const dir = require_('out');
+  const logPath = logPathFor(dir);
+  const log = readLog(logPath);
+  const fromId = require_('from');
+  const settleMs = Number(flag('settle-ms') ?? POLICY.postLoadSettleMs);
+  const renderedDir = join(resolve(dir), 'rendered');
+
+  const headlessRecord = log.attempts.find((a) => a.id === fromId);
+  if (!headlessRecord) die(`${fromId} matches no recorded attempt`);
+  if (headlessRecord.status !== 'discovery' || headlessRecord.recordType !== 'observation') {
+    die(`${fromId} is not a discovery observation`);
+  }
+  if (headlessRecord.outcome !== 'retrieval-blocked') {
+    die(`${fromId} records ${JSON.stringify(headlessRecord.outcome)}; there is nothing to retry`);
+  }
+  if (isDiscoverySuperseded(log, fromId)) die(`${fromId} has been superseded`);
+
+  // Its bytes, verified, and its barrier: an automation barrier only.
+  const problems = assertRenderEvidenceUsable(log, { renderId: headlessRecord.renderId, capturesRoot: resolve(dir) });
+  const barrierProblems = problems.filter((p) => !/access-barred/.test(p));
+  if (barrierProblems.length) die(`the barred render cannot be relied on:\n  ${barrierProblems.join('\n  ')}`);
+  const priorRender = findRender(log, headlessRecord.renderId);
+  if (!priorRender) die(`${fromId} cites no registered render`);
+  if (priorRender.browserMode !== 'headless') die(`${fromId}'s render is ${priorRender.browserMode}, not headless`);
+  if (!needsHeadedFallback(priorRender)) {
+    die(
+      `${fromId}'s barriers (${(priorRender.accessBarriers ?? []).join(', ') || 'none'}) do not warrant a ` +
+        'headed retry. A sign-in wall is a finding about what the public can read, and a redirect ' +
+        'refusal never reached the page.'
+    );
+  }
+
+  // Refuse a second retry, and refuse one where an unbarred render already exists.
+  const existingFollower = log.attempts.find(
+    (a) => a.followsDiscoveryId === fromId && !isDiscoverySuperseded(log, a.id)
+  );
+  if (existingFollower) die(`${fromId} is already followed by ${existingFollower.id}; one barred attempt gets one retry`);
+  const usable = (log.renders ?? []).filter(
+    (r) => canonicalise(r.url) === canonicalise(headlessRecord.url) &&
+      assertRenderEvidenceUsable(log, { renderId: r.id, capturesRoot: resolve(dir) }).length === 0
+  );
+  if (usable.length) {
+    die(`${headlessRecord.url} already has an unbarred render (${usable.map((r) => r.id).join(', ')}); nothing to continue`);
+  }
+
+  const { agency, website, url, category, candidateSetVersion: setVersion, discoveryKind: method } = headlessRecord;
+  const attemptedModes = [{
+    browserMode: 'headless',
+    httpStatus: priorRender.httpStatus ?? null,
+    accessBarriers: priorRender.accessBarriers ?? [],
+  }];
+  console.log(`continuing ${fromId}: ${url}`);
+  console.log(`  ${agency} | ${category} v${setVersion} | ${method}`);
+  console.log(`  barred headless render ${priorRender.id}: HTTP ${priorRender.httpStatus} (${(priorRender.accessBarriers ?? []).join(', ')})`);
+
+  await headedFallbackForRender({
+    log, logPath, dir, renderedDir, agency, website, url, category, setVersion, method, settleMs,
+    headlessRecord, attemptedModes,
+  });
+}
+
+/**
  * Re-records an agency's resolution under the protocol now in force, keeping the old record.
  *
  * Takes no resolution and no reason FOR the resolution - only a reason for re-resolving, which is
@@ -1598,7 +1675,7 @@ const commands = { packet: doPacket, candidates: doCandidates, lock: doLock, 'ap
   deviation: doDeviation, 'recheck-robots': doRecheckRobots, 're-resolve': doReResolve,
   'render-discovery': doRenderDiscovery, 'correct-discovery': doCorrectDiscovery,
   'classify-render': doClassifyRender, 'adopt-render': doAdoptRender,
-  're-resolve-set': doReResolveSet };
+  're-resolve-set': doReResolveSet, 'continue-headed': doContinueHeaded };
 if (!commands[command]) die(USAGE);
 try {
   await commands[command]();

@@ -3085,3 +3085,87 @@ headed launches, one per path, and no more.
 
 Nothing is judged. The backlog stands at **66 records across 57 URLs**, with the two corpus pages still
 to be re-rendered — TKM headlessly, Health through the fallback.
+
+## Amendment 36: a successful fallback was the one nobody checked
+
+**Dated 28 September 2026.** `selection-v1.0.33`, `capture-v1.0.12` and `solo-protocol-v1.0.14`.
+Moves no earlier tag.
+
+### The claim that did not reproduce
+
+"All 57 URLs now have a usable render" was wrong. **52 had one; five had only a Cloudflare
+interstitial** — rendered during the 56-URL pass under `selection-v1.0.30`, before the headed fallback
+existed, and correctly refused as a basis for judgement by the same rule that refuses `g-0058`.
+
+| barred render / observation | URL | awaiting |
+| --- | --- | --- |
+| `g-0042` / `d-0350` | `health.govt.nz/` | `d-0202`, `d-0256` |
+| `g-0043` / `d-0351` | …`/register-for-an-assisted-dying-practitioner-list` | `d-0203`, `d-0232` |
+| `g-0044` / `d-0352` | …`/register-radiation-sources` | `d-0204`, `d-0231` |
+| `g-0049` / `d-0357` | …`/about-us/contact-us` | `d-0257` |
+| `g-0050` / `d-0358` | …`/about-us/contact-us/oia-requests` | `d-0259` |
+
+### The frozen path could not reach them
+
+Measured, not assumed. `render-discovery` begins with a headless attempt, and a second headless
+observation of one page in one round names no barred predecessor — so Amendment 35's duplicate rule
+refused it before the fallback was reached. The attempt under `p-0154` was refused, its bytes
+auto-quarantined by the `selection-v1.0.31` guard, and the permit closed
+`recording-failed-after-request`. One attempt only; no further headless retries.
+
+So a continuation is **explicit**: `continue-headed --from d-0350` names the barred observation it
+continues rather than a command silently choosing one. It requires an active observation recording
+`retrieval-blocked`, verifies that render's bytes, requires an **automation** barrier (never a sign-in
+wall, a rate limit or a redirect refusal), matches agency, category, round and canonical URL, refuses
+a second follower or a page that already has an unbarred render, and issues **one** new permit,
+durably recorded before the request. It skips the redundant headless attempt: seven observations
+already show that host bars headless, and re-proving it five more times would be traffic spent on a
+question already answered. **Five headed requests, not ten.**
+
+### And the gap that mattered more
+
+Three attacks against the *successful* fallback `d-0367` left **both validators reporting zero
+problems**: deleting `followsDiscoveryId`, pointing it at `d-0350` — a different page, category and
+round — and deleting `attemptedModes`. The relationship was checked where it was **written**, and once
+more when `renderBarred` made it **terminal**. A successful headed render was simply trusted.
+
+Every headed observation now needs, at trust time and in both packages: exactly **one** valid headless
+predecessor, active and recording `retrieval-blocked`; matching agency, category, round and canonical
+URL; the predecessor's render in **headless** mode carrying an automation barrier, and its own in
+**headed**; **distinct consumed permits**; and chronology — the headed permit issued no earlier than
+the headless attempt was recorded, and its navigation after the one it follows. A **headless**
+observation claiming to follow anything is refused.
+
+`attemptedModes` is now **derived** from the two registered renders and required to match, because a
+summary that can disagree with what it summarises is a second source of truth. For the same reason
+`renderBarred`'s both-barred decision no longer reads the summary at all: it reads the two renders.
+
+### Tests
+
+Thirteen further conformance cases bring that table to **64**, of which 57 are refusals: the three
+attacks, a summary disagreeing with its renders, two active followers, a headless observation claiming
+to follow, the wrong browser mode on either side, following an unbarred attempt, a sign-in wall, a
+shared permit, and both chronology violations — plus a clean pair that must be **accepted**.
+
+The conformance directory now follows the ledger rather than being fixed in advance, so a case that
+does not use the fallback pair does not inherit its bytes as orphans.
+
+### The five continuations
+
+All five read on the first headed attempt.
+
+| observation | render | HTTP | title |
+| --- | --- | --- | --- |
+| `d-0368` | `g-0060` | 200 | Ministry of Health NZ |
+| `d-0369` | `g-0061` | 200 | Register for an assisted dying practitioner list |
+| `d-0370` | `g-0062` | 200 | Register radiation sources |
+| `d-0371` | `g-0063` | 200 | Contact us |
+| `d-0372` | `g-0064` | 200 | Official Information Act requests |
+
+**57 of 57 URLs now have an unbarred usable render.** Zero open permits, zero ledger problems, zero
+orphans, 63 observations across 64 renders, and every earlier observation untouched.
+
+### What this does not establish
+
+No judgement has been recorded, and none of these pages has been assessed. The barred renders are
+preserved and remain refused as evidence.

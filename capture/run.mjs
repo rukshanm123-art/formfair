@@ -17,7 +17,7 @@
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync, renameSync, unlinkSync, mkdirSync, readdirSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
-import { LEDGER_HEADER, recordExamination, CATEGORIES } from './capture.mjs';
+import { LEDGER_HEADER, recordExamination, CATEGORIES, needsHeadedFallback } from './capture.mjs';
 import { POLICY } from './politeness.mjs';
 import { DISCOVERY_EVIDENCE, RENDERED_METHODS } from './render-discovery.mjs';
 import { evaluatePolicy } from './robots-policy.mjs';
@@ -2882,6 +2882,18 @@ export function checkRenderLedger(log, renderedDir) {
         for (const problem of renderRefusalProblems(log, a)) problems.push(problem);
       }
     }
+    // selection-v1.0.33: a headed observation, successful or not, must justify its second navigation.
+    if (a.recordType === RECORD_TYPES.OBSERVATION && !withdrawn) {
+      const own = findRender(log, a.renderId);
+      if (own?.browserMode === 'headed') {
+        for (const problem of headedObservationProblems(log, a)) problems.push(problem);
+      } else if (own && a.followsDiscoveryId) {
+        problems.push(
+          `${a.id} is a ${own.browserMode} observation claiming to follow ${a.followsDiscoveryId}; only a ` +
+            'headed retry follows a barred attempt'
+        );
+      }
+    }
     if (a.renderBarred !== undefined) {
       if (a.renderBarred !== true) {
         problems.push(`${a.id} has renderBarred ${JSON.stringify(a.renderBarred)}; it is true or absent`);
@@ -3154,16 +3166,30 @@ export function renderBarredProblems(log, attempt) {
   if (attempt.outcome !== 'retrieval-blocked') {
     problems.push(`${where} claims renderBarred but records ${JSON.stringify(attempt.outcome)}`);
   }
-  const modes = attempt.attemptedModes;
-  if (!Array.isArray(modes) || !['headless', 'headed'].every((m) => modes.some((x) => x.browserMode === m))) {
-    problems.push(`${where} claims renderBarred without recording both a headless and a headed attempt`);
-  } else if (modes.some((m) => m.error)) {
+  // selection-v1.0.33: derived from the two REGISTERED renders, not read off `attemptedModes`. A
+  // terminal claim resting on a summary could be made true by editing the summary.
+  const ownRender = findRender(log, attempt.renderId);
+  const priorRender = findRender(log, log.attempts.find((a) => a.id === attempt.followsDiscoveryId)?.renderId);
+  if (!ownRender || !priorRender) {
+    problems.push(`${where} claims renderBarred without two registered renders behind it`);
+  } else {
+    if (priorRender.browserMode !== 'headless' || ownRender.browserMode !== 'headed') {
+      problems.push(
+        `${where} claims renderBarred from a ${priorRender.browserMode} and a ${ownRender.browserMode} ` +
+          'render; the two modes must be headless then headed'
+      );
+    }
+    for (const [render, label] of [[priorRender, 'headless'], [ownRender, 'headed']]) {
+      if ((render.accessBarriers ?? []).length === 0) {
+        problems.push(`${where} claims renderBarred but its ${label} render recorded no access barrier`);
+      }
+    }
+  }
+  if (Array.isArray(attempt.attemptedModes) && attempt.attemptedModes.some((m) => m.error)) {
     problems.push(
-      `${where} claims renderBarred, but one attempt failed to launch (${modes.find((m) => m.error).error}). ` +
-        'An environment failure is not evidence that the site blocked access.'
+      `${where} claims renderBarred, but one attempt failed to launch. An environment failure is not ` +
+        'evidence that the site blocked access.'
     );
-  } else if (!modes.every((m) => (m.accessBarriers ?? []).length > 0)) {
-    problems.push(`${where} claims renderBarred but not every recorded mode was access-barred`);
   }
   const earlier = log.attempts.find((a) => a.id === attempt.followsDiscoveryId);
   if (!attempt.followsDiscoveryId) {
@@ -3187,6 +3213,152 @@ export function renderBarredProblems(log, attempt) {
       const permit = (log.discoveryPermits ?? []).find((p) => p.id === id);
       if (!permit) problems.push(`${where} rests on permit ${id}, which does not exist`);
       else if (!permit.consumedAt) problems.push(`${where} rests on permit ${id}, which is not consumed`);
+    }
+  }
+  return problems;
+}
+
+/**
+ * Every headed observation must have exactly one valid headless predecessor.
+ *
+ * selection-v1.0.33. The fallback relationship was checked only where it was WRITTEN, and once more
+ * when `renderBarred` made it terminal. A SUCCESSFUL headed render was trusted: deleting
+ * `followsDiscoveryId` from `d-0367`, pointing it at `d-0350` - a different page, category and round -
+ * or deleting `attemptedModes` each left both validators reporting zero problems. A second navigation
+ * of the same page is justified only by the barred first one, so the justification has to be checked
+ * wherever the record is relied on.
+ *
+ * `attemptedModes` is DERIVED here rather than believed. It is a summary of the two renders, and a
+ * summary that can disagree with what it summarises is a second source of truth.
+ */
+export function headedObservationProblems(log, attempt) {
+  const problems = [];
+  const where = attempt.id ?? '(an unidentified record)';
+  const render = findRender(log, attempt.renderId);
+  if (!render) return problems; // reported elsewhere
+
+  const predecessor = log.attempts.find((a) => a.id === attempt.followsDiscoveryId);
+  if (!attempt.followsDiscoveryId) {
+    problems.push(
+      `${where} is a headed observation with no headless predecessor; a second navigation of one page ` +
+        'is justified only by the barred first one'
+    );
+    return problems;
+  }
+  if (!predecessor) {
+    problems.push(`${where} follows ${attempt.followsDiscoveryId}, which does not exist`);
+    return problems;
+  }
+  if (predecessor.recordType !== RECORD_TYPES.OBSERVATION) {
+    problems.push(`${where} follows ${predecessor.id}, which is not an observation`);
+  }
+  if (predecessor.outcome !== 'retrieval-blocked') {
+    problems.push(`${where} follows ${predecessor.id}, which was not access-barred; there was nothing to retry`);
+  }
+  if (isDiscoverySuperseded(log, predecessor.id)) {
+    problems.push(`${where} follows ${predecessor.id}, which has been superseded`);
+  }
+  for (const [field, label] of [['agency', 'agency'], ['category', 'category'],
+    ['candidateSetVersion', 'round']]) {
+    if (predecessor[field] !== attempt[field]) {
+      problems.push(
+        `${where} follows ${predecessor.id}, which is ${label} ${JSON.stringify(predecessor[field])}, ` +
+          `not ${JSON.stringify(attempt[field])}`
+      );
+    }
+  }
+  if (canonicalise(predecessor.url ?? '') !== canonicalise(attempt.url)) {
+    problems.push(`${where} follows ${predecessor.id}, which is ${predecessor.url}, not ${attempt.url}`);
+  }
+
+  // Exactly one follower. Two headed attempts after one bar would be a second retry.
+  const followers = log.attempts.filter(
+    (a) => a.followsDiscoveryId === predecessor.id && !isDiscoverySuperseded(log, a.id)
+  );
+  if (followers.length > 1) {
+    problems.push(
+      `${predecessor.id} is followed by ${followers.length} active records ` +
+        `(${followers.map((a) => a.id).join(', ')}); one barred attempt gets one retry`
+    );
+  }
+
+  const earlierRender = findRender(log, predecessor.renderId);
+  if (!earlierRender) {
+    problems.push(`${where} follows ${predecessor.id}, which cites no registered render`);
+  } else {
+    if (earlierRender.browserMode !== 'headless') {
+      problems.push(`${where} follows a render in ${JSON.stringify(earlierRender.browserMode)} mode, not headless`);
+    }
+    // The bar must be an AUTOMATION barrier. A sign-in wall is a finding about what the public can
+    // read, and retrying it in a visible window would not change that.
+    if (!needsHeadedFallback(earlierRender)) {
+      problems.push(
+        `${where} follows ${predecessor.id}, whose barriers ` +
+          `(${(earlierRender.accessBarriers ?? []).join(', ') || 'none'}) do not warrant a headed retry`
+      );
+    }
+  }
+  if (render.browserMode !== 'headed') {
+    problems.push(`${where} claims to be a headed observation but its render is ${JSON.stringify(render.browserMode)}`);
+  }
+
+  // Two navigations, two permits, in order.
+  if (!predecessor.permitId || !attempt.permitId || predecessor.permitId === attempt.permitId) {
+    problems.push(`${where} and ${predecessor.id} must each name their own permit; two requests are not authorised by one`);
+  } else {
+    const permits = log.discoveryPermits ?? [];
+    const earlierPermit = permits.find((p) => p.id === predecessor.permitId);
+    const thisPermit = permits.find((p) => p.id === attempt.permitId);
+    for (const [permit, id] of [[earlierPermit, predecessor.permitId], [thisPermit, attempt.permitId]]) {
+      if (!permit) problems.push(`${where} rests on permit ${id}, which does not exist`);
+      else if (!permit.consumedAt) problems.push(`${where} rests on permit ${id}, which is not consumed`);
+    }
+    // The headless attempt is consumed and recorded BEFORE the headed permit is issued.
+    const ms = (v) => { const t = Date.parse(v ?? ''); return Number.isNaN(t) ? null : t; };
+    const earlierConsumed = ms(earlierPermit?.consumedAt);
+    const thisIssued = ms(thisPermit?.issuedAt);
+    if (earlierConsumed !== null && thisIssued !== null && thisIssued < earlierConsumed) {
+      problems.push(
+        `${where}'s permit was issued at ${thisPermit.issuedAt}, before ${predecessor.id}'s was ` +
+          `consumed at ${earlierPermit.consumedAt}; the first attempt is recorded before the second is authorised`
+      );
+    }
+    const earlierNav = ms(predecessor.navigatedAt);
+    const thisNav = ms(attempt.navigatedAt);
+    if (earlierNav !== null && thisNav !== null && thisNav <= earlierNav) {
+      problems.push(`${where} navigated at ${attempt.navigatedAt}, not after ${predecessor.id} at ${predecessor.navigatedAt}`);
+    }
+  }
+
+  // `attemptedModes` is a summary of the two renders. It may match them or be absent; it may not
+  // disagree, because then nothing says which of the two governs.
+  if (attempt.attemptedModes === undefined) {
+    problems.push(
+      `${where} records no attemptedModes. A headed observation carries the summary of both attempts, ` +
+        'so a reader can see the pair without reconstructing it.'
+    );
+  }
+  if (attempt.attemptedModes !== undefined && earlierRender) {
+    const derived = [
+      { browserMode: 'headless', httpStatus: earlierRender.httpStatus ?? null, accessBarriers: earlierRender.accessBarriers ?? [] },
+      { browserMode: 'headed', httpStatus: render.httpStatus ?? null, accessBarriers: render.accessBarriers ?? [] },
+    ];
+    const stored = attempt.attemptedModes;
+    if (!Array.isArray(stored) || stored.length !== derived.length) {
+      problems.push(`${where} records ${Array.isArray(stored) ? stored.length : 'no'} attempted mode(s); the two renders describe ${derived.length}`);
+    } else {
+      for (const [i, want] of derived.entries()) {
+        const got = stored[i] ?? {};
+        if (got.browserMode !== want.browserMode) {
+          problems.push(`${where}'s attempted mode ${i + 1} is ${JSON.stringify(got.browserMode)}, but its render was ${want.browserMode}`);
+        }
+        if ((got.httpStatus ?? null) !== want.httpStatus) {
+          problems.push(`${where}'s attempted mode ${i + 1} records HTTP ${got.httpStatus}, but its render recorded ${want.httpStatus}`);
+        }
+        if (JSON.stringify(got.accessBarriers ?? []) !== JSON.stringify(want.accessBarriers)) {
+          problems.push(`${where}'s attempted mode ${i + 1} disagrees with its render about the access barriers`);
+        }
+      }
     }
   }
   return problems;

@@ -168,7 +168,7 @@ const FRAME_FILES = [
  * exhaustion records at all. A manifest that misnames its own protocol is worse than one that
  * omits it: a reader checking which rules a corpus was sealed under would be told the wrong ones.
  */
-export const SOLO_PROTOCOL_TAG = 'solo-protocol-v1.0.13';
+export const SOLO_PROTOCOL_TAG = 'solo-protocol-v1.0.14';
 
 /**
  * Two resolutions, mirrored from the capture package and checked equal by a test.
@@ -460,6 +460,80 @@ export function renderLedgerProblems(log, renderedDir) {
       }
     }
 
+    // solo-protocol-v1.0.14. Every headed observation must justify its second navigation, successful
+    // or not. The relationship was checked only where it was written: deleting `followsDiscoveryId`,
+    // pointing it at a record for another page, or deleting `attemptedModes` each left both
+    // validators silent.
+    if (a.recordType === 'observation' && !withdrawn) {
+      const own = findRender(a.renderId);
+      const where = a.id ?? '(an unidentified record)';
+      if (own && own.browserMode === 'headed') {
+        const prior = byId.get(a.followsDiscoveryId);
+        const priorRender = prior ? findRender(prior.renderId) : null;
+        if (!a.followsDiscoveryId) problems.push(`${where} is a headed observation with no headless predecessor`);
+        else if (!prior) problems.push(`${where} follows a record that does not exist`);
+        else {
+          if (prior.recordType !== 'observation') problems.push(`${where} follows a record that is not an observation`);
+          if (prior.outcome !== 'retrieval-blocked') problems.push(`${where} follows a record that was not access-barred`);
+          if (superseded.has(prior.id)) problems.push(`${where} follows a superseded record`);
+          for (const field of ['agency', 'category', 'candidateSetVersion']) {
+            if (prior[field] !== a[field]) problems.push(`${where} follows a record differing in ${field}`);
+          }
+          if (canon(prior.url ?? '') !== canon(a.url)) problems.push(`${where} follows a record for a different page`);
+          const followers = attempts.filter((x) => x.followsDiscoveryId === prior.id && !superseded.has(x.id));
+          if (followers.length > 1) problems.push(`${prior.id} is followed by ${followers.length} active records`);
+          if (!priorRender) problems.push(`${where} follows a record citing no registered render`);
+          else {
+            if (priorRender.browserMode !== 'headless') problems.push(`${where} follows a render that was not headless`);
+            const barriers = priorRender.accessBarriers ?? [];
+            if (!barriers.some((b) => !/sign-in wall/.test(b))) {
+              problems.push(`${where} follows a record whose barriers do not warrant a headed retry`);
+            }
+          }
+          if (!prior.permitId || !a.permitId || prior.permitId === a.permitId) {
+            problems.push(`${where} and the record it follows must each name their own permit`);
+          } else {
+            const earlierPermit = permits.find((p) => p.id === prior.permitId);
+            const thisPermit = permits.find((p) => p.id === a.permitId);
+            for (const [permit, id] of [[earlierPermit, prior.permitId], [thisPermit, a.permitId]]) {
+              if (!permit) problems.push(`${where} rests on permit ${id}, which does not exist`);
+              else if (!permit.consumedAt) problems.push(`${where} rests on an unconsumed permit`);
+            }
+            const t = (v) => { const x = Date.parse(v ?? ''); return Number.isNaN(x) ? null : x; };
+            if (t(thisPermit?.issuedAt) !== null && t(earlierPermit?.consumedAt) !== null &&
+                t(thisPermit.issuedAt) < t(earlierPermit.consumedAt)) {
+              problems.push(`${where}'s permit was issued before the first attempt was recorded`);
+            }
+            if (t(a.navigatedAt) !== null && t(prior.navigatedAt) !== null && t(a.navigatedAt) <= t(prior.navigatedAt)) {
+              problems.push(`${where} did not navigate after the record it follows`);
+            }
+          }
+          // attemptedModes is a summary of the two renders and may not disagree with them.
+          if (a.attemptedModes === undefined) problems.push(`${where} records no attemptedModes`);
+          else if (priorRender) {
+            const derived = [
+              { browserMode: 'headless', httpStatus: priorRender.httpStatus ?? null, accessBarriers: priorRender.accessBarriers ?? [] },
+              { browserMode: 'headed', httpStatus: own.httpStatus ?? null, accessBarriers: own.accessBarriers ?? [] },
+            ];
+            if (!Array.isArray(a.attemptedModes) || a.attemptedModes.length !== 2) {
+              problems.push(`${where} records the wrong number of attempted modes`);
+            } else {
+              for (const [i, want] of derived.entries()) {
+                const got = a.attemptedModes[i] ?? {};
+                if (got.browserMode !== want.browserMode) problems.push(`${where}'s attempted mode ${i + 1} names the wrong browser mode`);
+                if ((got.httpStatus ?? null) !== want.httpStatus) problems.push(`${where}'s attempted mode ${i + 1} disagrees with its render about the status`);
+                if (JSON.stringify(got.accessBarriers ?? []) !== JSON.stringify(want.accessBarriers)) {
+                  problems.push(`${where}'s attempted mode ${i + 1} disagrees with its render about the access barriers`);
+                }
+              }
+            }
+          }
+        }
+      } else if (own && a.followsDiscoveryId) {
+        problems.push(`${where} is a ${own.browserMode} observation claiming to follow another`);
+      }
+    }
+
     // solo-protocol-v1.0.13: the second flag able to retire a backlog entry. Both browser modes
     // barred is terminal, and terminal claims carry their evidence.
     if (a.renderBarred !== undefined) {
@@ -468,13 +542,22 @@ export function renderLedgerProblems(log, renderedDir) {
         problems.push(`${where} has a renderBarred that is neither true nor absent`);
       } else {
         if (a.outcome !== 'retrieval-blocked') problems.push(`${where} claims renderBarred without being blocked`);
-        const modes = a.attemptedModes;
-        if (!Array.isArray(modes) || !['headless', 'headed'].every((m) => modes.some((x) => x.browserMode === m))) {
-          problems.push(`${where} claims renderBarred without both a headless and a headed attempt`);
-        } else if (modes.some((m) => m.error)) {
+        // Derived from the two registered renders, not read off the summary.
+        const ownR = findRender(a.renderId);
+        const priorR = findRender(byId.get(a.followsDiscoveryId)?.renderId);
+        if (!ownR || !priorR) problems.push(`${where} claims renderBarred without two registered renders`);
+        else {
+          if (priorR.browserMode !== 'headless' || ownR.browserMode !== 'headed') {
+            problems.push(`${where} claims renderBarred from the wrong pair of browser modes`);
+          }
+          for (const r of [priorR, ownR]) {
+            if ((r.accessBarriers ?? []).length === 0) {
+              problems.push(`${where} claims renderBarred but a render recorded no access barrier`);
+            }
+          }
+        }
+        if (Array.isArray(a.attemptedModes) && a.attemptedModes.some((m) => m.error)) {
           problems.push(`${where} claims renderBarred, but one attempt failed to launch`);
-        } else if (!modes.every((m) => (m.accessBarriers ?? []).length > 0)) {
-          problems.push(`${where} claims renderBarred but not every mode was access-barred`);
         }
         const earlier = byId.get(a.followsDiscoveryId);
         if (!a.followsDiscoveryId) problems.push(`${where} claims renderBarred without naming what it follows`);
