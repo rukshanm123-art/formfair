@@ -15,7 +15,8 @@
 import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import { mkdtempSync, existsSync, readdirSync, mkdirSync } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { mkdtempSync, existsSync, readdirSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { chromium } from 'playwright';
@@ -471,5 +472,55 @@ describe('every hop is recorded, including one back to the authorised URL', () =
     assert.match(out.redirectChain[1].reason, /back to the URL this permit authorises/);
     // Continuous, which is what the refusal validator relies on.
     assert.equal(out.redirectChain[1].from, out.redirectChain[0].to);
+  });
+});
+
+describe('a retrospective render can be authorised for a closed round', () => {
+  test('preflight issues a permit for a locked, approved set without reopening it', async () => {
+    // selection-v1.0.30. `recordCandidates` refuses to touch a locked set, which is right for a set
+    // that would grow - but the preflight's call adds nothing, and refusing it made every
+    // retrospective render impossible: all sixty-six backlog records belong to rounds that are
+    // locked and approved, so no permit could be issued for any of them.
+    const dir = mkdtempSync(join(tmpdir(), 'ff-closed-'));
+    mkdirSync(join(dir, 'captures'), { recursive: true });
+    const log = emptyLog();
+    log.candidateSets['A\u0000account-registration'] = {
+      agency: 'A', category: 'account-registration', version: 2, discovered: [], locked: [],
+      ordered: [], droppedBeyondBound: [], lockedAt: '2026-09-25T03:00:00Z', approval: 'approved',
+      candidateDeclaration: 'none', declaredAt: '2026-09-25T03:00:00Z',
+      discoveryRecordIds: [], discoveryMethods: ['navigation'],
+    };
+    writeFileSync(join(dir, 'capture-log.json'), JSON.stringify(log));
+
+    const cli = new URL('../cli-capture.mjs', import.meta.url).pathname;
+    // Asynchronously: `spawnSync` blocks this process's event loop, and the robots server the child
+    // must reach lives in this process - so a synchronous spawn deadlocks until the fetch times out.
+    const run = (args) => new Promise((resolve) => {
+      const child = spawn('node', [cli, ...args]);
+      let stdout = ''; let stderr = '';
+      child.stdout.on('data', (d) => { stdout += d; });
+      child.stderr.on('data', (d) => { stderr += d; });
+      child.on('exit', (status) => resolve({ status, stdout, stderr }));
+    });
+
+    const ok = await run(['preflight-discovery', '--out', dir, '--agency', 'A', '--website', `${origin}/`,
+      '--url', `${origin}/direct`, '--category', 'account-registration', '--set-version', '2',
+      '--method', 'navigation']);
+    assert.equal(ok.status, 0, ok.stderr);
+    assert.match(ok.stdout, /permit p-0001/);
+
+    // The set is untouched: still locked, still approved, still version 2.
+    const after = JSON.parse(readFileSync(join(dir, 'capture-log.json'), 'utf8'));
+    const set = after.candidateSets['A\u0000account-registration'];
+    assert.equal(set.lockedAt, '2026-09-25T03:00:00Z');
+    assert.equal(set.approval, 'approved');
+    assert.equal(set.version, 2);
+
+    // And the version is still checked: a wrong one is refused rather than silently accepted.
+    const wrong = await run(['preflight-discovery', '--out', dir, '--agency', 'A', '--website', `${origin}/`,
+      '--url', `${origin}/other`, '--category', 'account-registration', '--set-version', '1',
+      '--method', 'navigation']);
+    assert.notEqual(wrong.status, 0);
+    assert.match(wrong.stderr, /is version 2, not 1/);
   });
 });

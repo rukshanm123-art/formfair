@@ -42,7 +42,7 @@ import { fetchRobotsPolicy, evaluatePolicy, DISPOSITION } from './robots-policy.
 import {
   DISCOVERY_KINDS, DISCOVERY_METHODS, DISCOVERY_OUTCOMES, remainingBudget, canonicalise,
   SEARCH_TERMS, parseDrawOrder, nextWork, isSuperseded, MAX_QUALIFIED_AGENCIES,
-  TECHNICAL_ATTRITION_OUTCOMES, JUDGEMENT_OUTCOMES,
+  TECHNICAL_ATTRITION_OUTCOMES, JUDGEMENT_OUTCOMES, setKey,
 } from './selection.mjs';
 import { readFileSync as readFile } from 'node:fs';
 import { buildPacket, renderPacket } from './packet.mjs';
@@ -834,7 +834,15 @@ async function doPreflightDiscovery() {
   // selection-v1.0.12: the round exists from its first inspection. Previously a candidate set
   // was created only when candidates were recorded, so a round could accumulate discovery
   // records that no gate could see - every gate keyed off the set.
-  const openedSet = recordCandidates(log, { agency, category, urls: [] });
+  //
+  // selection-v1.0.30. Only CREATED when it does not already exist. `recordCandidates` refuses to
+  // touch a locked set, which is right for a set that would grow - but this call adds nothing, and
+  // refusing it made every retrospective render impossible: all sixty-six backlog records belong to
+  // rounds that are locked and approved, so no permit could be issued for any of them. The round
+  // these renders re-examine is closed by design; the render does not reopen it, and a rendered
+  // judgement is bound by `answersDiscoveryId` rather than by joining the set.
+  const existing = log.candidateSets?.[setKey(agency, category)];
+  const openedSet = existing ?? recordCandidates(log, { agency, category, urls: [] });
   if (openedSet.version !== setVersion) {
     die(
       `the active round for ${agency} / ${category} is version ${openedSet.version}, not ` +
