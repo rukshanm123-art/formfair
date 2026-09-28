@@ -2030,7 +2030,10 @@ describe('capture-blocked leaves eligibility unknown', () => {
  */
 describe('the capture path cannot evade a challenge', () => {
   const here = dirname(fileURLToPath(import.meta.url));
-  const sources = ['capture.mjs', 'cli-capture.mjs'].map((f) => ({
+  // selection-v1.0.32: the discovery path drives a browser too, and gained the same headed fallback,
+  // so it is held to the same prohibitions. A rule asserted of one path and not the other is a rule
+  // the other path does not have.
+  const sources = ['capture.mjs', 'cli-capture.mjs', 'render-discovery.mjs', 'redirect-guard.mjs'].map((f) => ({
     file: f,
     text: readFileSync(join(here, '..', f), 'utf8'),
   }));
@@ -2068,8 +2071,15 @@ describe('the capture path cannot evade a challenge', () => {
     // Both modes are plain chromium.launch with nothing but the headless flag.
     assert.match(cli, /chromium\.launch\(\{\s*headless:\s*true\s*\}\)/);
     assert.match(cli, /chromium\.launch\(\{\s*headless:\s*false\s*\}\)/);
-    // And exactly one headed attempt, so a barred page is not retried indefinitely.
-    assert.equal((cli.match(/headless:\s*false/g) ?? []).length, 1);
+    // selection-v1.0.32: exactly TWO headed attempts in the file - one for capture, one for rendered
+    // discovery - and no more, so neither path retries a barred page indefinitely.
+    assert.equal((cli.match(/headless:\s*false/g) ?? []).length, 2);
+  });
+
+  test('a rendered discovery context is as fresh as a capture context', () => {
+    const render = code(sources.find((s) => s.file === 'render-discovery.mjs').text);
+    assert.match(render, /browser\.newContext\(\{\s*viewport/);
+    assert.ok(!/launchPersistentContext/.test(render), 'no persistent profile');
   });
 
   test('each capture gets a fresh context with no persistent profile', () => {

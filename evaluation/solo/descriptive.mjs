@@ -168,7 +168,7 @@ const FRAME_FILES = [
  * exhaustion records at all. A manifest that misnames its own protocol is worse than one that
  * omits it: a reader checking which rules a corpus was sealed under would be told the wrong ones.
  */
-export const SOLO_PROTOCOL_TAG = 'solo-protocol-v1.0.12';
+export const SOLO_PROTOCOL_TAG = 'solo-protocol-v1.0.13';
 
 /**
  * Two resolutions, mirrored from the capture package and checked equal by a test.
@@ -455,6 +455,40 @@ export function renderLedgerProblems(log, renderedDir) {
             if (hop.allowed !== true) {
               problems.push(`${where}'s hop ${i + 1} was refused, so the chain should have stopped there`);
             }
+          }
+        }
+      }
+    }
+
+    // solo-protocol-v1.0.13: the second flag able to retire a backlog entry. Both browser modes
+    // barred is terminal, and terminal claims carry their evidence.
+    if (a.renderBarred !== undefined) {
+      const where = a.id ?? '(an unidentified record)';
+      if (a.renderBarred !== true) {
+        problems.push(`${where} has a renderBarred that is neither true nor absent`);
+      } else {
+        if (a.outcome !== 'retrieval-blocked') problems.push(`${where} claims renderBarred without being blocked`);
+        const modes = a.attemptedModes;
+        if (!Array.isArray(modes) || !['headless', 'headed'].every((m) => modes.some((x) => x.browserMode === m))) {
+          problems.push(`${where} claims renderBarred without both a headless and a headed attempt`);
+        } else if (modes.some((m) => m.error)) {
+          problems.push(`${where} claims renderBarred, but one attempt failed to launch`);
+        } else if (!modes.every((m) => (m.accessBarriers ?? []).length > 0)) {
+          problems.push(`${where} claims renderBarred but not every mode was access-barred`);
+        }
+        const earlier = byId.get(a.followsDiscoveryId);
+        if (!a.followsDiscoveryId) problems.push(`${where} claims renderBarred without naming what it follows`);
+        else if (!earlier) problems.push(`${where} follows a record that does not exist`);
+        else {
+          if (earlier.outcome !== 'retrieval-blocked') problems.push(`${where} follows a record that was not barred`);
+          if (canon(earlier.url) !== canon(a.url)) problems.push(`${where} follows a record for a different page`);
+          if (!earlier.permitId || !a.permitId || earlier.permitId === a.permitId) {
+            problems.push(`${where} and the record it follows must each name their own consumed permit`);
+          }
+          for (const id of [earlier.permitId, a.permitId]) {
+            const permit = permits.find((p) => p.id === id);
+            if (!permit) problems.push(`${where} rests on permit ${id}, which does not exist`);
+            else if (!permit.consumedAt) problems.push(`${where} rests on an unconsumed permit`);
           }
         }
       }

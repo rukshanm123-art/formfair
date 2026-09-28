@@ -26,7 +26,8 @@ import { MAX_REDIRECT_HOPS } from '../redirect-guard.mjs';
 import {
   emptyLog, recordRobotsCheck, renderBacklog, appendAttempt, sha256, checkRenderLedger,
   renderRefusalProblems, quarantineArtefact, closeDiscoveryPermit, issueDiscoveryPermit,
-  permitAudit, checkPermitLedger, ELIGIBILITY_CRITERIA,
+  permitAudit, checkPermitLedger, ELIGIBILITY_CRITERIA, renderBarredProblems,
+  assertRenderEvidenceUsable,
 } from '../run.mjs';
 import { evaluatePolicy } from '../robots-policy.mjs';
 
@@ -673,5 +674,242 @@ describe('a request whose record could not be written', () => {
     assert.equal(closed.navigatedAt, undefined, 'no instant is invented');
     assert.ok(closed.navigationWindow.earliest < closed.navigationWindow.latest);
     assert.match(closed.navigationWindow.note, /issuance to write/);
+  });
+});
+
+describe('the rendered discovery path has the same headed fallback as capture', () => {
+  /**
+   * selection-v1.0.32. Without it the record contradicts itself: a headless render of the Health
+   * feedback page returns a Cloudflare interstitial, while that page is in the corpus because a HEADED
+   * capture read it. Same page, same protocol, opposite statements, differing only by a browser mode
+   * one path had and the other did not.
+   *
+   * Two separate navigations, each with its own permit - so these tests assert the permits as much as
+   * the outcomes.
+   */
+  let barrier;
+  let barrierOrigin;
+  let blockModes = new Set();
+  let barrierHits;
+
+  const CHALLENGE = `<!doctype html><html><head><title>Just a moment...</title></head><body>
+    <h1>Checking your browser</h1>
+    <script src="https://challenges.cloudflare.com/turnstile/v0/api.js"></script></body></html>`;
+  const REAL = `<!doctype html><html><head><title>Feedback</title></head><body>
+    <label for="n">First name</label><input id="n" name="name" type="text" maxlength="255"></body></html>`;
+  const WALL = `<!doctype html><html><head><title>Sign in</title></head><body>
+    <form><input type="password" name="p"><p>Please sign in to continue</p></form></body></html>`;
+
+  before(async () => {
+    barrierHits = [];
+    barrier = createServer((req, res) => {
+      barrierHits.push(req.url);
+      if (req.url === '/robots.txt') {
+        res.writeHead(200, { 'content-type': 'text/plain' });
+        return res.end('User-agent: *\nDisallow: /nothing\n');
+      }
+      const headless = /HeadlessChrome/.test(req.headers['user-agent'] ?? '');
+      const mode = headless ? 'headless' : 'headed';
+      if (req.url === '/wall') { res.writeHead(200, { 'content-type': 'text/html' }); return res.end(WALL); }
+      if (blockModes.has(mode)) {
+        res.writeHead(403, { 'content-type': 'text/html' });
+        return res.end(CHALLENGE);
+      }
+      res.writeHead(200, { 'content-type': 'text/html' });
+      res.end(REAL);
+    });
+    await new Promise((r) => barrier.listen(0, '127.0.0.1', r));
+    barrierOrigin = `http://127.0.0.1:${barrier.address().port}`;
+  });
+  after(() => { barrier?.closeAllConnections?.(); barrier?.close(); });
+
+  const cli = new URL('../cli-capture.mjs', import.meta.url).pathname;
+  const run = (args) => new Promise((resolve) => {
+    const child = spawn('node', [cli, ...args]);
+    let stdout = ''; let stderr = '';
+    child.stdout.on('data', (d) => { stdout += d; });
+    child.stderr.on('data', (d) => { stderr += d; });
+    child.on('exit', (status) => resolve({ status, stdout, stderr }));
+  });
+
+  const prepare = () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ff-hf-'));
+    mkdirSync(join(dir, 'captures'), { recursive: true });
+    const log = emptyLog();
+    log.candidateSets['A\u0000enquiry-or-contact'] = {
+      agency: 'A', category: 'enquiry-or-contact', version: 1, discovered: [], locked: [],
+      ordered: [], droppedBeyondBound: [], lockedAt: '2026-09-27T09:00:00Z', approval: 'approved',
+      candidateDeclaration: 'none', discoveryRecordIds: [], discoveryMethods: ['navigation'],
+    };
+    writeFileSync(join(dir, 'capture-log.json'), JSON.stringify(log));
+    return dir;
+  };
+  const renderVia = async (dir, path) => {
+    const pf = await run(['preflight-discovery', '--out', dir, '--agency', 'A',
+      '--website', `${barrierOrigin}/`, '--url', `${barrierOrigin}${path}`,
+      '--category', 'enquiry-or-contact', '--set-version', '1', '--method', 'navigation']);
+    assert.equal(pf.status, 0, pf.stderr);
+    const permit = pf.stdout.match(/permit (p-\d+):/)?.[1];
+    const r = await run(['render-discovery', '--out', dir, '--agency', 'A',
+      '--website', `${barrierOrigin}/`, '--url', `${barrierOrigin}${path}`,
+      '--category', 'enquiry-or-contact', '--set-version', '1', '--method', 'navigation',
+      '--permit-id', permit]);
+    return { r, permit, log: () => JSON.parse(readFileSync(join(dir, 'capture-log.json'), 'utf8')) };
+  };
+
+  test('headless blocked, headed successful: two observations, two permits, one usable render', async () => {
+    blockModes = new Set(['headless']);
+    const dir = prepare();
+    const { r, log } = await renderVia(dir, '/feedback');
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stderr, /headless was access-barred/);
+
+    const l = log();
+    const obs = l.attempts.filter((a) => a.recordType === 'observation');
+    assert.equal(obs.length, 2, 'both attempts are preserved');
+    assert.equal(obs[0].outcome, 'retrieval-blocked');
+    assert.equal(obs[1].outcome, 'rendered');
+    assert.equal(obs[1].followsDiscoveryId, obs[0].id);
+    assert.equal(obs[1].renderBarred, undefined, 'headed succeeded, so nothing is terminal');
+
+    // Two navigations, two permits, neither reused.
+    assert.notEqual(obs[0].permitId, obs[1].permitId);
+    assert.equal(l.discoveryPermits.length, 2);
+    assert.ok(l.discoveryPermits.every((p) => p.consumedAt), 'both consumed');
+    // Five-second pacing between them, honestly.
+    const gap = Date.parse(obs[1].navigatedAt) - Date.parse(obs[0].navigatedAt);
+    assert.ok(gap >= 5000, `only ${gap} ms between the two navigations`);
+
+    // Two renders, and only the headed one is usable as evidence.
+    assert.equal(l.renders.length, 2);
+    const headed = l.renders.find((x) => x.browserMode === 'headed');
+    assert.deepEqual(headed.accessBarriers, []);
+    assert.equal(headed.controlCount, 1);
+    assert.deepEqual(assertRenderEvidenceUsable(l, { renderId: headed.id, capturesRoot: dir }), []);
+    const barredRender = l.renders.find((x) => x.browserMode === 'headless');
+    assert.ok(assertRenderEvidenceUsable(l, { renderId: barredRender.id, capturesRoot: dir }).length > 0,
+      'a judgement may not cite the barred render');
+    // The challenge bytes are retained privately.
+    assert.ok(existsSync(join(dir, 'rendered', barredRender.renderFile)));
+    assert.deepEqual(checkRenderLedger(l, join(dir, 'rendered')), []);
+  });
+
+  test('both modes barred: a terminal record that discharges only that URL', async () => {
+    blockModes = new Set(['headless', 'headed']);
+    const dir = prepare();
+    const { r, log } = await renderVia(dir, '/feedback');
+    assert.notEqual(r.status, 0, 'the run stops');
+    const l = log();
+    const obs = l.attempts.filter((a) => a.recordType === 'observation');
+    assert.equal(obs.length, 2);
+    assert.ok(obs.every((a) => a.outcome === 'retrieval-blocked'));
+    assert.equal(obs[1].renderBarred, true);
+    assert.deepEqual(renderBarredProblems(l, obs[1]), []);
+    assert.deepEqual(checkRenderLedger(l, join(dir, 'rendered')), []);
+  });
+
+  test('a sign-in wall causes no fallback: it is a finding, not a barrier', async () => {
+    blockModes = new Set();
+    const dir = prepare();
+    const { r, log } = await renderVia(dir, '/wall');
+    assert.equal(r.status, 0, r.stderr);
+    assert.doesNotMatch(r.stderr, /headless was access-barred/);
+    const l = log();
+    assert.equal(l.attempts.filter((a) => a.recordType === 'observation').length, 1,
+      'one navigation only');
+    assert.equal(l.discoveryPermits.length, 1);
+  });
+
+  test('a headed launch failure leaves the obligation outstanding', () => {
+    // An environment failure is not evidence that the site blocked access. Asserted as the invariant
+    // rather than by breaking Playwright's launcher: sabotaging the browser path breaks the HEADLESS
+    // launch too, so no observation is recorded at all and the test proves nothing about this branch.
+    //
+    // The timeline is anchored to the real clock, in the order the ledger requires: robots read
+    // before the permits, the plain-fetch record predating the permit model, and each navigation
+    // after the permit that authorised it.
+    const iso = (ms) => new Date(ms).toISOString().replace(/\.\d{3}Z$/, 'Z');
+    const t = Date.now();
+    const robotsAt = iso(t - 90 * 60_000);
+    const issuedOne = iso(t - 80 * 60_000);
+    const navigatedOne = iso(t - 80 * 60_000 + 10_000);
+    const consumedOne = iso(t - 80 * 60_000 + 20_000);
+    const issuedTwo = iso(t - 80 * 60_000 + 30_000);
+    const plainAt = iso(t - 3 * 24 * 3600_000);
+
+    const dir = mkdtempSync(join(tmpdir(), 'ff-launch-'));
+    mkdirSync(join(dir, 'rendered'), { recursive: true });
+    const log = emptyLog();
+    recordRobotsCheck(log, {
+      origin: 'https://a.govt.nz', url: 'https://a.govt.nz/robots.txt', fetchedAt: robotsAt,
+      httpStatus: 200, disposition: 'rules', sha256: sha256(''), bytes: 0, body: '',
+    });
+    // The plain-fetch record that still owes a render, predating the permit model in this log.
+    appendAttempt(log, {
+      examinedAt: plainAt, agency: 'A', website: 'https://a.govt.nz/',
+      url: 'https://a.govt.nz/feedback', status: 'discovery', discoveryKind: 'internal-search',
+      outcome: 'no-candidates', category: 'enquiry-or-contact', candidateSetVersion: 1,
+      navigatedAt: plainAt, approval: 'approved',
+    });
+    const owing = log.attempts.at(-1);
+
+    const html = '<html><head><title>Just a moment...</title></head><body>challenge</body></html>';
+    writeFileSync(join(dir, 'rendered', 'g1.html'), html);
+    log.discoveryPermits = [
+      {
+        id: 'p-0001', agency: 'A', category: 'enquiry-or-contact', candidateSetVersion: 1,
+        url: 'https://a.govt.nz/feedback', robotsCheckId: 'r-0001',
+        issuedAt: issuedOne, consumedAt: consumedOne,
+      },
+      {
+        id: 'p-0002', agency: 'A', category: 'enquiry-or-contact', candidateSetVersion: 1,
+        url: 'https://a.govt.nz/feedback', robotsCheckId: 'r-0001', issuedAt: issuedTwo,
+      },
+    ];
+    log.renders = [{
+      id: 'g-0001', url: 'https://a.govt.nz/feedback', navigatedAt: navigatedOne,
+      permitId: 'p-0001', renderFile: 'g1.html', renderedSha256: sha256(html),
+      renderedBytes: Buffer.byteLength(html), accessBarriers: ['http 403', 'cloudflare interstitial'],
+      browserMode: 'headless',
+    }];
+    appendAttempt(log, {
+      recordType: 'observation', permitId: 'p-0001', renderId: 'g-0001',
+      examinedAt: navigatedOne, agency: 'A', website: 'https://a.govt.nz/',
+      url: 'https://a.govt.nz/feedback', status: 'discovery', discoveryKind: 'navigation',
+      outcome: 'retrieval-blocked', category: 'enquiry-or-contact', candidateSetVersion: 1,
+      navigatedAt: navigatedOne, approval: 'approved', evidence: 'rendered-dom',
+      renderFile: 'g1.html', renderedSha256: sha256(html), renderedBytes: Buffer.byteLength(html),
+      accessBarriers: ['http 403', 'cloudflare interstitial'],
+      attemptedModes: [{ browserMode: 'headless', accessBarriers: ['http 403'] }],
+    });
+    const headlessObs = log.attempts.at(-1);
+    log.candidateSets['A\u0000enquiry-or-contact'] = {
+      agency: 'A', category: 'enquiry-or-contact', version: 1, discovered: [], locked: [],
+      lockedAt: plainAt, approval: 'approved', candidateDeclaration: 'none',
+      discoveryRecordIds: [owing.id],
+    };
+
+    // The headed attempt could not launch: its permit closes unused, with the reason stated.
+    closeDiscoveryPermit(log, {
+      permitId: 'p-0002', disposition: 'unused',
+      reason: 'headed Chromium could not launch (missing display). No request was made under this ' +
+        'permit. This is an environment failure, not evidence that the site blocked access, so the ' +
+        'render obligation for this URL remains outstanding.',
+    });
+
+    assert.ok(!log.attempts.some((a) => a.renderBarred), 'a launch failure is not a terminal finding');
+    assert.ok(renderBacklog(log).some((a) => a.id === owing.id), 'the obligation remains outstanding');
+    assert.equal(headlessObs.outcome, 'retrieval-blocked', 'and the headless observation stands');
+    assert.deepEqual(checkPermitLedger(log), []);
+    assert.deepEqual(checkRenderLedger(log, join(dir, 'rendered')), []);
+  });
+
+  test('the launch-failure branch closes the permit unused and records nothing terminal', () => {
+    // The distinction lives in what that branch does NOT do, so it is asserted against the source.
+    const src = readFileSync(new URL('../cli-capture.mjs', import.meta.url), 'utf8');
+    const branch = src.slice(src.indexOf('if (!headed) {'), src.indexOf('attemptedModes.push({\n    browserMode: \'headed\''));
+    assert.match(branch, /PERMIT_DISPOSITIONS\.UNUSED/);
+    assert.match(branch, /environment failure, not evidence that the site blocked access/);
+    assert.ok(!/renderBarred/.test(branch), 'a launch failure must set no terminal flag');
   });
 });

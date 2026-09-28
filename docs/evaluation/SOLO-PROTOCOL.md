@@ -3020,3 +3020,68 @@ access-barred too. That is recorded here as a finding and is **not** resolved by
 
 No judgement has been recorded. The backlog stands at **66 records across 57 URLs**; zero open permits,
 zero ledger problems, zero unaccounted files in `rendered/`, and the first 54 observations untouched.
+
+## Amendment 35: discovery and capture must agree on what a page is
+
+**Dated 28 September 2026.** `selection-v1.0.32`, `capture-v1.0.11` and `solo-protocol-v1.0.13`.
+Moves no earlier tag.
+
+Amendment 25 gave the capture path one fixed headed attempt for a page that bars automated retrieval.
+Discovery now drives a browser too, and had no such attempt — so the two paths could disagree about
+whether a page is readable, and on the Health feedback page they did. A headless render of `c-0292`'s
+own page returned a **28,754-byte Cloudflare interstitial titled "Just a moment…"**, while that page is
+in the corpus precisely because a **headed capture read it**, name field and all.
+
+Recording that as attrition would have said "blocked" about a page this protocol has already
+established is publicly readable: the same page, the same protocol, opposite statements, differing
+only by a browser mode one path had and the other did not. So rendered discovery gets the same fallback
+on the same terms.
+
+### Two navigations, not one retried
+
+| | |
+| --- | --- |
+| decision | `needsHeadedFallback()`, **shared** with the capture path so the two cannot drift |
+| trigger | an **automation barrier** only — never a sign-in wall, which is a finding about what the public can read, and never a redirect refusal or a rate limit, which never reached the page |
+| permits | **one each**. The headless attempt is consumed and recorded *before* the headed permit is issued, and a permit is never reused |
+| pacing | the five-second minimum applies between them, honestly waited |
+| evidence | both observations preserved: headless `retrieval-blocked` with its challenge bytes retained privately, headed authoritative if it succeeds |
+| judgements | may cite **only** the successful, non-barred render — the barred one is already refused by `assertRenderEvidenceUsable` |
+
+A headed fallback is therefore a **second observation of the same page in the same round**, which the
+duplicate rule refused. It is now permitted only when it says so, by naming the barred observation it
+follows through `followsDiscoveryId`; that link is validated at write time — same agency, category,
+round and page, target an observation that was actually barred, and a permit of its own. An *unlinked*
+second observation is still refused, because that is one page requested twice for no stated reason.
+
+### Both modes barred
+
+A terminal `renderBarred` record: this page cannot be read by this instrument, so no judgement will
+ever rest on it and its render obligation is discharged as attrition — **for that URL only**. It is the
+second flag able to retire a backlog entry, and the lesson from the first is applied before it is used
+rather than after: it requires the outcome `retrieval-blocked`, both modes recorded and **both barred**,
+and the headless observation it follows, of the same page, each with its **own consumed permit**. One
+permit cannot evidence two requests. Validated in both packages, and the run stops.
+
+### A headed browser that cannot start is not a blocked website
+
+If headed Chromium fails to launch, the permit closes `unused` with the reason stated, **no terminal
+record is written**, and the URL's render obligation stays outstanding. Blaming a government website
+for a missing display would be the easiest possible way to make attrition look like evidence.
+
+### Tests
+
+Nine: headless blocked with headed succeeding — asserting two observations, two distinct consumed
+permits, five seconds of real pacing between them, two renders, and that only the unbarred one is
+usable as evidence; both modes barred; a headed launch failure leaving the obligation outstanding; a
+sign-in wall causing no fallback and no second permit; and no challenge interaction.
+
+The **no-stealth source guards now cover the discovery path too** — `render-discovery.mjs` and
+`redirect-guard.mjs` alongside `capture.mjs` and `cli-capture.mjs`. A prohibition asserted of one path
+and not the other is a prohibition the other path does not have. The file may now contain exactly two
+headed launches, one per path, and no more.
+
+### What this does not establish
+
+Nothing is judged. The backlog stands at **66 records across 57 URLs**, with the two corpus pages still
+to be re-rendered — TKM headlessly, Health through the fallback.

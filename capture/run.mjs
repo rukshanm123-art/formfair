@@ -262,7 +262,19 @@ export function appendAttempt(log, attempt) {
         a.category === attempt.category && a.candidateSetVersion === attempt.candidateSetVersion &&
         kindOf(a) === incoming
     );
-    if (sameRound && !attempt.supersedesDiscoveryId) {
+    // selection-v1.0.32. A headed fallback is a SECOND observation of the same page in the same
+    // round, by design - two browser modes of one attempt to read it. It is permitted only when it
+    // says so, by naming the barred observation it follows; an unlinked second observation is still
+    // refused, because that would be the same page requested twice for no stated reason.
+    const isLinkedFallback = attempt.recordType === RECORD_TYPES.OBSERVATION &&
+      typeof attempt.followsDiscoveryId === 'string' &&
+      log.attempts.some(
+        (a) => a.id === attempt.followsDiscoveryId && a.status === 'discovery' &&
+          a.agency === attempt.agency && a.category === attempt.category &&
+          a.candidateSetVersion === attempt.candidateSetVersion &&
+          canonicalise(a.url) === canonicalise(attempt.url)
+      );
+    if (sameRound && !attempt.supersedesDiscoveryId && !isLinkedFallback) {
       throw new Error(
         `${attempt.url} is already recorded for ${attempt.agency} / ${attempt.category} ` +
           `round ${attempt.candidateSetVersion}. If that record is wrong, correct it with ` +
@@ -301,6 +313,43 @@ export function appendAttempt(log, attempt) {
   // category, and the first use of this is a service-application render of a page first inspected
   // under account-registration. The link must therefore cross categories, and it is not a
   // correction - the earlier record was true about the method it used.
+  // selection-v1.0.32. The fallback link: the record it follows must be the same work, and must be
+  // an observation that was actually barred - otherwise "follows" would be a way of recording a
+  // second request for a page that had already been read.
+  if (attempt.followsDiscoveryId) {
+    const target = log.attempts.find((a) => a.id === attempt.followsDiscoveryId);
+    if (!target) {
+      throw new Error(`followsDiscoveryId ${attempt.followsDiscoveryId} matches no recorded attempt`);
+    }
+    if (target.status !== 'discovery') {
+      throw new Error(`${target.id} is a ${target.status} attempt; a fallback follows a discovery record`);
+    }
+    if (target.recordType !== RECORD_TYPES.OBSERVATION) {
+      throw new Error(`${target.id} is not an observation; a fallback follows the retrieval it retries`);
+    }
+    if (target.outcome !== 'retrieval-blocked') {
+      throw new Error(
+        `${target.id} records ${JSON.stringify(target.outcome)}; a fallback follows an attempt that ` +
+          'was access-barred, or there was nothing to retry'
+      );
+    }
+    for (const [field, label] of [['agency', 'agency'], ['category', 'category'],
+      ['candidateSetVersion', 'round']]) {
+      if (target[field] !== attempt[field]) {
+        throw new Error(`${target.id} is ${label} ${JSON.stringify(target[field])}, not ${JSON.stringify(attempt[field])}`);
+      }
+    }
+    if (canonicalise(target.url) !== canonicalise(attempt.url)) {
+      throw new Error(`${target.id} is ${target.url}, not ${attempt.url}`);
+    }
+    if (target.permitId && attempt.permitId && target.permitId === attempt.permitId) {
+      throw new Error(
+        `${attempt.id ?? 'this record'} and ${target.id} name the same permit ${target.permitId}; a ` +
+          'fallback is a second navigation and takes its own'
+      );
+    }
+  }
+
   // selection-v1.0.26. An explicit answered record, checked at write time as well as at the gate.
   // Keying answers by canonical URL and category alone let a judgement about a shared third-party
   // form under one agency clear another agency's backlog entry for the same page.
@@ -2833,6 +2882,13 @@ export function checkRenderLedger(log, renderedDir) {
         for (const problem of renderRefusalProblems(log, a)) problems.push(problem);
       }
     }
+    if (a.renderBarred !== undefined) {
+      if (a.renderBarred !== true) {
+        problems.push(`${a.id} has renderBarred ${JSON.stringify(a.renderBarred)}; it is true or absent`);
+      } else {
+        for (const problem of renderBarredProblems(log, a)) problems.push(problem);
+      }
+    }
 
     // A record carrying a digest but no registry entry is checked directly against disk. Two such
     // records exist - written before the registry did - and a hash nobody re-reads is decoration
@@ -3081,6 +3137,74 @@ export function renderRefusalProblems(log, attempt) {
 }
 
 /**
+ * Is this `renderBarred` record the record of both modes being barred?
+ *
+ * selection-v1.0.32. The terminal case: a page that bars headless AND headed retrieval cannot be read
+ * by this instrument, so its render obligation can never be discharged by a judgement. That makes it
+ * the second flag able to retire a backlog entry, and the lesson from the first one - a bare boolean
+ * removed a record from the backlog with both ledgers silent - applies before it is used, not after.
+ *
+ * It requires TWO navigations: a headless observation that was barred, and this headed one, each with
+ * its own consumed permit. One permit cannot evidence two requests, and a single barred attempt is
+ * not a terminal finding - it is what the fallback exists to answer.
+ */
+export function renderBarredProblems(log, attempt) {
+  const problems = [];
+  const where = attempt.id ?? '(an unidentified record)';
+  if (attempt.outcome !== 'retrieval-blocked') {
+    problems.push(`${where} claims renderBarred but records ${JSON.stringify(attempt.outcome)}`);
+  }
+  const modes = attempt.attemptedModes;
+  if (!Array.isArray(modes) || !['headless', 'headed'].every((m) => modes.some((x) => x.browserMode === m))) {
+    problems.push(`${where} claims renderBarred without recording both a headless and a headed attempt`);
+  } else if (modes.some((m) => m.error)) {
+    problems.push(
+      `${where} claims renderBarred, but one attempt failed to launch (${modes.find((m) => m.error).error}). ` +
+        'An environment failure is not evidence that the site blocked access.'
+    );
+  } else if (!modes.every((m) => (m.accessBarriers ?? []).length > 0)) {
+    problems.push(`${where} claims renderBarred but not every recorded mode was access-barred`);
+  }
+  const earlier = log.attempts.find((a) => a.id === attempt.followsDiscoveryId);
+  if (!attempt.followsDiscoveryId) {
+    problems.push(`${where} claims renderBarred without naming the headless observation it follows`);
+  } else if (!earlier) {
+    problems.push(`${where} follows ${attempt.followsDiscoveryId}, which does not exist`);
+  } else {
+    if (earlier.outcome !== 'retrieval-blocked') {
+      problems.push(`${where} follows ${earlier.id}, which was not access-barred`);
+    }
+    if (canonicalise(earlier.url) !== canonicalise(attempt.url)) {
+      problems.push(`${where} follows ${earlier.id}, which is a different page`);
+    }
+    if (!earlier.permitId || !attempt.permitId || earlier.permitId === attempt.permitId) {
+      problems.push(
+        `${where} and ${earlier.id} must each name their own consumed permit; two requests are not ` +
+          'authorised by one'
+      );
+    }
+    for (const id of [earlier.permitId, attempt.permitId]) {
+      const permit = (log.discoveryPermits ?? []).find((p) => p.id === id);
+      if (!permit) problems.push(`${where} rests on permit ${id}, which does not exist`);
+      else if (!permit.consumedAt) problems.push(`${where} rests on permit ${id}, which is not consumed`);
+    }
+  }
+  return problems;
+}
+
+/** URLs both browser modes were barred from, so no judgement can ever rest on them. */
+function renderBarredUrls(log) {
+  const urls = new Set();
+  for (const a of log.attempts) {
+    if (a.status !== 'discovery' || a.renderBarred !== true) continue;
+    if (isDiscoverySuperseded(log, a.id)) continue;
+    if (renderBarredProblems(log, a).length > 0) continue;
+    urls.add(canonicalise(a.url));
+  }
+  return urls;
+}
+
+/**
  * Conditions under which a refusal can never be retried, whatever any policy later says.
  *
  * A loop and an unusable target are properties of the redirect itself. Everything else depends on a
@@ -3126,6 +3250,7 @@ export function renderBacklog(log) {
   const answered = renderedJudgements(log);
   const current = boundToCurrentSet(log);
   const unreachable = renderRefusedUrls(log);
+  const barred = renderBarredUrls(log);
   return log.attempts.filter((a) => {
     // Only evidence a CURRENT set stands on. A record belonging solely to a superseded round is
     // history, and re-rendering it would be traffic spent on a finding already withdrawn.
@@ -3143,6 +3268,8 @@ export function renderBacklog(log) {
     if (answered.has(a.id)) return false;
     // Or discharged as attrition, because a render attempt found the page unreachable within policy.
     if (unreachable.has(canonicalise(a.url))) return false;
+    // Or because both browser modes were barred, so no judgement can ever rest on this page.
+    if (barred.has(canonicalise(a.url))) return false;
     if (NON_HTML.test(url.pathname)) return false;
     // And the request must not be FORBIDDEN by the policy in force now. Without this the gate would
     // demand renders that politeness forbids - an obligation meetable only by breaching robots,

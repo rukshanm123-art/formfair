@@ -992,6 +992,13 @@ async function doRenderDiscovery() {
     browserMode: 'headless',
     policyFor: recordedPolicyFor(log),
   });
+  const attemptedModes = [{
+    browserMode: 'headless',
+    httpStatus: rendered.httpStatus ?? null,
+    userAgent: rendered.userAgent ?? null,
+    accessBarriers: rendered.accessBarriers ?? [],
+    refused: rendered.refused === true,
+  }];
 
   // The page redirected somewhere the recorded policy does not permit. The original URL was
   // requested under its permit and the target never was, so the permit is consumed and the finding
@@ -1032,14 +1039,26 @@ async function doRenderDiscovery() {
   // retrieved their page and then threw inside `appendAttempt`, so `writeLog` never ran: the permit
   // stayed open and the bytes stayed in `rendered/` with nothing naming them. A failure after the
   // write must take the bytes with it, exactly as the capture path does.
+  let headless = null;
   try {
-    recordRenderedObservation();
+    headless = recordRenderedObservation();
   } catch (error) {
     const moved = rendered.renderFile
       ? quarantineArtefact(renderedDir, rendered.renderFile, { reason: `not recorded: ${error.message}` })
       : null;
     if (moved) console.error(`quarantined ${rendered.renderFile} -> ${moved}`);
     throw error;
+  }
+
+  // The headless attempt is consumed and recorded above. Only now, and only for an AUTOMATION
+  // barrier, is a second permit issued for a second navigation. `needsHeadedFallback` is the capture
+  // path's own decision, shared so the two cannot drift: a sign-in wall is a finding about what the
+  // public can read, and a redirect refusal never reached the page at all.
+  if (headless && needsHeadedFallback(rendered)) {
+    await headedFallbackForRender({
+      log, logPath, dir, renderedDir, agency, website, url, category, setVersion, method, settleMs,
+      headlessRecord: headless.record, attemptedModes,
+    });
   }
 
   function recordRenderedObservation() {
@@ -1084,6 +1103,7 @@ async function doRenderDiscovery() {
     accessBarriers: rendered.accessBarriers,
     submissionProtection: rendered.submissionProtection,
     authenticationSignals: rendered.authenticationSignals,
+    attemptedModes,
     ...(flag('note') ? { note: flag('note') } : {}),
     approval: APPROVAL.APPROVED,
     politeness: { userAgent: rendered.userAgent, settleMs, browserMode: rendered.browserMode },
@@ -1118,7 +1138,175 @@ async function doRenderDiscovery() {
   if (rendered.links.length > 40) console.log(`  ... and ${rendered.links.length - 40} more link(s)`);
   console.log('');
   console.log(`Nothing is judged yet. Run \`classify-render --render ${render.id} --category <c> --outcome <o>\`.`);
+  return { render, record, rendered };
   }
+}
+
+/**
+ * One fixed headed attempt for a page that bars automated retrieval, on Amendment 25's terms.
+ *
+ * selection-v1.0.32. Discovery now drives a browser, so it meets the same barrier capture does - and
+ * the Health feedback page proves it: a headless render of `c-0292`'s own page returned a 28,754-byte
+ * Cloudflare interstitial titled "Just a moment...", while that page is in the corpus because a HEADED
+ * capture read it. Without a matching fallback the record would have said "blocked" about a page the
+ * protocol has already established is publicly readable - the same page, the same protocol, opposite
+ * statements, differing only by a browser mode one path had and the other did not.
+ *
+ * Two SEPARATE navigations, not one retried. Each takes its own permit, the headless attempt is
+ * consumed and recorded before the headed permit is issued, and the five-second pacing applies
+ * between them. A permit authorises one request; two requests need two.
+ *
+ * `needsHeadedFallback` is shared with the capture path so the two cannot drift, and it fires only
+ * for an automation barrier - never a sign-in wall, which is a finding about what the public can
+ * read, and never a redirect refusal or a rate limit, which are not barriers to retrieval at all.
+ */
+async function headedFallbackForRender({
+  log, logPath, dir, renderedDir, agency, website, url, category, setVersion, method, settleMs,
+  headlessRecord, attemptedModes,
+}) {
+  // The policy is re-read from the record, not re-fetched: this second request is authorised by a
+  // second permit resting on the same recorded check.
+  const parsed = new URL(url);
+  const check = findRobotsCheck(log, parsed.origin);
+  if (!check || !robotsCheckIsFresh(check)) {
+    die(`the robots policy for ${parsed.origin} is missing or stale; the headed attempt is not authorised`);
+  }
+  const verdict = evaluatePolicy(check, parsed.pathname + parsed.search, 'chromium');
+  if (!verdict.allowed) die(`the robots policy no longer permits ${url}: ${verdict.reason}`);
+
+  const headedPermit = issueDiscoveryPermit(log, {
+    agency, category, candidateSetVersion: setVersion, url,
+    robotsCheckId: check.id, reason: `headed fallback after ${headlessRecord.id} was access-barred`,
+  });
+  writeLog(logPath, log); // durable before the request, as every permit must be
+  console.error(
+    `headless was access-barred (${headlessRecord.accessBarriers.join(', ')}); ` +
+      `retrying once with headed Chromium under ${headedPermit.id}`
+  );
+
+  await pacer.beforeNavigation(null);
+  let headed = null;
+  let launchError = null;
+  try {
+    headed = await renderDiscoveryPage({
+      browserFactory: () => chromium.launch({ headless: false }),
+      url, outDir: renderedDir, recordId: `g${Date.now()}`, settleMs,
+      browserMode: 'headed',
+      policyFor: recordedPolicyFor(log),
+    });
+  } catch (error) {
+    launchError = error.message.split('\n')[0];
+  }
+
+  // A headed browser that cannot start is the environment failing, not the site blocking. The
+  // obligation stays outstanding: recording attrition here would blame a government website for a
+  // missing display.
+  if (!headed) {
+    attemptedModes.push({ browserMode: 'headed', error: launchError });
+    closeDiscoveryPermit(log, {
+      permitId: headedPermit.id, disposition: PERMIT_DISPOSITIONS.UNUSED,
+      reason:
+        `headed Chromium could not launch (${launchError}). No request was made under this permit. ` +
+        'This is an environment failure, not evidence that the site blocked access, so the render ' +
+        'obligation for this URL remains outstanding.',
+    });
+    writeLog(logPath, log);
+    writeDerived({ log, dir, frameSha256: flag('frame-sha256'), drawOrderSha256: flag('draw-order-sha256'), synthetic: has('synthetic') });
+    die(
+      `headed Chromium could not launch: ${launchError}. The headless observation ` +
+        `${headlessRecord.id} stands; this URL still owes a render.`
+    );
+  }
+
+  attemptedModes.push({
+    browserMode: 'headed',
+    httpStatus: headed.httpStatus ?? null,
+    userAgent: headed.userAgent ?? null,
+    accessBarriers: headed.accessBarriers ?? [],
+    refused: headed.refused === true,
+  });
+
+  const consumed = consumeDiscoveryPermit(log, {
+    agency, category, candidateSetVersion: setVersion, url,
+    navigatedAt: headed.navigatedAt, permitId: headedPermit.id,
+  });
+  const headedRender = recordRender(log, {
+    url, finalUrl: headed.finalUrl, navigatedAt: headed.navigatedAt, permitId: consumed.id,
+    renderFile: headed.renderFile, renderedSha256: headed.renderedSha256,
+    renderedBytes: headed.renderedBytes, httpStatus: headed.httpStatus,
+    loadState: headed.loadState, domNodes: headed.domNodes,
+    linkCount: headed.links.length, formCount: headed.forms.length,
+    controlCount: headed.controls.length, buttonCount: headed.buttons,
+    accessBarriers: headed.accessBarriers, submissionProtection: headed.submissionProtection,
+    authenticationSignals: headed.authenticationSignals, title: headed.title,
+    browser: headed.browser, browserMode: headed.browserMode, userAgent: headed.userAgent,
+    viewport: headed.viewport, locale: headed.locale, settleMs: headed.settleMs,
+    redirectChain: headed.redirectChain,
+  });
+  const stillBarred = headed.accessBarriers.length > 0;
+  appendAttempt(log, {
+    recordType: 'observation',
+    permitId: consumed.id,
+    renderId: headedRender.id,
+    examinedAt: now(), agency, website, url,
+    status: 'discovery', discoveryKind: method,
+    outcome: stillBarred ? 'retrieval-blocked' : 'rendered',
+    category, candidateSetVersion: setVersion,
+    navigatedAt: headed.navigatedAt,
+    finalUrl: headed.finalUrl,
+    evidence: headed.evidence,
+    renderFile: headed.renderFile,
+    renderedSha256: headed.renderedSha256,
+    renderedBytes: headed.renderedBytes,
+    httpStatus: headed.httpStatus,
+    loadState: headed.loadState,
+    domNodes: headed.domNodes,
+    linkCount: headed.links.length,
+    formCount: headed.forms.length,
+    controlCount: headed.controls.length,
+    buttonCount: headed.buttons,
+    accessBarriers: headed.accessBarriers,
+    submissionProtection: headed.submissionProtection,
+    authenticationSignals: headed.authenticationSignals,
+    attemptedModes,
+    followsDiscoveryId: headlessRecord.id,
+    // Terminal only when BOTH modes were barred: this page cannot be read by this instrument, so no
+    // judgement will ever rest on it and its render obligation is discharged as attrition.
+    ...(stillBarred ? { renderBarred: true } : {}),
+    note: `headed fallback after ${headlessRecord.id} was access-barred`,
+    approval: APPROVAL.APPROVED,
+    politeness: { userAgent: headed.userAgent, settleMs, browserMode: headed.browserMode },
+  });
+  writeLog(logPath, log);
+  writeDerived({ log, dir, frameSha256: flag('frame-sha256'), drawOrderSha256: flag('draw-order-sha256'), synthetic: has('synthetic') });
+  const record = log.attempts.at(-1);
+  console.log('');
+  console.log(`recorded ${record.id}: headed observation ${headedRender.id} -> ${record.outcome}`);
+  console.log(
+    `HTTP ${headed.httpStatus ?? '-'}  ${headed.domNodes} DOM nodes, ${headed.links.length} link(s), ` +
+      `${headed.forms.length} form element(s), ${headed.controls.length} control(s)`
+  );
+  console.log(`rendered bytes: ${headed.renderedBytes} sha256 ${headed.renderedSha256.slice(0, 16)}`);
+  if (headed.title) console.log(`title: ${headed.title}`);
+  if (headed.accessBarriers.length) console.log(`accessBarriers: ${headed.accessBarriers.join(', ')}`);
+  if (headed.submissionProtection.length) console.log(`submissionProtection: ${headed.submissionProtection.join(', ')}`);
+  for (const c of headed.controls.slice(0, 30)) {
+    console.log(
+      `  control ${c.tag}${c.type ? `[${c.type}]` : ''}${c.name ? ` name=${c.name}` : ''}` +
+        `${c.id ? ` id=${c.id}` : ''}${c.maxlength ? ` maxlength=${c.maxlength}` : ''}` +
+        `${c.accessibleName ? `  <- ${JSON.stringify(c.accessibleName.slice(0, 60))}` : ''}`
+    );
+  }
+  if (stillBarred) {
+    console.log('');
+    console.log('Both modes were access-barred. This URL cannot be read by this instrument.');
+    console.log(`${record.id} is terminal: no judgement can rest on this page, and its render obligation is discharged as attrition.`);
+    die(`access-barred in both browser modes: ${headed.accessBarriers.join(', ')}`);
+  } else {
+    console.log('');
+    console.log(`Nothing is judged yet. Run \`classify-render --render ${headedRender.id} --category <c> --outcome <o>\`.`);
+  }
+  return { headedRender, record, stillBarred };
 }
 
 /**
