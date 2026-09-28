@@ -23,7 +23,7 @@ import {
 import {
   emptyLog, recordRobotsCheck, robotsCheckIsFresh, ROBOTS_MAX_AGE_MS, issueDiscoveryPermit,
   consumeDiscoveryPermit, appendAttempt, permitAudit, recordCandidates, lockCandidateSet,
-  recordDeviation, checkDeviations, corpusBlockers, checkCaptureFiles, quarantineCapture,
+  recordDeviation, checkDeviations, corpusBlockers, checkCaptureFiles, quarantineArtefact,
   PERMIT_TTL_MS, sha256, approveCandidateSet, exhaustAgency, agencyResolution, agencyResolutions,
   AGENCY_RESOLUTIONS, BOUNDED_COMPLETE_REASON, ATTRITION_REASON, reResolveExhaustion,
   renderBacklog, renderBacklogByUrl, renderPrerequisite, SUPERSEDED_COMPLETE_REASONS,
@@ -361,7 +361,7 @@ describe('a refusal after the markup is written leaves no orphan', () => {
     mkdirSync(captures, { recursive: true });
     writeFileSync(join(captures, 'p.html'), '<html>429 body</html>', 'utf8');
 
-    const moved = quarantineCapture(captures, 'p.html', { reason: 'HTTP 429; run stopped by policy' });
+    const moved = quarantineArtefact(captures, 'p.html', { reason: 'HTTP 429; run stopped by policy' });
     assert.ok(moved, 'the file was moved');
     assert.equal(existsSync(join(captures, 'p.html')), false, 'nothing is left in the captures directory');
     assert.equal(existsSync(moved), true, 'the evidence is preserved, not deleted');
@@ -383,7 +383,7 @@ describe('a refusal after the markup is written leaves no orphan', () => {
     const dir = mkdtempSync(join(tmpdir(), 'ff-q3-'));
     const captures = join(dir, 'captures');
     mkdirSync(captures, { recursive: true });
-    assert.equal(quarantineCapture(captures, 'nothing.html', { reason: 'x' }), null);
+    assert.equal(quarantineArtefact(captures, 'nothing.html', { reason: 'x' }), null);
   });
 });
 

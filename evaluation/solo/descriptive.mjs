@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -168,7 +168,7 @@ const FRAME_FILES = [
  * exhaustion records at all. A manifest that misnames its own protocol is worse than one that
  * omits it: a reader checking which rules a corpus was sealed under would be told the wrong ones.
  */
-export const SOLO_PROTOCOL_TAG = 'solo-protocol-v1.0.11';
+export const SOLO_PROTOCOL_TAG = 'solo-protocol-v1.0.12';
 
 /**
  * Two resolutions, mirrored from the capture package and checked equal by a test.
@@ -259,6 +259,22 @@ export function renderLedgerProblems(log, renderedDir) {
       problems.push(`${where}: ${basename(full)} does not match its recorded digest`);
     }
   };
+
+  // solo-protocol-v1.0.12: what ELSE is in the directory. Two renders wrote their bytes and failed to
+  // record, leaving files nothing named while both ledgers reported zero problems.
+  {
+    let present = null;
+    try { present = readdirSync(root).filter((f) => f.endsWith('.html')); } catch { present = null; }
+    if (present) {
+      const named = new Set([
+        ...renders.map((r) => r.renderFile),
+        ...(log.attempts ?? []).map((a) => a.renderFile),
+      ].filter(Boolean));
+      for (const file of present) {
+        if (!named.has(file)) problems.push(`${file} is in rendered/ but no render or record names it`);
+      }
+    }
+  }
 
   const seen = new Set();
   for (const render of renders) {

@@ -348,7 +348,13 @@ export function appendAttempt(log, attempt) {
     }
   }
 
-  const priorForUrl = log.attempts.filter(
+  // selection-v1.0.31. Only a CANDIDATE assessment is blocked by a prior candidate assessment. This
+  // rule refuses a second judgement on one page, and a discovery record is not a judgement on a page
+  // - so it was refusing exactly the two pages the corpus rests on: `www.tkm.govt.nz/contact/` and
+  // `www.health.govt.nz/about-this-site/feedback` both have approved captures, and both were skipped
+  // by the retrospective render pass because of this branch. The pages most worth re-examining were
+  // the only two that could not be.
+  const priorForUrl = attempt.status === 'discovery' ? [] : log.attempts.filter(
     (a) => a.status !== 'discovery' && a.agency === attempt.agency && a.url === attempt.url
   );
   // capture-v1.0.3: supersede by attempt id, not by URL. Superseding by URL was
@@ -1738,6 +1744,17 @@ export const PERMIT_DISPOSITIONS = Object.freeze({
   UNUSED: 'unused',
   /** A navigation occurred, but duplicated an inspection already recorded under another permit. */
   DUPLICATE_REQUEST: 'duplicate-request',
+  /**
+   * The request was made and the record of it could not be written.
+   *
+   * selection-v1.0.31. Two renders retrieved their page and then failed inside `appendAttempt`, so
+   * the log was never written: the permit stayed open, the bytes stayed on disk, and the request had
+   * unarguably happened. `unused` would assert no request was made and `duplicate-request` would
+   * assert another record accounts for it; both are false. This says what occurred - real
+   * authorised traffic that produced no observation - and names the quarantined bytes as its
+   * evidence.
+   */
+  RECORDING_FAILED: 'recording-failed-after-request',
 });
 
 /**
@@ -1748,7 +1765,7 @@ export const PERMIT_DISPOSITIONS = Object.freeze({
  * assert that no request occurred - the opposite of the truth. The two dispositions say which
  * it was, and `duplicate-request` must name the inspection that accounts for the traffic.
  */
-export function closeDiscoveryPermit(log, { permitId, disposition, reason, accountedBy = null }) {
+export function closeDiscoveryPermit(log, { permitId, disposition, reason, accountedBy = null, quarantinedFile = null, navigationWindow = null }) {
   const permit = (log.discoveryPermits ?? []).find((p) => p.id === permitId);
   if (!permit) throw new Error(`permit ${permitId} does not exist`);
   if (permit.consumedAt) {
@@ -1780,13 +1797,27 @@ export function closeDiscoveryPermit(log, { permitId, disposition, reason, accou
         );
       }
     }
+  } else if (disposition === PERMIT_DISPOSITIONS.RECORDING_FAILED) {
+    if (accountedBy) {
+      throw new Error(`a ${disposition} closure names no discovery record: the record is what failed to be written`);
+    }
+    if (typeof quarantinedFile !== 'string' || quarantinedFile.trim() === '') {
+      throw new Error(`a ${disposition} closure must name the quarantined bytes the request produced`);
+    }
   } else if (accountedBy) {
     throw new Error('an unused closure names no discovery record: nothing was requested under it');
   }
 
   const closedAt = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
   const closureId = `x-${String((log.discoveryPermits ?? []).filter((p) => p.closedAt).length + 1).padStart(4, '0')}`;
-  Object.assign(permit, { closedAt, disposition, closureReason: reason, accountedBy, closureId });
+  Object.assign(permit, {
+    closedAt, disposition, closureReason: reason, accountedBy, closureId,
+    ...(quarantinedFile ? { quarantinedFile } : {}),
+    // selection-v1.0.31: a WINDOW, not an invented instant. The exact navigation time was lost with
+    // the record that failed to be written; what is known is that the request fell between the
+    // permit's issuance and the moment its bytes were written to disk. Both ends are observations.
+    ...(navigationWindow ? { navigationWindow } : {}),
+  });
 
   // Validated after assignment so the ledger is checked in the state it would be left in, and
   // rolled back entirely if it does not hold.
@@ -1834,13 +1865,16 @@ export function permitAudit(log) {
     recordedLate: lateRecorded.length,
     lateRecords: lateRecorded,
     closedUnused: closed.filter((p) => p.disposition === PERMIT_DISPOSITIONS.UNUSED).length,
+    closedRecordingFailed: closed.filter((p) => p.disposition === PERMIT_DISPOSITIONS.RECORDING_FAILED).length,
     closedDuplicateRequest: closed.filter((p) => p.disposition === PERMIT_DISPOSITIONS.DUPLICATE_REQUEST).length,
     open: openDiscoveryPermits(log).length,
     // A duplicate-request permit covered a real request, so it counts as traffic. It produced no
     // additional inspection, candidate, page or observation, and is counted nowhere else.
+    // A recording-failed permit covered a real request too, and produced no observation.
     networkRequestsAuthorised:
       permits.filter((p) => p.consumedAt).length +
-      closed.filter((p) => p.disposition === PERMIT_DISPOSITIONS.DUPLICATE_REQUEST).length,
+      closed.filter((p) => p.disposition === PERMIT_DISPOSITIONS.DUPLICATE_REQUEST).length +
+      closed.filter((p) => p.disposition === PERMIT_DISPOSITIONS.RECORDING_FAILED).length,
     closures: closed.map((p) => ({
       closureId: p.closureId, permitId: p.id, closedAt: p.closedAt,
       disposition: p.disposition, reason: p.closureReason, accountedBy: p.accountedBy ?? null,
@@ -2185,6 +2219,16 @@ export function checkPermitLedger(log) {
         if (permit.disposition === PERMIT_DISPOSITIONS.DUPLICATE_REQUEST && !present(permit.accountedBy)) {
           problems.push(`${where} is closed duplicate-request but names no discovery record`);
         }
+        // selection-v1.0.31: the bytes the failed request produced are named, so the traffic has
+        // evidence rather than only an assertion that it happened.
+        if (permit.disposition === PERMIT_DISPOSITIONS.RECORDING_FAILED) {
+          if (present(permit.accountedBy)) {
+            problems.push(`${where} is closed ${permit.disposition} but names a discovery record; none exists`);
+          }
+          if (typeof permit.quarantinedFile !== 'string' || permit.quarantinedFile.trim() === '') {
+            problems.push(`${where} is closed ${permit.disposition} without naming the quarantined bytes`);
+          }
+        }
       }
 
       const issued = stamp(permit.issuedAt, 'issuedAt', where);
@@ -2299,6 +2343,9 @@ export function checkPermitLedger(log) {
     }
     if (permit.disposition === PERMIT_DISPOSITIONS.UNUSED && permit.accountedBy) {
       problems.push(`${permit.id} is closed unused but names ${permit.accountedBy}`);
+    }
+    if (permit.disposition === PERMIT_DISPOSITIONS.RECORDING_FAILED && permit.accountedBy) {
+      problems.push(`${permit.id} is closed ${permit.disposition} but names ${permit.accountedBy}`);
     }
     if (permit.disposition !== PERMIT_DISPOSITIONS.DUPLICATE_REQUEST) continue;
 
@@ -2535,6 +2582,29 @@ export function checkRenderLedger(log, renderedDir) {
       );
     }
   };
+
+  // selection-v1.0.31. What ELSE is in the directory. `captures/` has had this check since
+  // capture-v1.0.6; `rendered/` never got one, and it is now load-bearing for discovery. Two renders
+  // wrote their bytes and then failed to record - `appendAttempt` threw and `writeLog` never ran - so
+  // two files sat there that no record named, and both ledgers reported zero problems.
+  {
+    let present = null;
+    try { present = readdirSync(root).filter((f) => f.endsWith('.html')); } catch { present = null; }
+    if (present) {
+      const named = new Set([
+        ...(log.renders ?? []).map((r) => r.renderFile),
+        ...log.attempts.map((a) => a.renderFile),
+      ].filter(Boolean));
+      for (const file of present) {
+        if (!named.has(file)) {
+          problems.push(
+            `${file} is in ${RENDERED_DIR}/ but no render or record names it. Rendered bytes nothing ` +
+              'accounts for must be quarantined, not left beside the evidence.'
+          );
+        }
+      }
+    }
+  }
 
   // The registry itself.
   const seen = new Set();
@@ -3298,7 +3368,7 @@ export function checkCaptureFiles(log, capturesDir) {
 }
 
 /**
- * Moves a capture file out of the captures directory, preserving it.
+ * Moves an artefact out of its directory, preserving it. Used for captures and for renders.
  *
  * capture-v1.0.7. The harness wrote the markup as soon as the page was readable, and every
  * refusal AFTER that point left the file behind with no attempt owning it. HTTP 429 was the clear
@@ -3310,10 +3380,10 @@ export function checkCaptureFiles(log, capturesDir) {
  * evidence of what the server returned, and destroying it to tidy the directory would destroy the
  * record of the refusal along with it.
  */
-export function quarantineCapture(capturesDir, file, { reason }) {
-  const from = join(resolve(capturesDir), file);
+export function quarantineArtefact(fromDir, file, { reason }) {
+  const from = join(resolve(fromDir), file);
   if (!existsSync(from)) return null;
-  const dir = join(resolve(capturesDir), '..', 'quarantine');
+  const dir = join(resolve(fromDir), '..', 'quarantine');
   mkdirSync(dir, { recursive: true });
   const stamp = new Date().toISOString().replace(/[:.]/g, '-').replace(/-\d{3}Z$/, 'Z');
   const to = join(dir, `${stamp}-${file}`);

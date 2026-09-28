@@ -33,7 +33,7 @@ import {
   issueDiscoveryPermit, consumeDiscoveryPermit, findOpenPermit,
   unresolvedDiscoveryRounds, openDiscoveryPermits, robotsCheckIsFresh, isDiscoverySuperseded,
   reopenCandidateSet, closeDiscoveryPermit, permitAudit, PERMIT_DISPOSITIONS, corpusBlockers,
-  quarantineCapture, recordDeviation, agencyResolutions, agencyResolution, reResolveExhaustion,
+  quarantineArtefact, recordDeviation, agencyResolutions, agencyResolution, reResolveExhaustion,
   renderBacklog, renderBacklogByUrl, renderPrerequisite, recordRender, findRender,
   findRenderForUrl, assertRenderEvidenceUsable, assertPermitUsable, adoptRender,
   reResolveCandidateSet, staleSetBindings,
@@ -335,7 +335,7 @@ async function doCapture() {
     const reason =
       `HTTP 429 for ${url} at ${record.capturedAt ?? now()}. The run stops here by policy, so this ` +
       'markup was never adopted as a capture. Preserved as evidence of the response.';
-    const moved = record.file ? quarantineCapture(capturesDir, record.file, { reason }) : null;
+    const moved = record.file ? quarantineArtefact(capturesDir, record.file, { reason }) : null;
     appendAttempt(log, {
       ...base, status: 'failed', category, finalUrl: record.finalUrl,
       exclusionReason:
@@ -407,7 +407,7 @@ async function doCapture() {
     // validation failure used to leave an unowned capture in the directory, which then blocked
     // every later build with a complaint about an orphan whose origin nothing recorded.
     const moved = record.file
-      ? quarantineCapture(capturesDir, record.file, { reason: `not adopted: ${error.message}` })
+      ? quarantineArtefact(capturesDir, record.file, { reason: `not adopted: ${error.message}` })
       : null;
     if (moved) console.error(`quarantined ${record.file} -> ${moved}`);
     throw error;
@@ -1028,6 +1028,21 @@ async function doRenderDiscovery() {
     return;
   }
 
+  // selection-v1.0.31. Everything after the bytes are written runs inside one guard. Two renders
+  // retrieved their page and then threw inside `appendAttempt`, so `writeLog` never ran: the permit
+  // stayed open and the bytes stayed in `rendered/` with nothing naming them. A failure after the
+  // write must take the bytes with it, exactly as the capture path does.
+  try {
+    recordRenderedObservation();
+  } catch (error) {
+    const moved = rendered.renderFile
+      ? quarantineArtefact(renderedDir, rendered.renderFile, { reason: `not recorded: ${error.message}` })
+      : null;
+    if (moved) console.error(`quarantined ${rendered.renderFile} -> ${moved}`);
+    throw error;
+  }
+
+  function recordRenderedObservation() {
   const permit = consumeDiscoveryPermit(log, {
     agency, category, candidateSetVersion: setVersion, url,
     navigatedAt: rendered.navigatedAt, permitId,
@@ -1103,6 +1118,7 @@ async function doRenderDiscovery() {
   if (rendered.links.length > 40) console.log(`  ... and ${rendered.links.length - 40} more link(s)`);
   console.log('');
   console.log(`Nothing is judged yet. Run \`classify-render --render ${render.id} --category <c> --outcome <o>\`.`);
+  }
 }
 
 /**
@@ -1375,10 +1391,18 @@ function doClosePermit() {
     disposition: require_('disposition'),
     reason: require_('reason'),
     accountedBy: flag('accounted-by'),
+    quarantinedFile: flag('quarantined-file'),
+    navigationWindow: flag('window-earliest') && flag('window-latest')
+      ? { earliest: flag('window-earliest'), latest: flag('window-latest'), note: flag('window-note') ?? null }
+      : null,
   });
   writeLog(logPath, log);
   console.log(`closed ${permit.id} as ${permit.disposition} (${permit.closureId})`);
   if (permit.accountedBy) console.log(`accounted by ${permit.accountedBy}`);
+  if (permit.quarantinedFile) console.log(`quarantined bytes: ${permit.quarantinedFile}`);
+  if (permit.navigationWindow) {
+    console.log(`navigation window: ${permit.navigationWindow.earliest} .. ${permit.navigationWindow.latest}`);
+  }
 }
 
 const commands = { packet: doPacket, candidates: doCandidates, lock: doLock, 'approve-set': doApproveSet,

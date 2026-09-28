@@ -25,7 +25,8 @@ import { capturePage } from '../capture.mjs';
 import { MAX_REDIRECT_HOPS } from '../redirect-guard.mjs';
 import {
   emptyLog, recordRobotsCheck, renderBacklog, appendAttempt, sha256, checkRenderLedger,
-  renderRefusalProblems,
+  renderRefusalProblems, quarantineArtefact, closeDiscoveryPermit, issueDiscoveryPermit,
+  permitAudit, checkPermitLedger, ELIGIBILITY_CRITERIA,
 } from '../run.mjs';
 import { evaluatePolicy } from '../robots-policy.mjs';
 
@@ -522,5 +523,155 @@ describe('a retrospective render can be authorised for a closed round', () => {
       '--method', 'navigation']);
     assert.notEqual(wrong.status, 0);
     assert.match(wrong.stderr, /is version 2, not 1/);
+  });
+});
+
+describe('the corpus’s own pages can be re-examined', () => {
+  test('a discovery record may coexist with a candidate assessment for the same URL', () => {
+    // selection-v1.0.31. This branch refuses a second JUDGEMENT on one page, and a discovery record
+    // is not a judgement on a page - so it was refusing exactly the two URLs the corpus rests on.
+    const log = emptyLog();
+    log.attempts.push({
+      id: 'c-0001', agency: 'A', category: 'enquiry-or-contact', status: 'captured',
+      approval: 'approved', url: 'https://a.govt.nz/contact', finalUrl: 'https://a.govt.nz/contact',
+      pageId: 'page-1', file: 'page-1.html', htmlSha256: sha256('x'),
+      inclusionEvidence: 'has a name field', capturedAt: '2026-09-25T00:00:00Z',
+    });
+    assert.doesNotThrow(() => appendAttempt(log, {
+      examinedAt: '2026-09-28T01:00:00Z', agency: 'A', website: 'https://a.govt.nz/',
+      url: 'https://a.govt.nz/contact', status: 'discovery', discoveryKind: 'navigation',
+      outcome: 'no-candidates', category: 'enquiry-or-contact', candidateSetVersion: 1,
+      navigatedAt: '2026-09-28T01:00:00Z', approval: 'approved',
+    }));
+  });
+
+  test('but a second CANDIDATE assessment of the same URL is still refused', () => {
+    const log = emptyLog();
+    log.attempts.push({
+      id: 'c-0001', agency: 'A', category: 'enquiry-or-contact', status: 'captured',
+      approval: 'approved', url: 'https://a.govt.nz/contact', finalUrl: 'https://a.govt.nz/contact',
+      pageId: 'page-1', file: 'page-1.html', htmlSha256: sha256('x'),
+      inclusionEvidence: 'has a name field', capturedAt: '2026-09-25T00:00:00Z',
+    });
+    assert.throws(() => appendAttempt(log, {
+      examinedAt: '2026-09-28T01:00:00Z', agency: 'A', website: 'https://a.govt.nz/',
+      url: 'https://a.govt.nz/contact', status: 'excluded', category: 'enquiry-or-contact',
+      exclusionReason: 'a second judgement on one page', capturedAt: '2026-09-28T01:00:00Z',
+      eligibility: Object.fromEntries(ELIGIBILITY_CRITERIA.map((c) => [c, null])),
+    }), /is already recorded for A/);
+  });
+});
+
+describe('rendered bytes nothing accounts for', () => {
+  const setup = () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ff-orph-'));
+    const renderedDir = join(dir, 'rendered');
+    mkdirSync(renderedDir, { recursive: true });
+    return { dir, renderedDir };
+  };
+
+  test('an unnamed file in rendered/ is reported', () => {
+    const { renderedDir } = setup();
+    writeFileSync(join(renderedDir, 'stray.html'), '<html></html>');
+    const problems = checkRenderLedger(emptyLog(), renderedDir);
+    assert.equal(problems.length, 1);
+    assert.match(problems[0], /is in rendered\/ but no render or record names it/);
+  });
+
+  test('a file the log names is not an orphan', () => {
+    const { renderedDir } = setup();
+    const html = '<html><body><input id="q7"></body></html>';
+    writeFileSync(join(renderedDir, 'g1.html'), html);
+    const log = emptyLog();
+    log.discoveryPermits = [{
+      id: 'p-0001', agency: 'A', category: 'service-application', candidateSetVersion: 1,
+      url: 'https://a.govt.nz/apply', robotsCheckId: 'r-0001',
+      issuedAt: '2026-09-27T09:00:00Z', consumedAt: '2026-09-27T09:00:30Z',
+    }];
+    log.renders = [{
+      id: 'g-0001', url: 'https://a.govt.nz/apply', navigatedAt: '2026-09-27T09:00:10Z',
+      permitId: 'p-0001', renderFile: 'g1.html', renderedSha256: sha256(html),
+      renderedBytes: Buffer.byteLength(html), adoptedFrom: 'd-0001', accessBarriers: [],
+    }];
+    assert.deepEqual(checkRenderLedger(log, renderedDir), []);
+  });
+
+  test('quarantine moves the bytes out and records why', () => {
+    const { dir, renderedDir } = setup();
+    writeFileSync(join(renderedDir, 'stray.html'), '<html>bytes</html>');
+    const moved = quarantineArtefact(renderedDir, 'stray.html', { reason: 'not recorded: appendAttempt refused it' });
+    assert.ok(moved);
+    assert.equal(existsSync(join(renderedDir, 'stray.html')), false);
+    assert.equal(existsSync(moved), true, 'the evidence is preserved, not deleted');
+    assert.match(readFileSync(`${moved}.reason.txt`, 'utf8'), /appendAttempt refused it/);
+    assert.deepEqual(checkRenderLedger(emptyLog(), renderedDir), [], 'and the directory is clean again');
+  });
+});
+
+describe('a request whose record could not be written', () => {
+  const build = () => {
+    const log = emptyLog();
+    recordRobotsCheck(log, {
+      origin: 'https://a.govt.nz', url: 'https://a.govt.nz/robots.txt',
+      fetchedAt: new Date(Date.now() - 60_000).toISOString().replace(/\.\d{3}Z$/, 'Z'),
+      httpStatus: 200, disposition: 'rules', sha256: sha256(''), bytes: 0, body: '',
+    });
+    issueDiscoveryPermit(log, {
+      agency: 'A', category: 'service-application', candidateSetVersion: 1,
+      url: 'https://a.govt.nz/apply', robotsCheckId: 'r-0001',
+    });
+    return log;
+  };
+
+  test('it closes as recording-failed-after-request, naming the quarantined bytes', () => {
+    const log = build();
+    const closed = closeDiscoveryPermit(log, {
+      permitId: 'p-0001', disposition: 'recording-failed-after-request',
+      reason: 'the request was made and appendAttempt refused the observation',
+      quarantinedFile: 'quarantine/2026-09-28T01-45-42Z-g1.html',
+      navigationWindow: { earliest: '2026-09-28T01:12:38Z', latest: '2026-09-28T01:12:55Z' },
+    });
+    assert.equal(closed.disposition, 'recording-failed-after-request');
+    assert.equal(closed.quarantinedFile, 'quarantine/2026-09-28T01-45-42Z-g1.html');
+    assert.equal(closed.navigationWindow.earliest, '2026-09-28T01:12:38Z');
+    assert.equal(closed.accountedBy, null);
+    assert.deepEqual(checkPermitLedger(log), []);
+  });
+
+  test('it must name the quarantined bytes, and may not name a record', () => {
+    assert.throws(() => closeDiscoveryPermit(build(), {
+      permitId: 'p-0001', disposition: 'recording-failed-after-request', reason: 'x',
+    }), /must name the quarantined bytes/);
+    assert.throws(() => closeDiscoveryPermit(build(), {
+      permitId: 'p-0001', disposition: 'recording-failed-after-request', reason: 'x',
+      quarantinedFile: 'q/x.html', accountedBy: 'd-0001',
+    }), /names no discovery record/);
+  });
+
+  test('it counts as authorised traffic, and as no observation', () => {
+    const log = build();
+    closeDiscoveryPermit(log, {
+      permitId: 'p-0001', disposition: 'recording-failed-after-request', reason: 'x',
+      quarantinedFile: 'q/x.html',
+    });
+    const audit = permitAudit(log);
+    assert.equal(audit.closedRecordingFailed, 1);
+    assert.equal(audit.networkRequestsAuthorised, 1, 'the request happened');
+    assert.equal(audit.consumed, 0, 'and produced no observation');
+    assert.equal(audit.open, 0);
+  });
+
+  test('a navigation window is recorded rather than an invented instant', () => {
+    // The exact navigation time was lost with the record that failed to be written. Both ends of
+    // the window are observations: the permit's issuance and the moment the bytes hit the disk.
+    const log = build();
+    const closed = closeDiscoveryPermit(log, {
+      permitId: 'p-0001', disposition: 'recording-failed-after-request', reason: 'x',
+      quarantinedFile: 'q/x.html',
+      navigationWindow: { earliest: '2026-09-28T01:12:38Z', latest: '2026-09-28T01:12:55Z', note: 'issuance to write' },
+    });
+    assert.equal(closed.navigatedAt, undefined, 'no instant is invented');
+    assert.ok(closed.navigationWindow.earliest < closed.navigationWindow.latest);
+    assert.match(closed.navigationWindow.note, /issuance to write/);
   });
 });

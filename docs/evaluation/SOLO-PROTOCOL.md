@@ -2949,3 +2949,74 @@ cases bring that table to **51**, of which 45 are refusals.
 Still nothing rendered or captured. The backlog stands at **66 records across 57 URLs on 12 origins**.
 The twelve policies were fetched on 27 September and must be re-checked where they have crossed the
 24-hour boundary before the render pass begins.
+
+## Amendment 34: the two pages the corpus rests on were the two it could not re-examine
+
+**Dated 28 September 2026.** `selection-v1.0.31`, `capture-v1.0.10` and `solo-protocol-v1.0.12`.
+Moves no earlier tag.
+
+The retrospective render pass ran: **56 URLs attempted, 54 recorded, 0 redirect refusals.** With the
+pilot that is 55 observations across 56 registered renders. Exactly one render's final URL differed
+from what was requested, and not by a redirect — `?q=whakapā` → `?q=whakap%C4%81`, percent-encoding
+normalisation. So no page in the backlog redirected anywhere, and the Amendment 32 guard never had to
+refuse. That is only knowable now.
+
+The twelve policies had 7½ hours of freshness left and were reused from cache throughout: **zero extra
+robots requests** for a twenty-minute pass.
+
+### Two URLs were refused, and they were the only two that matter
+
+`www.tkm.govt.nz/contact/` and `www.health.govt.nz/about-this-site/feedback` — the approved captures
+`c-0070` and `c-0292`, which are the entire corpus. `appendAttempt` refuses a discovery record for a
+URL that already carries a candidate assessment.
+
+That branch exists to refuse a second **judgement** on one page. A discovery record is not a judgement
+on a page, so the rule was reaching further than its reason — and it reached exactly the two pages
+whose evidence most needed re-examining, because they are the two the selection actually uses. Only a
+candidate assessment is now blocked by a prior candidate assessment.
+
+### Both failures left bytes nothing accounted for
+
+The render retrieved its page and wrote the bytes; `appendAttempt` then threw, so `writeLog` never
+ran. The permit stayed open, the file stayed in `rendered/`, and **both ledgers reported zero
+problems**: `checkRenderLedger` validated the files the log named and never asked what else was in the
+directory. `captures/` has had that check since `capture-v1.0.6`.
+
+So `rendered/` gets the same orphan check, mirrored in the sealer, and every step after the bytes are
+written now runs inside one guard that quarantines them on failure — as the capture path does.
+
+### Accounting for the two requests
+
+The requests happened. `unused` would assert none was made and `duplicate-request` would assert
+another record accounts for one; both are false. A third closure disposition,
+**`recording-failed-after-request`**, says what occurred: real authorised traffic that produced no
+observation. It must name the quarantined bytes, may not name a discovery record, and counts in
+`networkRequestsAuthorised` while counting as no observation.
+
+**The exact navigation time is not reconstructed.** It was lost with the record that failed to be
+written. What is known is a **window** — the permit's issuance to the moment the bytes reached the
+disk — and both ends are observations, so the window is recorded and no instant is invented.
+
+| permit | page | window | quarantined |
+| --- | --- | --- | --- |
+| `p-0106` | `www.tkm.govt.nz/contact/` | 01:12:38Z – 01:12:55Z | 18,410 bytes, `5bafc32f…`, "TKM \| Contact Us" |
+| `p-0143` | `www.health.govt.nz/about-this-site/feedback` | 01:21:02Z – 01:21:05Z | 28,754 bytes, `de02dbdd…`, "Just a moment…" |
+
+**The bytes are preserved and deliberately not adopted as evidence.** The orphan HTML holds the markup
+and nothing else: the failed write lost the HTTP status, the load state, the final URL, the browser
+identity, the blocking classification and the navigation time. Reconstructing those would make the
+corpus's two selected pages rest on inferred evidence, so the pages are re-rendered cleanly instead —
+two further requests, which is a small price for complete, tagged evidence on the only two pages the
+corpus uses.
+
+### And the second orphan is not the page
+
+`p-0143`'s 28,754 bytes are titled **"Just a moment…"** — a Cloudflare interstitial, the same barrier
+headless Chromium met at `c-0291` and the reason Amendment 25 added a headed fallback to the capture
+path. `renderDiscoveryPage` has no such fallback, so a clean headless re-render of that page will be
+access-barred too. That is recorded here as a finding and is **not** resolved by this amendment.
+
+### What this does not establish
+
+No judgement has been recorded. The backlog stands at **66 records across 57 URLs**; zero open permits,
+zero ledger problems, zero unaccounted files in `rendered/`, and the first 54 observations untouched.
