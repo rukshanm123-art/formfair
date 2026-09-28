@@ -266,15 +266,24 @@ export function appendAttempt(log, attempt) {
     // round, by design - two browser modes of one attempt to read it. It is permitted only when it
     // says so, by naming the barred observation it follows; an unlinked second observation is still
     // refused, because that would be the same page requested twice for no stated reason.
+    const inSameRound = (id) => log.attempts.some(
+      (a) => a.id === id && a.status === 'discovery' &&
+        a.agency === attempt.agency && a.category === attempt.category &&
+        a.candidateSetVersion === attempt.candidateSetVersion &&
+        canonicalise(a.url) === canonicalise(attempt.url)
+    );
     const isLinkedFallback = attempt.recordType === RECORD_TYPES.OBSERVATION &&
-      typeof attempt.followsDiscoveryId === 'string' &&
-      log.attempts.some(
-        (a) => a.id === attempt.followsDiscoveryId && a.status === 'discovery' &&
-          a.agency === attempt.agency && a.category === attempt.category &&
-          a.candidateSetVersion === attempt.candidateSetVersion &&
-          canonicalise(a.url) === canonicalise(attempt.url)
-      );
-    if (sameRound && !attempt.supersedesDiscoveryId && !isLinkedFallback) {
+      typeof attempt.followsDiscoveryId === 'string' && inSameRound(attempt.followsDiscoveryId);
+    // selection-v1.0.34. A rendered judgement ANSWERING the plain-retrieval record for the same page
+    // and round is the second legitimate case, and it is the whole retrospective backlog: all
+    // sixty-six obligations are a plain-fetch record and the rendered judgement that answers it. The
+    // alternative was to supersede each one, which would withdraw sixty-six records that are not
+    // wrong - each was true of the method it used - and would drop the `answersDiscoveryId` link the
+    // protocol asks a judgement to carry. `answersDiscoveryId` is already validated above for agency,
+    // category, round, page and rendered evidence, so naming it is not a way round the rule.
+    const isAnsweringJudgement = attempt.recordType === RECORD_TYPES.JUDGEMENT_ONLY &&
+      typeof attempt.answersDiscoveryId === 'string' && inSameRound(attempt.answersDiscoveryId);
+    if (sameRound && !attempt.supersedesDiscoveryId && !isLinkedFallback && !isAnsweringJudgement) {
       throw new Error(
         `${attempt.url} is already recorded for ${attempt.agency} / ${attempt.category} ` +
           `round ${attempt.candidateSetVersion}. If that record is wrong, correct it with ` +

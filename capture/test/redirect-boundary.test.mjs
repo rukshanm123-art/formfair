@@ -913,3 +913,89 @@ describe('the rendered discovery path has the same headed fallback as capture', 
     assert.ok(!/renderBarred/.test(branch), 'a launch failure must set no terminal flag');
   });
 });
+
+describe('a rendered judgement may answer the plain record it upgrades', () => {
+  test('a judgement naming answersDiscoveryId coexists with the record it answers', () => {
+    // selection-v1.0.34. Every one of the sixty-six retrospective obligations is a plain-fetch record
+    // and the rendered judgement that answers it, in the same round - which the duplicate rule
+    // refused. Superseding each instead would withdraw sixty-six records that are not wrong (each was
+    // true of the method it used) and would drop the `answersDiscoveryId` link a judgement carries.
+    const dir = mkdtempSync(join(tmpdir(), 'ff-ans-'));
+    mkdirSync(join(dir, 'rendered'), { recursive: true });
+    const html = '<html><body><input id="q7" type="text"></body></html>';
+    writeFileSync(join(dir, 'rendered', 'g1.html'), html);
+    const iso = (ms) => new Date(ms).toISOString().replace(/\.\d{3}Z$/, 'Z');
+    const t = Date.now();
+    const log = emptyLog();
+    recordRobotsCheck(log, {
+      origin: 'https://a.govt.nz', url: 'https://a.govt.nz/robots.txt', fetchedAt: iso(t - 90 * 60_000),
+      httpStatus: 200, disposition: 'rules', sha256: sha256(''), bytes: 0, body: '',
+    });
+    appendAttempt(log, {
+      examinedAt: iso(t - 3 * 24 * 3600_000), agency: 'A', website: 'https://a.govt.nz/',
+      url: 'https://a.govt.nz/apply', status: 'discovery', discoveryKind: 'navigation',
+      outcome: 'no-candidates', category: 'service-application', candidateSetVersion: 1,
+      navigatedAt: iso(t - 3 * 24 * 3600_000), approval: 'approved',
+    });
+    const plain = log.attempts.at(-1);
+    log.discoveryPermits = [{
+      id: 'p-0001', agency: 'A', category: 'service-application', candidateSetVersion: 1,
+      url: 'https://a.govt.nz/apply', robotsCheckId: 'r-0001',
+      issuedAt: iso(t - 80 * 60_000), consumedAt: iso(t - 80 * 60_000 + 20_000),
+    }];
+    log.renders = [{
+      id: 'g-0001', url: 'https://a.govt.nz/apply', navigatedAt: iso(t - 80 * 60_000 + 10_000),
+      permitId: 'p-0001', renderFile: 'g1.html', renderedSha256: sha256(html),
+      renderedBytes: Buffer.byteLength(html), accessBarriers: [], browserMode: 'headless',
+    }];
+    appendAttempt(log, {
+      recordType: 'observation', permitId: 'p-0001', renderId: 'g-0001',
+      examinedAt: iso(t - 80 * 60_000 + 10_000), agency: 'A', website: 'https://a.govt.nz/',
+      url: 'https://a.govt.nz/apply', status: 'discovery', discoveryKind: 'navigation',
+      outcome: 'rendered', category: 'service-application', candidateSetVersion: 1,
+      navigatedAt: iso(t - 80 * 60_000 + 10_000), approval: 'approved', evidence: 'rendered-dom',
+      renderFile: 'g1.html', renderedSha256: sha256(html), renderedBytes: Buffer.byteLength(html),
+    });
+    const observation = log.attempts.at(-1);
+    log.candidateSets['A\u0000service-application'] = {
+      agency: 'A', category: 'service-application', version: 1, discovered: [], locked: [],
+      lockedAt: iso(t - 2 * 24 * 3600_000), approval: 'approved', candidateDeclaration: 'none',
+      discoveryRecordIds: [plain.id],
+    };
+    assert.ok(renderBacklog(log).some((a) => a.id === plain.id));
+
+    assert.doesNotThrow(() => appendAttempt(log, {
+      recordType: 'judgement-only', renderId: 'g-0001', evidenceFromDiscoveryId: observation.id,
+      answersDiscoveryId: plain.id,
+      examinedAt: iso(t), agency: 'A', website: 'https://a.govt.nz/',
+      url: 'https://a.govt.nz/apply', status: 'discovery', discoveryKind: 'navigation',
+      outcome: 'no-candidates', category: 'service-application', candidateSetVersion: 1,
+      navigationPerformed: false, checkedAt: iso(t), evidence: 'rendered-dom',
+      renderFile: 'g1.html', renderedSha256: sha256(html), renderedBytes: Buffer.byteLength(html),
+      approval: 'approved',
+    }));
+    assert.deepEqual(renderBacklog(log), [], 'and it answers the obligation');
+    assert.equal(plain.outcome, 'no-candidates', 'the record it answers is preserved unchanged');
+    assert.deepEqual(checkRenderLedger(log, join(dir, 'rendered')), []);
+    assert.deepEqual(checkPermitLedger(log), []);
+  });
+
+  test('a judgement for a DIFFERENT round still cannot slip past the duplicate rule', () => {
+    const log = emptyLog();
+    appendAttempt(log, {
+      examinedAt: '2026-09-20T00:00:00Z', agency: 'A', website: 'https://a.govt.nz/',
+      url: 'https://a.govt.nz/apply', status: 'discovery', discoveryKind: 'navigation',
+      outcome: 'no-candidates', category: 'service-application', candidateSetVersion: 1,
+      navigatedAt: '2026-09-20T00:00:00Z', approval: 'approved',
+    });
+    const plain = log.attempts.at(-1);
+    assert.throws(() => appendAttempt(log, {
+      recordType: 'judgement-only', renderId: 'g-0001', evidenceFromDiscoveryId: 'd-0001',
+      answersDiscoveryId: plain.id,
+      examinedAt: '2026-09-28T00:00:00Z', agency: 'A', website: 'https://a.govt.nz/',
+      url: 'https://a.govt.nz/apply', status: 'discovery', discoveryKind: 'navigation',
+      outcome: 'no-candidates', category: 'service-application', candidateSetVersion: 2,
+      navigationPerformed: false, checkedAt: '2026-09-28T00:00:00Z', approval: 'approved',
+    }), /a judgement answers a record in its own round/);
+  });
+});
