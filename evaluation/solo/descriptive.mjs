@@ -168,7 +168,7 @@ const FRAME_FILES = [
  * exhaustion records at all. A manifest that misnames its own protocol is worse than one that
  * omits it: a reader checking which rules a corpus was sealed under would be told the wrong ones.
  */
-export const SOLO_PROTOCOL_TAG = 'solo-protocol-v1.0.8';
+export const SOLO_PROTOCOL_TAG = 'solo-protocol-v1.0.11';
 
 /**
  * Two resolutions, mirrored from the capture package and checked equal by a test.
@@ -394,6 +394,56 @@ export function renderLedgerProblems(log, renderedDir) {
         if (canon(target.url) !== canon(a.url)) problems.push(`${where}, which is a different page`);
       }
     }
+    // solo-protocol-v1.0.11: the flag that discharges a backlog obligation. Adding
+    // `renderRefused: true` to an ordinary record removed it from the backlog with both ledgers
+    // reporting nothing. A boolean that discharges an obligation must carry the evidence that the
+    // obligation was discharged.
+    if (a.renderRefused !== undefined) {
+      const where = a.id ?? '(an unidentified record)';
+      if (a.renderRefused !== true) {
+        problems.push(`${where} has a renderRefused that is neither true nor absent`);
+      } else {
+        const chain = a.redirectChain;
+        if (!Array.isArray(chain) || chain.length === 0) {
+          problems.push(`${where} claims renderRefused with no redirect chain`);
+        }
+        if (a.navigationPerformed === false) {
+          problems.push(`${where} claims renderRefused but records that no navigation occurred`);
+        }
+        if (!isoUtc(a.navigatedAt)) problems.push(`${where} claims renderRefused with no navigation timestamp`);
+        if (!a.permitId) problems.push(`${where} claims renderRefused with no permit`);
+        else {
+          const permit = permits.find((p) => p.id === a.permitId);
+          if (!permit) problems.push(`${where} names permit ${a.permitId}, which does not exist`);
+          else {
+            if (!permit.consumedAt) problems.push(`${where} names an unconsumed permit`);
+            for (const field of ['agency', 'category', 'candidateSetVersion']) {
+              if (permit[field] !== a[field]) problems.push(`${where} names a permit covering a different ${field}`);
+            }
+            if (permit.url !== a.url) problems.push(`${where} names a permit for a different URL`);
+          }
+        }
+        if (Array.isArray(chain) && chain.length > 0) {
+          if (canon(chain[0].from ?? '') !== canon(a.url)) {
+            problems.push(`${where}'s chain does not start at its own URL`);
+          }
+          for (let i = 1; i < chain.length; i++) {
+            if (canon(chain[i].from ?? '') !== canon(chain[i - 1].to ?? '')) {
+              problems.push(`${where}'s chain is not continuous at hop ${i + 1}`);
+            }
+          }
+          if (chain[chain.length - 1].allowed !== false) {
+            problems.push(`${where} claims renderRefused but its last hop was allowed`);
+          }
+          for (const [i, hop] of chain.slice(0, -1).entries()) {
+            if (hop.allowed !== true) {
+              problems.push(`${where}'s hop ${i + 1} was refused, so the chain should have stopped there`);
+            }
+          }
+        }
+      }
+    }
+
     if (!a.renderId && a.renderFile) {
       const full = confinedPath(a.renderFile, a.id);
       if (full) verifyBytes(a.id, full, a.renderedSha256, a.renderedBytes);

@@ -344,6 +344,62 @@ const CASES = [
     acceptable: false,
     mutate: (l) => { l.attempts[1].renderFile = 'other.html'; },
   },
+  // selection-v1.0.29 / solo-protocol-v1.0.11. The flag that discharges a backlog obligation. Adding
+  // `renderRefused: true` to an ordinary record removed it from the backlog with both ledgers silent.
+  {
+    name: 'REFUSAL: the bare boolean with no chain, permit or navigation',
+    acceptable: false,
+    mutate: (l) => { l.attempts[1].renderRefused = true; },
+  },
+  {
+    name: 'REFUSAL: renderRefused: false is not a value',
+    acceptable: false,
+    mutate: (l) => { l.attempts[0].renderRefused = false; },
+  },
+  {
+    name: 'REFUSAL: a chain that does not start at the record\u2019s own URL',
+    acceptable: false,
+    mutate: (l) => {
+      l.attempts[0].renderRefused = true;
+      l.attempts[0].redirectChain = [{ from: 'https://a.govt.nz/other', to: 'https://a.govt.nz/no', httpStatus: 302, allowed: false }];
+    },
+  },
+  {
+    name: 'REFUSAL: a chain that is not continuous',
+    acceptable: false,
+    mutate: (l) => {
+      l.attempts[0].renderRefused = true;
+      l.attempts[0].redirectChain = [
+        { from: 'https://a.govt.nz/apply', to: 'https://a.govt.nz/one', httpStatus: 302, allowed: true },
+        { from: 'https://a.govt.nz/elsewhere', to: 'https://a.govt.nz/no', httpStatus: 302, allowed: false },
+      ];
+    },
+  },
+  {
+    name: 'REFUSAL: a chain whose last hop was allowed',
+    acceptable: false,
+    mutate: (l) => {
+      l.attempts[0].renderRefused = true;
+      l.attempts[0].redirectChain = [{ from: 'https://a.govt.nz/apply', to: 'https://a.govt.nz/fine', httpStatus: 302, allowed: true }];
+    },
+  },
+  {
+    name: 'REFUSAL: a permit for a different page',
+    acceptable: false,
+    mutate: (l) => {
+      l.attempts[0].renderRefused = true;
+      l.attempts[0].redirectChain = [{ from: 'https://a.govt.nz/apply', to: 'https://a.govt.nz/no', httpStatus: 302, allowed: false }];
+      l.discoveryPermits[0].url = 'https://a.govt.nz/elsewhere';
+    },
+  },
+  {
+    name: 'REFUSAL: a well-formed one is accepted',
+    acceptable: true,
+    mutate: (l) => {
+      l.attempts[0].renderRefused = true;
+      l.attempts[0].redirectChain = [{ from: 'https://a.govt.nz/apply', to: 'https://a.govt.nz/no', httpStatus: 302, allowed: false, reason: 'Disallow: /no' }];
+    },
+  },
   {
     name: 'AUTHORITY: a copy that MATCHES the registry is fine',
     acceptable: true,
@@ -437,8 +493,8 @@ describe('the two render-ledger implementations agree', () => {
     // asserted from memory. A count printed in prose and checked by nobody is decoration, which is
     // the same objection this protocol makes to an unread digest. Update these numbers deliberately
     // when adding a case, and update the protocol with them.
-    assert.equal(CASES.length, 44, 'the protocol states 44 conformance cases');
-    assert.equal(refused, 39, 'the protocol states 39 refusal cases');
+    assert.equal(CASES.length, 51, 'the protocol states 51 conformance cases');
+    assert.equal(refused, 45, 'the protocol states 45 refusal cases');
     assert.equal(accepted + refused, CASES.length, 'every case must state a verdict');
   });
 });

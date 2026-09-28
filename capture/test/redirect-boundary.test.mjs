@@ -22,7 +22,10 @@ import { chromium } from 'playwright';
 import { renderDiscoveryPage } from '../render-discovery.mjs';
 import { capturePage } from '../capture.mjs';
 import { MAX_REDIRECT_HOPS } from '../redirect-guard.mjs';
-import { emptyLog, recordRobotsCheck, renderBacklog, appendAttempt, sha256 } from '../run.mjs';
+import {
+  emptyLog, recordRobotsCheck, renderBacklog, appendAttempt, sha256, checkRenderLedger,
+  renderRefusalProblems,
+} from '../run.mjs';
 import { evaluatePolicy } from '../robots-policy.mjs';
 
 const FORM = '<html><head><title>Destination</title></head><body><input id="q7" type="text"></body></html>';
@@ -32,12 +35,14 @@ let origin;
 let other;
 let hits;
 let otherHits;
+let bounced;
 let server;
 let otherServer;
 
 before(async () => {
   hits = [];
   otherHits = [];
+  bounced = 0;
   server = createServer((req, res) => {
     hits.push(req.url);
     if (req.url === '/robots.txt') {
@@ -49,6 +54,13 @@ before(async () => {
     if (req.url === '/to-allowed') { res.writeHead(302, { location: '/fine' }); return res.end(); }
     if (req.url === '/loop') { res.writeHead(302, { location: '/loop2' }); return res.end(); }
     if (req.url === '/loop2') { res.writeHead(302, { location: '/loop' }); return res.end(); }
+    if (req.url === '/bounce') {
+      bounced += 1;
+      if (bounced === 1) { res.writeHead(302, { location: '/bounce-back' }); return res.end(); }
+      res.writeHead(200, { 'content-type': 'text/html' });
+      return res.end(FORM);
+    }
+    if (req.url === '/bounce-back') { res.writeHead(302, { location: '/bounce' }); return res.end(); }
     if (req.url === '/forbidden' || req.url === '/fine' || req.url === '/direct') {
       res.writeHead(200, { 'content-type': 'text/html' });
       return res.end(FORM);
@@ -244,16 +256,220 @@ describe('an unreachable page discharges its backlog obligation as attrition', (
     };
     assert.equal(renderBacklog(log).length, 2);
 
-    // A render of /apply was attempted and refused at the policy boundary.
+    // A render of /apply was attempted and refused at the policy boundary. selection-v1.0.29: the
+    // refusal must carry its permit, its navigation and a continuous chain, or it discharges nothing.
+    log.discoveryPermits = [{
+      id: 'p-0001', agency: 'A', category: 'service-application', candidateSetVersion: 1,
+      url: 'https://a.govt.nz/apply', robotsCheckId: 'r-0001',
+      issuedAt: '2026-09-26T19:09:00Z', consumedAt: '2026-09-26T19:10:30Z',
+    }];
     appendAttempt(log, {
+      permitId: 'p-0001',
       examinedAt: '2026-09-26T19:10:00Z', agency: 'A', website: 'https://a.govt.nz/',
       url: 'https://a.govt.nz/apply', status: 'discovery', discoveryKind: 'navigation',
       outcome: 'disallowed', category: 'service-application', candidateSetVersion: 1,
       navigatedAt: '2026-09-26T19:10:00Z', approval: 'approved',
       renderRefused: true,
-      redirectChain: [{ from: 'https://a.govt.nz/apply', to: 'https://a.govt.nz/forbidden', httpStatus: 302, allowed: false }],
+      redirectChain: [{
+        from: 'https://a.govt.nz/apply', to: 'https://a.govt.nz/forbidden',
+        httpStatus: 302, allowed: false, reason: 'more than 10 redirects',
+      }],
     });
     assert.deepEqual(renderBacklog(log).map((a) => a.id), [reachable.id],
       '/apply is discharged as attrition; /other still owes a render');
+  });
+});
+
+describe('a discharge must carry the evidence that discharged it', () => {
+  /**
+   * selection-v1.0.29. Both attacks below worked against selection-v1.0.28 with zero ledger
+   * problems. The first is one line long.
+   */
+  const build = ({ destinationPolicy = null, chain = null, refusalFields = {}, flag = true } = {}) => {
+    const log = emptyLog();
+    recordRobotsCheck(log, {
+      origin: 'https://a.govt.nz', url: 'https://a.govt.nz/robots.txt',
+      fetchedAt: new Date(Date.now() - 60_000).toISOString().replace(/\.\d{3}Z$/, 'Z'),
+      httpStatus: 200, disposition: 'rules', sha256: sha256(''), bytes: 0, body: '',
+    });
+    if (destinationPolicy) recordRobotsCheck(log, destinationPolicy);
+    appendAttempt(log, {
+      examinedAt: '2026-09-27T09:00:00Z', agency: 'A', website: 'https://a.govt.nz/',
+      url: 'https://a.govt.nz/apply', status: 'discovery', discoveryKind: 'navigation',
+      outcome: 'no-candidates', category: 'service-application', candidateSetVersion: 1,
+      navigatedAt: '2026-09-27T09:00:00Z', approval: 'approved',
+    });
+    const plain = log.attempts.at(-1);
+    log.candidateSets['A\u0000service-application'] = {
+      agency: 'A', category: 'service-application', version: 1, discovered: [], locked: [],
+      lockedAt: '2026-09-27T09:30:00Z', approval: 'approved', candidateDeclaration: 'none',
+      discoveryRecordIds: [plain.id],
+    };
+    log.discoveryPermits = [{
+      id: 'p-0001', agency: 'A', category: 'service-application', candidateSetVersion: 1,
+      url: 'https://a.govt.nz/apply', robotsCheckId: 'r-0001',
+      issuedAt: '2026-09-27T09:59:00Z', consumedAt: '2026-09-27T10:00:30Z',
+    }];
+    if (flag) {
+      appendAttempt(log, {
+        permitId: 'p-0001',
+        examinedAt: '2026-09-27T10:00:00Z', agency: 'A', website: 'https://a.govt.nz/',
+        url: 'https://a.govt.nz/apply', status: 'discovery', discoveryKind: 'navigation',
+        outcome: 'disallowed', category: 'service-application', candidateSetVersion: 1,
+        navigatedAt: '2026-09-27T10:00:00Z', approval: 'approved',
+        renderRefused: true,
+        redirectChain: chain ?? [{
+          from: 'https://a.govt.nz/apply', to: 'https://a.govt.nz/forbidden',
+          httpStatus: 302, allowed: false, robotsCheckId: 'r-0001', reason: 'Disallow: /forbidden',
+        }],
+        ...refusalFields,
+      });
+    }
+    return { log, plain, refusal: flag ? log.attempts.at(-1) : null };
+  };
+  const dischargedIn = (log, id) => !renderBacklog(log).some((a) => a.id === id);
+
+  test('THE ATTACK: the bare boolean on an ordinary record discharges nothing', () => {
+    // One line, against selection-v1.0.28: backlog 66 -> 65, both ledgers silent.
+    const { log, plain } = build({ flag: false });
+    assert.equal(dischargedIn(log, plain.id), false);
+    plain.renderRefused = true;
+    assert.equal(dischargedIn(log, plain.id), false, 'the flag alone must discharge nothing');
+    const problems = checkRenderLedger(log, mkdtempSync(join(tmpdir(), 'ff-x-')));
+    assert.ok(problems.some((p) => /with no redirect chain/.test(p)), problems.join('; '));
+  });
+
+  test('a well-formed refusal against a confirmed disallow DOES discharge', () => {
+    const { log, plain } = build({
+      destinationPolicy: {
+        origin: 'https://a.govt.nz', url: 'https://a.govt.nz/robots.txt',
+        fetchedAt: new Date(Date.now() - 30_000).toISOString().replace(/\.\d{3}Z$/, 'Z'),
+        httpStatus: 200, disposition: 'rules',
+        sha256: sha256('x'), bytes: 1, body: 'User-agent: *\nDisallow: /forbidden\n',
+      },
+    });
+    assert.equal(dischargedIn(log, plain.id), true);
+    assert.deepEqual(checkRenderLedger(log, mkdtempSync(join(tmpdir(), 'ff-x-'))), []);
+  });
+
+  test('THE ATTACK: a missing destination policy does not discharge, and a permitting one restores it', () => {
+    const { log, plain } = build({
+      chain: [{
+        from: 'https://a.govt.nz/apply', to: 'https://elsewhere.invalid/x',
+        httpStatus: 302, allowed: false, reason: 'no recorded robots policy for https://elsewhere.invalid',
+      }],
+    });
+    assert.equal(dischargedIn(log, plain.id), false, 'unchecked is not unreachable');
+
+    // A fresh policy that PERMITS the destination must bring the render back, not leave it retired.
+    recordRobotsCheck(log, {
+      origin: 'https://elsewhere.invalid', url: 'https://elsewhere.invalid/robots.txt',
+      fetchedAt: new Date(Date.now() - 10_000).toISOString().replace(/\.\d{3}Z$/, 'Z'),
+      httpStatus: 404, disposition: 'allow-all', sha256: sha256(''), bytes: 0, body: '',
+    });
+    assert.equal(dischargedIn(log, plain.id), false, 'a permitted destination means retry, not attrition');
+
+    // And a fresh policy that FORBIDS it discharges.
+    recordRobotsCheck(log, {
+      origin: 'https://elsewhere.invalid', url: 'https://elsewhere.invalid/robots.txt',
+      fetchedAt: new Date(Date.now() - 5_000).toISOString().replace(/\.\d{3}Z$/, 'Z'),
+      httpStatus: 200, disposition: 'rules', sha256: sha256('y'), bytes: 1,
+      body: 'User-agent: *\nDisallow: /x\n',
+    });
+    assert.equal(dischargedIn(log, plain.id), true);
+  });
+
+  test('a stale or unestablished destination policy does not discharge either', () => {
+    for (const policy of [
+      {
+        origin: 'https://elsewhere.invalid', url: 'https://elsewhere.invalid/robots.txt',
+        fetchedAt: '2026-09-01T00:00:00Z', httpStatus: 200, disposition: 'rules',
+        sha256: sha256('y'), bytes: 1, body: 'User-agent: *\nDisallow: /x\n',
+      },
+      {
+        origin: 'https://elsewhere.invalid', url: 'https://elsewhere.invalid/robots.txt',
+        fetchedAt: new Date(Date.now() - 10_000).toISOString().replace(/\.\d{3}Z$/, 'Z'),
+        httpStatus: 200, disposition: 'unestablished', sha256: sha256('z'), bytes: 212, body: '',
+        representation: { valid: false, reason: 'the media type was text/html, not text/plain', challenge: 'Imperva/Incapsula' },
+      },
+    ]) {
+      const { log, plain } = build({
+        destinationPolicy: policy,
+        chain: [{
+          from: 'https://a.govt.nz/apply', to: 'https://elsewhere.invalid/x',
+          httpStatus: 302, allowed: false, reason: 'not permitted',
+        }],
+      });
+      assert.equal(dischargedIn(log, plain.id), false, policy.disposition);
+    }
+  });
+
+  test('a loop and an unusable target are terminal whatever any policy says', () => {
+    for (const reason of ['more than 10 redirects', 'the redirect target is not a usable URL']) {
+      const { log, plain } = build({
+        chain: [{ from: 'https://a.govt.nz/apply', to: 'https://a.govt.nz/loop', httpStatus: 302, allowed: false, reason }],
+      });
+      assert.equal(dischargedIn(log, plain.id), true, reason);
+    }
+  });
+
+  test('a broken chain discharges nothing, and is reported', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ff-x-'));
+    const cases = [
+      ['starting somewhere else', [{ from: 'https://a.govt.nz/other', to: 'https://a.govt.nz/forbidden', httpStatus: 302, allowed: false }], /does not start at|starts at/],
+      ['not continuous', [
+        { from: 'https://a.govt.nz/apply', to: 'https://a.govt.nz/one', httpStatus: 302, allowed: true },
+        { from: 'https://a.govt.nz/elsewhere', to: 'https://a.govt.nz/forbidden', httpStatus: 302, allowed: false },
+      ], /not continuous/],
+      ['ending in an allowed hop', [{ from: 'https://a.govt.nz/apply', to: 'https://a.govt.nz/fine', httpStatus: 302, allowed: true }], /its last hop was allowed/],
+      ['refused before the end', [
+        { from: 'https://a.govt.nz/apply', to: 'https://a.govt.nz/one', httpStatus: 302, allowed: false },
+        { from: 'https://a.govt.nz/one', to: 'https://a.govt.nz/forbidden', httpStatus: 302, allowed: false },
+      ], /should have stopped there/],
+    ];
+    for (const [name, chain, pattern] of cases) {
+      const { log, plain } = build({ chain });
+      assert.equal(dischargedIn(log, plain.id), false, name);
+      assert.ok(checkRenderLedger(log, dir).some((p) => pattern.test(p)), `${name}: ${checkRenderLedger(log, dir).join('; ')}`);
+    }
+  });
+
+  test('a refusal with no permit, or one for another page, discharges nothing', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ff-x-'));
+    const noPermit = build({ refusalFields: { permitId: undefined } });
+    assert.equal(dischargedIn(noPermit.log, noPermit.plain.id), false);
+    assert.ok(checkRenderLedger(noPermit.log, dir).some((p) => /with no permit/.test(p)));
+
+    const wrongScope = build();
+    wrongScope.log.discoveryPermits[0].url = 'https://a.govt.nz/elsewhere';
+    assert.equal(dischargedIn(wrongScope.log, wrongScope.plain.id), false);
+    assert.ok(checkRenderLedger(wrongScope.log, dir).some((p) => /which authorised/.test(p)));
+
+    const unconsumed = build();
+    unconsumed.log.discoveryPermits[0].consumedAt = null;
+    assert.equal(dischargedIn(unconsumed.log, unconsumed.plain.id), false);
+  });
+
+  test('renderRefused: false is not a value, it is absent', () => {
+    const { log } = build({ flag: false });
+    log.attempts[0].renderRefused = false;
+    assert.ok(checkRenderLedger(log, mkdtempSync(join(tmpdir(), 'ff-x-')))
+      .some((p) => /it is true or absent/.test(p)));
+  });
+});
+
+describe('every hop is recorded, including one back to the authorised URL', () => {
+  test('a redirect returning to the original URL appears in the chain', async () => {
+    // selection-v1.0.29: it was counted and left out, contradicting the protocol's own claim - and
+    // leaving a gap that would have broken the continuity check above.
+    const dir = mkdtempSync(join(tmpdir(), 'ff-rd9-'));
+    const out = await render(`${origin}/bounce`, dir, policySource());
+    assert.equal(out.refused, false);
+    assert.ok(out.redirectChain.length >= 2, `chain was ${JSON.stringify(out.redirectChain)}`);
+    assert.equal(out.redirectChain[0].to, `${origin}/bounce-back`);
+    assert.equal(out.redirectChain[1].to, `${origin}/bounce`);
+    assert.match(out.redirectChain[1].reason, /back to the URL this permit authorises/);
+    // Continuous, which is what the refusal validator relies on.
+    assert.equal(out.redirectChain[1].from, out.redirectChain[0].to);
   });
 });

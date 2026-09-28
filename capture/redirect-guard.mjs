@@ -104,9 +104,22 @@ export async function installRedirectGuard(context, page, { url, policyFor = REF
       return finish('Fetch.failRequest', { errorReason: 'BlockedByClient' });
     }
 
-    // A redirect back to the authorised URL needs no second POLICY decision; it is already covered
-    // by the permit. It is still counted above.
-    if (sameResource(target, url)) return finish('Fetch.continueResponse');
+    // A redirect back to the authorised URL needs no second POLICY decision - the permit already
+    // covers it - but it IS recorded. selection-v1.0.29: it was counted and left out of the chain,
+    // which contradicted the protocol's own claim that every hop is recorded and would have broken
+    // the continuity check that now validates a refusal.
+    if (sameResource(target, url)) {
+      state.redirectChain.push({
+        from: event.request.url,
+        to: target,
+        httpStatus: status,
+        allowed: true,
+        robotsCheckId: null,
+        disposition: null,
+        reason: 'a redirect back to the URL this permit authorises',
+      });
+      return finish('Fetch.continueResponse');
+    }
 
     const verdict = policyFor(target) ?? REFUSE_ALL_REDIRECTS();
     state.redirectChain.push({

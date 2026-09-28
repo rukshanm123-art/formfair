@@ -2753,6 +2753,17 @@ export function checkRenderLedger(log, renderedDir) {
       }
     }
 
+    // selection-v1.0.29. The flag that discharges a backlog obligation, validated where it is
+    // trusted. Checked for every record carrying it, superseded or not: a withdrawn record discharges
+    // nothing, but a malformed claim is still worth naming.
+    if (a.renderRefused !== undefined) {
+      if (a.renderRefused !== true) {
+        problems.push(`${a.id} has renderRefused ${JSON.stringify(a.renderRefused)}; it is true or absent`);
+      } else {
+        for (const problem of renderRefusalProblems(log, a)) problems.push(problem);
+      }
+    }
+
     // A record carrying a digest but no registry entry is checked directly against disk. Two such
     // records exist - written before the registry did - and a hash nobody re-reads is decoration
     // whether or not a registry happens to hold it.
@@ -2930,11 +2941,112 @@ function boundToCurrentSet(log) {
  * Keyed on the explicit `renderRefused` flag rather than inferred from an outcome, so an ordinary
  * `disallowed` record cannot quietly excuse a page nobody tried to render.
  */
+/**
+ * Is this `renderRefused` record actually the record of a guarded retrieval?
+ *
+ * selection-v1.0.29. The flag was trusted. Adding `renderRefused: true` to an ordinary record -
+ * `d-0018`, one line, no chain, no permit, no navigation - removed it from the backlog, and both
+ * ledgers reported zero problems. A boolean that discharges an obligation has to carry the evidence
+ * that the obligation was discharged, or it is just a way of saying "skip this".
+ */
+export function renderRefusalProblems(log, attempt) {
+  const problems = [];
+  const where = attempt.id ?? '(an unidentified record)';
+  const chain = attempt.redirectChain;
+  if (!Array.isArray(chain) || chain.length === 0) {
+    problems.push(`${where} claims renderRefused with no redirect chain`);
+  }
+  if (attempt.navigationPerformed === false) {
+    problems.push(`${where} claims renderRefused but records that no navigation occurred`);
+  }
+  if (!isoUtcish(attempt.navigatedAt)) {
+    problems.push(`${where} claims renderRefused with no navigation timestamp`);
+  }
+  if (!attempt.permitId) {
+    problems.push(`${where} claims renderRefused with no permit; the original URL was requested`);
+  } else {
+    const permit = (log.discoveryPermits ?? []).find((p) => p.id === attempt.permitId);
+    if (!permit) problems.push(`${where} names permit ${attempt.permitId}, which does not exist`);
+    else {
+      if (!permit.consumedAt) problems.push(`${where} names permit ${permit.id}, which is not consumed`);
+      for (const [field, label] of [['agency', 'agency'], ['category', 'category'],
+        ['candidateSetVersion', 'round']]) {
+        if (permit[field] !== attempt[field]) {
+          problems.push(
+            `${where} names permit ${permit.id}, which covers ${label} ` +
+              `${JSON.stringify(permit[field])}, not ${JSON.stringify(attempt[field])}`
+          );
+        }
+      }
+      if (permit.url !== attempt.url) {
+        problems.push(`${where} names permit ${permit.id}, which authorised ${permit.url}`);
+      }
+    }
+  }
+  if (Array.isArray(chain) && chain.length > 0) {
+    // Continuous: the first hop leaves the record's own URL, and each later hop leaves where the
+    // previous one arrived. A chain that does not join up describes no single navigation.
+    if (canonicalise(chain[0].from ?? '') !== canonicalise(attempt.url)) {
+      problems.push(`${where}'s chain starts at ${chain[0].from}, not at ${attempt.url}`);
+    }
+    for (let i = 1; i < chain.length; i++) {
+      if (canonicalise(chain[i].from ?? '') !== canonicalise(chain[i - 1].to ?? '')) {
+        problems.push(
+          `${where}'s chain is not continuous: hop ${i + 1} leaves ${chain[i].from}, but hop ${i} ` +
+            `arrived at ${chain[i - 1].to}`
+        );
+      }
+    }
+    const final = chain[chain.length - 1];
+    if (final.allowed !== false) {
+      problems.push(`${where} claims renderRefused but its last hop was allowed`);
+    }
+    for (const [i, hop] of chain.slice(0, -1).entries()) {
+      if (hop.allowed !== true) {
+        problems.push(`${where}'s hop ${i + 1} was refused, so the chain should have stopped there`);
+      }
+    }
+  }
+  return problems;
+}
+
+/**
+ * Conditions under which a refusal can never be retried, whatever any policy later says.
+ *
+ * A loop and an unusable target are properties of the redirect itself. Everything else depends on a
+ * policy, and a policy can be read again.
+ */
+const TERMINAL_REFUSAL = /more than \d+ redirects|not a usable URL/;
+
+/**
+ * URLs a render attempt found unreachable within the robots policy, and permanently so.
+ *
+ * selection-v1.0.29. A refusal for a MISSING policy used to discharge the URL for good: recording a
+ * fresh policy that permitted the destination did not bring it back. Missing, stale and
+ * unestablished are not terminal - they are reasons to fetch a policy and try again - so the final
+ * hop is re-evaluated against the policy in force NOW. Only a confirmed disallow under a fresh
+ * policy, a loop, or an unusable target discharges the obligation.
+ */
 function renderRefusedUrls(log) {
   const urls = new Set();
   for (const a of log.attempts) {
     if (a.status !== 'discovery' || a.renderRefused !== true) continue;
     if (isDiscoverySuperseded(log, a.id)) continue;
+    if (renderRefusalProblems(log, a).length > 0) continue; // an unevidenced flag discharges nothing
+    const chain = a.redirectChain;
+    const final = chain[chain.length - 1];
+    if (TERMINAL_REFUSAL.test(final.reason ?? '')) { urls.add(canonicalise(a.url)); continue; }
+
+    let target = null;
+    try { target = new URL(final.to); } catch { urls.add(canonicalise(a.url)); continue; }
+    const check = findRobotsCheck(log, target.origin);
+    // No policy, or one too old to rely on: the page is not unreachable, it is unchecked.
+    if (!check || !robotsCheckIsFresh(check)) continue;
+    const verdict = evaluatePolicy(check, target.pathname + target.search, 'chromium');
+    // `unestablished` says we could not read a policy, not that the host refused us.
+    if (verdict.unestablished === true) continue;
+    // And a policy that now permits the destination means the render should be retried.
+    if (verdict.allowed) continue;
     urls.add(canonicalise(a.url));
   }
   return urls;

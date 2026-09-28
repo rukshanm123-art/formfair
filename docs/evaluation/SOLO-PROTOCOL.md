@@ -2880,3 +2880,72 @@ that does not redirect, the fail-closed default, a redirect loop, and both captu
 Nothing is rendered or captured yet. The backlog stands at **66 records across 57 URLs on 12 origins**,
 all twelve policies fresh and valid, and how many of the fifty-seven redirect is still unknown — which
 is the point of fixing this first.
+
+## Amendment 33: a discharge must carry the evidence that discharged it
+
+**Dated 28 September 2026.** `selection-v1.0.29`, `capture-v1.0.9` and `solo-protocol-v1.0.11`.
+Moves no earlier tag. Still before any render.
+
+Amendment 32's guard works. The gate it added to stop the guard creating an unsatisfiable obligation
+did not, in two ways.
+
+### 1. The boolean was trusted
+
+Adding `renderRefused: true` to `d-0018` — one line, no redirect chain, no permit, no navigation —
+removed it from the backlog. **Both ledgers reported zero problems.** A boolean that discharges an
+obligation is a way of saying "skip this" unless it carries the evidence that the obligation was
+discharged.
+
+`renderRefused` is now validated wherever it is trusted, in both packages. It requires: a **consumed**
+permit covering the same agency, category, round **and URL**; a real navigation timestamp;
+`navigationPerformed` not false; and a **continuous** redirect chain — first hop leaving the record's
+own URL, each later hop leaving where the previous arrived — whose **last** hop was refused and whose
+earlier hops were all allowed, because a chain that was refused in the middle should have stopped
+there. `renderRefused: false` is refused outright: it is `true` or absent.
+
+An unevidenced flag now discharges nothing, and is reported.
+
+### 2. A temporary prerequisite was treated as permanent attrition
+
+A refusal caused by a **missing** destination policy discharged the URL for good. Recording a fresh
+policy that *permitted* the destination did not bring it back.
+
+Missing, stale and `unestablished` are not terminal — they are reasons to fetch a policy and try
+again. So the final refused hop is re-evaluated against the policy in force **now**:
+
+| destination policy now says | discharges? |
+| --- | --- |
+| no recorded policy | **no** — unchecked is not unreachable |
+| policy older than 24 hours | **no** |
+| `unestablished` | **no** — we could not read a policy, the host did not refuse us |
+| permits the target | **no** — the render should be retried |
+| disallows the target | **yes** |
+
+A redirect **loop** and an **unusable target** are terminal whatever any policy later says, because
+they are properties of the redirect rather than of a policy.
+
+So a URL retired as attrition returns to the backlog the moment a policy says it may be read, and the
+only permanent discharges are a confirmed disallow under a fresh policy, a loop, or a target that is
+not a URL.
+
+### And the chain contradiction
+
+Amendment 32 said every hop is recorded. A redirect back to the originally authorised URL was
+**counted but left out of the chain** — so the claim was false, and the continuity check above would
+have been unsatisfiable for any page that bounces through its own URL. Every hop is now recorded,
+with the returning one marked as already covered by the permit; only the policy *decision* is skipped
+for it.
+
+### Tests
+
+Both attacks are now tests, the first stated at the length it was exploited — one line. Plus a
+well-formed refusal that must be **accepted**; stale and `unestablished` destinations; loops and
+unusable targets as terminal; four broken-chain shapes; a missing permit, a permit for another page,
+an unconsumed permit; `renderRefused: false`; and the returning-hop chain. Seven further conformance
+cases bring that table to **51**, of which 45 are refusals.
+
+### What this does not establish
+
+Still nothing rendered or captured. The backlog stands at **66 records across 57 URLs on 12 origins**.
+The twelve policies were fetched on 27 September and must be re-checked where they have crossed the
+24-hour boundary before the render pass begins.
