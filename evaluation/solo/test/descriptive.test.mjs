@@ -608,6 +608,20 @@ describe('the corpus seal requires the exhaustion records', () => {
       renderId: 'g-0001', permitId: 'p-0001', candidateSetVersion: 1, approval: 'approved',
       url: 'https://example.invalid/apply', navigatedAt: '2026-09-25T03:30:00Z',
     });
+    // solo-protocol-v1.0.17 (Amendment 39): the observation concludes nothing, so a log carrying
+    // one and no judgement is now a log with evidence it never read. This fixture asserts a CLEAN
+    // seal, so it has to describe a state the protocol permits - which means the judgement the
+    // real path always writes.
+    log.attempts.push({
+      id: 'd-9401', agency: 'obs', category: 'account-registration', status: 'discovery',
+      discoveryKind: 'navigation', outcome: 'no-candidates', recordType: 'judgement-only',
+      renderId: 'g-0001', answersDiscoveryId: 'd-9400', evidenceFromDiscoveryId: 'd-9400',
+      candidateSetVersion: 1, approval: 'approved', navigationPerformed: false,
+      url: 'https://example.invalid/apply', checkedAt: '2026-09-25T03:32:00Z',
+      evidence: 'rendered-dom', renderFile: 'g1.html',
+      renderedSha256: createHash('sha256').update(html).digest('hex'),
+      renderedBytes: Buffer.byteLength(html),
+    });
     return log;
   };
 

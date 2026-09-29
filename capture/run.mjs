@@ -768,6 +768,16 @@ export function lockCandidateSet(log, { agency, category }) {
     );
   }
 
+  // Amendment 39. A round may not be locked while evidence it retrieved sits unread.
+  const unjudged = unjudgedRenderedObservations(log, {
+    agency, category, candidateSetVersion: set.version,
+  });
+  if (unjudged.length) {
+    throw new Error(
+      `this round has rendered evidence that was never judged:\n  ${unjudged.join('\n  ')}`
+    );
+  }
+
   const { ordered, locked } = lockCandidates(set.discovered);
 
   // selection-v1.0.4. The set and the round that produced it must agree. Binding the two
@@ -808,6 +818,17 @@ export function approveCandidateSet(log, { agency, category, approved, note }) {
     assertSetAgreesWithRound(log, set, {
       members: set.locked ?? [], declaration: set.candidateDeclaration ?? null,
     });
+    // Amendment 39, checked again here for the same reason the round agreement is: a set that
+    // reached approval by any route not passing through `lockCandidateSet` would otherwise be
+    // approved over unread evidence.
+    const unread = unjudgedRenderedObservations(log, {
+      agency: set.agency, category: set.category, candidateSetVersion: set.version,
+    });
+    if (unread.length) {
+      throw new Error(
+        `this set rests on rendered evidence that was never judged:\n  ${unread.join('\n  ')}`
+      );
+    }
   }
   set.approval = approved ? APPROVAL.APPROVED : APPROVAL.REJECTED;
   set.approvedAt = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
@@ -3558,6 +3579,92 @@ function renderRefusedUrls(log) {
   return urls;
 }
 
+/**
+ * Every rendered observation in a round must carry exactly one judgement of its own.
+ *
+ * Amendment 39. `renderBacklog` covers the RETROSPECTIVE obligation - plain-retrieval records that
+ * predate the registry - and nothing covered the forward one. A `render-discovery` writes an
+ * observation whose outcome is `rendered`, which concludes nothing by design; the conclusion is a
+ * separate `classify-render` record. Nothing required that second record to exist. In the NZDF
+ * account-registration round sixteen rendered observations sat in the log while `status` reported
+ * the set as the only outstanding work, so a set could be locked and approved over evidence that
+ * had been retrieved and never read - the precise failure `d-0306` is remembered for, except
+ * silent.
+ *
+ * Scoped to one agency, category and round, and matched on the whole binding rather than on the
+ * answer link alone: a judgement that names the right record but the wrong render, URL or round is
+ * not a judgement of this observation. `retrieval-blocked` needs no judgement - nothing was read,
+ * so there is nothing to conclude - while a headed fallback that SUCCEEDED records `rendered` like
+ * any other retrieval and is held to the same rule.
+ */
+export function unjudgedRenderedObservations(log, { agency, category, candidateSetVersion } = {}) {
+  const problems = [];
+  const inScope = (a) =>
+    (agency === undefined || a.agency === agency) &&
+    (category === undefined || a.category === category) &&
+    (candidateSetVersion === undefined || a.candidateSetVersion === candidateSetVersion);
+
+  const observations = log.attempts.filter(
+    (a) => a.status === 'discovery' && a.outcome === 'rendered' && inScope(a) &&
+      !isDiscoverySuperseded(log, a.id)
+  );
+
+  for (const o of observations) {
+    // Linked by EITHER role, because the two say different things. `answersDiscoveryId` names the
+    // obligation a judgement discharges; `evidenceFromDiscoveryId` names the observation it read.
+    // A fresh render answers its own observation, so both point at it. The retrospective pass does
+    // not: those judgements answer the original plain-retrieval record - `d-0377` answers `d-0018`
+    // - while citing the observation as their evidence. Testing the answer link alone declared all
+    // fifty-seven retrospective observations unread, which is the opposite of what the log shows.
+    const answering = log.attempts.filter(
+      (j) => j.recordType === RECORD_TYPES.JUDGEMENT_ONLY &&
+        (j.answersDiscoveryId === o.id || j.evidenceFromDiscoveryId === o.id) &&
+        !isDiscoverySuperseded(log, j.id)
+    );
+    const where = `${o.id} (${o.agency} / ${o.category} v${o.candidateSetVersion}, ${o.url})`;
+
+    // Uniqueness is per CATEGORY and round, not per observation. One render legitimately supports
+    // a judgement in each category it was examined under - `d-0315` carries three, for account
+    // registration, enquiry and service application - and that is the case the registry exists to
+    // express. What must never happen is two live judgements for the SAME category about the same
+    // retrieval, because then the round has two answers and no way to say which it acted on.
+    const sameRound = answering.filter(
+      (j) => j.category === o.category && j.candidateSetVersion === o.candidateSetVersion
+    );
+    if (sameRound.length === 0) {
+      problems.push(
+        answering.length
+          ? `${where} is cited only by judgements in other categories or rounds ` +
+            `(${answering.map((j) => `${j.id}:${j.category} v${j.candidateSetVersion}`).join(', ')}); ` +
+            'none concludes this observation\'s own round'
+          : `${where} was rendered but never judged; run \`classify-render --render ${o.renderId} ` +
+            `--answers ${o.id}\` before this round is locked or approved`
+      );
+      continue;
+    }
+    if (sameRound.length > 1) {
+      problems.push(
+        `${where} has ${sameRound.length} active judgements for its own category ` +
+          `(${sameRound.map((j) => j.id).join(', ')}); exactly one must be active`
+      );
+      continue;
+    }
+    const [j] = sameRound;
+    for (const [field, label] of [
+      ['renderId', 'render'], ['url', 'URL'], ['agency', 'agency'],
+      ['category', 'category'], ['candidateSetVersion', 'round'],
+    ]) {
+      if (j[field] !== o[field]) {
+        problems.push(
+          `${where} is judged by ${j.id}, whose ${label} is ${JSON.stringify(j[field])} ` +
+            `and not ${JSON.stringify(o[field])}`
+        );
+      }
+    }
+  }
+  return problems;
+}
+
 export function renderBacklog(log) {
   const answered = renderedJudgements(log);
   const current = boundToCurrentSet(log);
@@ -3674,6 +3781,13 @@ export function corpusBlockers(log, { capturesRoot = null } = {}) {
   }
   if (unassessed.length) {
     add('unassessed-candidates', `${unassessed.length} locked candidate(s) with no outcome`, unassessed);
+  }
+
+  // Amendment 39. Log-wide here, not per round: the corpus is built from every round at once,
+  // and an unread render in any of them is evidence the draft would rest on unseen.
+  const unread = unjudgedRenderedObservations(log);
+  if (unread.length) {
+    add('unjudged-renders', `${unread.length} rendered observation(s) have no matching judgement`, unread);
   }
 
   const rounds = unresolvedDiscoveryRounds(log);

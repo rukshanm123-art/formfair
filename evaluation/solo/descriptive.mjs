@@ -168,7 +168,7 @@ const FRAME_FILES = [
  * exhaustion records at all. A manifest that misnames its own protocol is worse than one that
  * omits it: a reader checking which rules a corpus was sealed under would be told the wrong ones.
  */
-export const SOLO_PROTOCOL_TAG = 'solo-protocol-v1.0.16';
+export const SOLO_PROTOCOL_TAG = 'solo-protocol-v1.0.17';
 
 /**
  * Two resolutions, mirrored from the capture package and checked equal by a test.
@@ -218,6 +218,67 @@ export const RESOLUTION_REASONS = Object.freeze({
  *
  * Returns problems rather than throwing, in the order the capture package produces them.
  */
+/**
+ * Amendment 39, mirrored. Every rendered observation must carry exactly one judgement of its own
+ * category and round.
+ *
+ * An independent implementation on purpose: the capture package's `unjudgedRenderedObservations`
+ * is the gate at lock and approval, and this is the gate at seal. A round whose evidence was
+ * retrieved and never read must fail both, including when it reaches the sealer by a route that
+ * never touched the capture CLI.
+ *
+ * Two distinctions the first cut got wrong, kept here so this copy cannot drift back to them.
+ * A judgement is linked by EITHER `answersDiscoveryId` or `evidenceFromDiscoveryId`: a fresh
+ * render answers its own observation, while a retrospective judgement answers the original
+ * plain-retrieval record and merely cites the observation as evidence. And uniqueness is scoped to
+ * the observation's own category and round, because one render legitimately supports a separate
+ * judgement in every category it was examined under.
+ */
+export function unjudgedRenderProblems(log) {
+  const problems = [];
+  const attempts = Array.isArray(log.attempts) ? log.attempts : [];
+  const superseded = new Set(
+    attempts.map((a) => a.supersedesDiscoveryId).filter((id) => id !== undefined && id !== null)
+  );
+  const active = (a) => !superseded.has(a.id);
+
+  for (const o of attempts) {
+    if (o.status !== 'discovery' || o.outcome !== 'rendered' || !active(o)) continue;
+    const where = `${o.id} (${o.agency} / ${o.category} v${o.candidateSetVersion}, ${o.url})`;
+    const citing = attempts.filter(
+      (j) => j.recordType === 'judgement-only' && active(j) &&
+        (j.answersDiscoveryId === o.id || j.evidenceFromDiscoveryId === o.id)
+    );
+    const sameRound = citing.filter(
+      (j) => j.category === o.category && j.candidateSetVersion === o.candidateSetVersion
+    );
+    if (sameRound.length === 0) {
+      problems.push(
+        citing.length
+          ? `${where} is cited only by judgements in other categories or rounds; none concludes its own round`
+          : `${where} was rendered but never judged`
+      );
+      continue;
+    }
+    if (sameRound.length > 1) {
+      problems.push(
+        `${where} has ${sameRound.length} active judgements for its own category ` +
+          `(${sameRound.map((j) => j.id).join(', ')}); exactly one must be active`
+      );
+      continue;
+    }
+    const [j] = sameRound;
+    for (const [field, label] of [['renderId', 'render'], ['url', 'URL'], ['agency', 'agency']]) {
+      if (j[field] !== o[field]) {
+        problems.push(
+          `${where} is judged by ${j.id}, whose ${label} is ${JSON.stringify(j[field])} and not ${JSON.stringify(o[field])}`
+        );
+      }
+    }
+  }
+  return problems;
+}
+
 export function renderLedgerProblems(log, renderedDir) {
   const problems = [];
   const root = resolve(renderedDir);
@@ -1111,6 +1172,11 @@ export function sealCorpus({
         // divergent rule sets came to sit behind one claim.
         for (const problem of renderLedgerProblems(log, join(logRoot, 'rendered'))) {
           problems.push(`renderLedger: ${problem}`);
+        }
+
+        // Amendment 39. Evidence retrieved and never read must not reach a seal.
+        for (const problem of unjudgedRenderProblems(log)) {
+          problems.push(`unjudgedRender: ${problem}`);
         }
 
         // The symmetric check: a sealed page must be an approved capture in the log.

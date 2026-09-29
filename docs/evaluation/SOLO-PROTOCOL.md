@@ -3325,3 +3325,69 @@ active set publishes its note; and that captured markup remains absent from both
 
 No capture tag accompanies this. Browser behaviour, retrieval, pacing and the permit boundary are
 untouched; only what is written into the two tracked files changes.
+
+## Amendment 39 — a rendered observation must be read before its round is locked
+
+*Frozen as `selection-v1.0.37` and `solo-protocol-v1.0.17`, 29 September 2026.*
+
+No request, no recapture, no outcome or category change, and no change to any locked set. Browser
+behaviour is untouched, so no capture tag accompanies this.
+
+### What was wrong
+
+`render-discovery` writes an observation whose outcome is `rendered`, and that record concludes
+nothing by design — the conclusion is a separate `classify-render` record. **Nothing required the
+second record to exist.**
+
+`renderBacklog` did not cover it. That function computes the *retrospective* obligation: active
+plain-retrieval records whose outcome is a content judgement, awaiting a render. A freshly rendered
+observation is not in that set, so the backlog read zero while sixteen rendered observations sat
+unjudged in the New Zealand Defence Force account-registration round, and `status` reported the
+unlocked candidate set as the only outstanding work. A set could therefore be locked and approved
+over evidence that had been retrieved and never read — which is what `d-0306` is remembered for,
+except that this version leaves no trace in the packet.
+
+### The rule
+
+Every active observation with outcome `rendered` must be answered by **exactly one** active
+`judgement-only` record for that observation's own category and round, and that judgement must
+name the same render, URL and agency.
+
+Three qualifications, each of which the first implementation got wrong and each now held by a test:
+
+1. **Linked by either role.** A judgement is bound to an observation by `answersDiscoveryId` *or*
+   `evidenceFromDiscoveryId`. A fresh render answers its own observation, so both point at it; a
+   retrospective judgement answers the original plain-retrieval record — `d-0377` answers `d-0018`
+   — and merely cites the observation as evidence. Testing the answer link alone reported all 57
+   retrospective observations as unread, the opposite of what the log shows.
+2. **Uniqueness is per category, not per observation.** One render legitimately supports a
+   judgement in every category it was examined under; `d-0315` carries three. What is forbidden is
+   two live judgements for the *same* category about one retrieval, because the round then has two
+   answers and no way to say which it acted on. A superseded judgement does not count.
+3. **Attrition needs no judgement.** `retrieval-blocked`, `robots-unestablished` and `disallowed`
+   read nothing, so there is nothing to conclude. A **successful headed fallback** is not attrition:
+   it records `rendered` like any other retrieval and is held to the rule. CadetNet is that case —
+   `g-0074` was barred and needs nothing, `g-0075` read the page and needs a judgement.
+
+### Where it is enforced
+
+At `lockCandidateSet`, at `approveCandidateSet`, in `corpusBlockers`, and independently in the
+sealer as `unjudgedRenderProblems`. Approval is checked separately from locking for the reason the
+round-agreement check already is: a set reaching approval by a route that never passed through
+`lockCandidateSet` would otherwise be approved unchecked. **Rejection stays ungated**, so a round
+whose evidence contradicts itself remains resolvable.
+
+### What holds it
+
+Nineteen cases in `capture/test/unjudged-renders.test.mjs`, every one driving **both**
+implementations over the same log and requiring them to agree: a missing judgement; a deleted one;
+mismatched render, URL and round; two active judgements for one category; a superseded duplicate
+that is not a duplicate; three categories off one render; the retrospective shape; a superseded
+observation; each attrition outcome; a successful headed fallback, which must be flagged while the
+barred attempt beside it is not; and the two refusals at lock and approval.
+
+### The NZDF round
+
+All 16 rendered observations in that round already carried matching judgements, and the live log
+reports zero unread renders across all 121 of them. The gate was added because the round *could*
+have been locked without them, not because it was.
