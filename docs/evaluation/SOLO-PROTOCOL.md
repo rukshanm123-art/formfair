@@ -3391,3 +3391,83 @@ barred attempt beside it is not; and the two refusals at lock and approval.
 All 16 rendered observations in that round already carried matching judgements, and the live log
 reports zero unread renders across all 121 of them. The gate was added because the round *could*
 have been locked without them, not because it was.
+
+## Amendment 40 — the bound counts candidates, and a retrieval may conclude nothing
+
+*Frozen as `selection-v1.0.38`, `capture-v1.0.13` and `solo-protocol-v1.0.18`, 30 September 2026.*
+
+### The state of the scan when this was written
+
+Recorded precisely, because this correction was made in the middle of an agency's assessment and
+the reader is entitled to know exactly what had and had not happened to it.
+
+- **The five locked URLs for New Zealand Defence Force / account-registration, and their order,
+  are unchanged.** Nothing here reopens discovery, alters a candidate, or re-runs a round.
+- **`https://www.cadetnet.org.nz/wp-login.php` remains beyond the bound.** It is the sixth
+  distinct URL by canonical sort and is not assessed. That is `droppedBeyondBound` working, and it
+  is untouched by this amendment.
+- **Three of the five candidates had already been retrieved** — `cadet-join.html`, and the Military
+  and Civilian Portal sign-in pages — and their bytes are held.
+- **`https://nzdf.bravosolution.com/web/login.shtml` and `https://www.cadetnet.org.nz/complete-signup/`
+  had not been visited at all.** No request of any kind had been made to either.
+- **No FormFair analysis had been run**, against these pages or any other.
+
+### What was wrong
+
+**The bound counted records, not candidates.** `remainingBudget` counted every non-discovery
+attempt for the agency and category. A candidate that was retrieved, found ineligible, rejected and
+superseded therefore spent three of the five slots by itself, and after two and a half candidates
+the round was stuck: `c-0498` could not even record the exclusion that resolved it. The frozen rule
+requires all five locked candidates to be examined, so a bound that halts the third is not
+enforcing the protocol — it is breaking it. `EFFORT_EXHAUSTED` applies once the five have outcomes,
+not before.
+
+**Obtaining a page meant asserting it qualified.** The capture path writes eligibility on its
+captured branch with criteria three and four set to `true` unconditionally, and it was the only way
+to retrieve a candidate. So reading a page in order to decide whether it qualified required first
+recording that it did. `c-0494` recorded `cadet-join.html` — a page with zero form elements and
+zero controls — as satisfying all five criteria, and had to be rejected and superseded. That is
+also *why* each candidate cost three records: the two defects compounded.
+
+### The rule
+
+1. The effort bound counts **distinct canonical candidate URLs** per agency and category. Further
+   records about a URL already counted — a retrieval, its exclusion, a correction, a supersession —
+   consume no additional slot and are preserved in the log as they always were. **A sixth distinct
+   URL is still refused**, which is what the bound is for.
+2. **Assessment-only retrieval.** `capture --retrieve-only` fetches a candidate under the same
+   robots, redirect, pacing and headed-fallback rules as a capture, and records `status: retrieved`
+   with the file, its digest, the browser provenance and **every eligibility criterion null**. It
+   may not carry `inclusionEvidence`. The researcher reads the markup and then either excludes from
+   that evidence, or promotes it.
+3. **Promotion does not re-request the page.** `promote --id <retrieval>` re-hashes the file on disk
+   against the digest the retrieval recorded, refuses if they differ, and writes the capture from
+   those same bytes. A promotion shares its retrieval's `pageId` and file by design; two *captured*
+   records naming one file remains an error.
+4. A retrieval is not a decision, so it need not be rejected before it is superseded — requiring
+   that would mean recording a verdict on the page in order to be allowed to record the verdict.
+
+### Criterion numbering
+
+Two exclusions were written with the wrong numbers and are corrected in the same change. The frozen
+order is: **1** publicly reachable without signing in, **2** reached from a frame website for that
+agency, **3** asks for the name of a natural person, **4** name field visible without entering data
+or submitting, **5** normal HTML or browser-rendered, not PDF or native.
+
+- `cadet-join.html` was written as failing criterion two. It does not: it was reached from an NZDF
+  frame website. It fails **three and four** — it asks for nothing and shows no name field.
+- The Military Portal sign-in page was written as failing criterion five. It does not: it is normal
+  HTML. It fails **three and four** — it asks for an email address and a password.
+
+The structural `--fails` keys were right in both records; the prose numbering was not, and prose is
+what a reader of the ledger sees.
+
+### What holds it
+
+Eleven cases in `capture/test/assessment-budget.test.mjs`: one candidate examined three times
+spending one slot; five distinct candidates filling the bound; a sixth refused; a further record
+about one of the five always allowed; the bound enforced against a real log; a retrieval recording
+bytes without a claim; a retrieval refused for asserting any criterion, for carrying inclusion
+evidence, or for missing its file, digest or page id; a retrieval needing no `exclusionReason`
+where every other non-capture does; and a promoted capture sharing its retrieval's file without
+reading as an orphan or a double-count.

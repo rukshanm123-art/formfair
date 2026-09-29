@@ -140,14 +140,38 @@ export function orderCandidates(urls) {
  * landing page inspected to find links - are recorded in the log for auditability but do
  * not consume the bound, because they are not forms being assessed.
  */
-export function remainingBudget(attempts, { agency, category }) {
+export function remainingBudget(attempts, { agency, category, url = null }) {
+  // Amendment 40. DISTINCT canonical candidate URLs, not attempt records.
+  //
+  // The bound is five candidates per category, and it counted every non-discovery attempt - so a
+  // candidate that was retrieved, found ineligible, rejected and superseded spent three of the five
+  // slots by itself. Assessing NZDF's five locked URLs became impossible after two and a half of
+  // them: `c-0498` could not even record the exclusion that resolved it. The frozen rule requires
+  // all five locked candidates to be examined, so a bound that stops the third is not enforcing the
+  // protocol, it is breaking it. Corrections and supersessions are preserved in the log and consume
+  // no slot, because they are the same candidate examined once.
+  //
+  // A SIXTH distinct URL is still refused, which is what the bound is actually for.
   const isCandidate = (a) => a.agency === agency && a.status !== 'discovery';
-  const inAgency = attempts.filter(isCandidate).length;
-  const inCategory = attempts.filter((a) => isCandidate(a) && a.category === category).length;
+  const keyOf = (a) => `${a.category ?? ''}\u0000${canonicalise(a.url)}`;
+  const agencyUrls = new Set(attempts.filter(isCandidate).map(keyOf));
+  const categoryUrls = new Set(
+    attempts.filter((a) => isCandidate(a) && a.category === category).map(keyOf)
+  );
+
+  // An attempt for a URL already counted is a further record about the SAME candidate and is
+  // always allowed; only a new one has to fit inside the bound.
+  const incoming = url === null ? null : `${category ?? ''}\u0000${canonicalise(url)}`;
+  const alreadyCounted = incoming !== null && categoryUrls.has(incoming);
+  const agencyFull = agencyUrls.size >= MAX_CANDIDATES_PER_AGENCY;
+  const categoryFull = categoryUrls.size >= MAX_CANDIDATES_PER_CATEGORY;
+
   return {
-    agencyRemaining: MAX_CANDIDATES_PER_AGENCY - inAgency,
-    categoryRemaining: MAX_CANDIDATES_PER_CATEGORY - inCategory,
-    exhausted: inAgency >= MAX_CANDIDATES_PER_AGENCY || inCategory >= MAX_CANDIDATES_PER_CATEGORY,
+    agencyRemaining: MAX_CANDIDATES_PER_AGENCY - agencyUrls.size,
+    categoryRemaining: MAX_CANDIDATES_PER_CATEGORY - categoryUrls.size,
+    distinctInAgency: agencyUrls.size,
+    distinctInCategory: categoryUrls.size,
+    exhausted: !alreadyCounted && (agencyFull || categoryFull),
   };
 }
 

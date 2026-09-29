@@ -13,13 +13,13 @@
   },
   "counts": {
     "discoveryPages": 474,
-    "candidatesAssessed": 19,
-    "captured": 3,
-    "excluded": 15,
+    "candidatesAssessed": 24,
+    "captured": 6,
+    "excluded": 17,
     "failed": 1,
     "captureBlocked": 0,
-    "pendingApprovalAttempts": 0,
-    "pendingApprovalCandidateSets": 1
+    "pendingApprovalAttempts": 2,
+    "pendingApprovalCandidateSets": 0
   },
   "discoveryByMethod": {
     "navigation": 197,
@@ -698,6 +698,54 @@
         "reason": "a UTF-8 text/plain robots file",
         "mediaType": "text/plain",
         "charset": "utf-8",
+        "challenge": null
+      }
+    },
+    {
+      "id": "r-0039",
+      "origin": "https://cadetforces.org.nz",
+      "url": "https://cadetforces.org.nz/robots.txt",
+      "fetchedAt": "2026-09-29T11:01:13Z",
+      "httpStatus": 404,
+      "disposition": "allow-all",
+      "contentType": null,
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "representation": null
+    },
+    {
+      "id": "r-0040",
+      "origin": "https://defencecareers.my.site.com",
+      "url": "https://defencecareers.my.site.com/robots.txt",
+      "fetchedAt": "2026-09-29T11:01:19Z",
+      "httpStatus": 200,
+      "disposition": "rules",
+      "contentType": "text/plain",
+      "bytes": 324,
+      "sha256": "47f36784aa2a506a6782fda340c58d6c43e8c5d6013d30031ea11a59287ca577",
+      "representation": {
+        "valid": true,
+        "reason": "a UTF-8 text/plain robots file",
+        "mediaType": "text/plain",
+        "charset": null,
+        "challenge": null
+      }
+    },
+    {
+      "id": "r-0041",
+      "origin": "https://nzdf.bravosolution.com",
+      "url": "https://nzdf.bravosolution.com/robots.txt",
+      "fetchedAt": "2026-09-29T11:01:27Z",
+      "httpStatus": 200,
+      "disposition": "unestablished",
+      "contentType": "text/html",
+      "bytes": 104,
+      "sha256": "4cbb150e8af9db24f6a7d51848ef8fbb60066a27b017fa85fb3537c922ede420",
+      "representation": {
+        "valid": false,
+        "reason": "the media type was text/html, not text/plain",
+        "mediaType": "text/html",
+        "charset": null,
         "challenge": null
       }
     }
@@ -3223,9 +3271,9 @@
       "locked": 5,
       "droppedBeyondBound": 1,
       "lockedAt": "2026-09-29T07:50:12Z",
-      "approval": "pending",
-      "approvedAt": null,
-      "approvalNote": null,
+      "approval": "approved",
+      "approvedAt": "2026-09-29T11:01:08Z",
+      "approvalNote": "Approved under selection-v1.0.37, whose unjudged-render gate this set passed at approval: all 16 rendered observations in the round carry exactly one matching judgement for their own category and round. Five candidates locked from 50 active records across 10 websites. Exact sign-in URLs and the category-specific /cadet-join.html are included; portal roots and the how-do-i-join landing pages are excluded under Amendment 8, and the three event-registration forms are excluded because registering for an event is not registering an account. The shared SmartProcure URL is deduplicated across the two nzdf.mil.nz websites. wp-login.php sorts sixth and falls beyond the frozen bound of five; it is not assessed. Eight active records yielded no candidate judgement: robots-unestablished x2 (Veterans' Affairs, an Imperva challenge in place of robots.txt, withheld without any content request) and retrieval-blocked x6 (Air Force Museum reCAPTCHA in both browser modes, CadetNet Cloudflare 403 headless before a successful headed read, and the CadetNet sitemap). Approving this set means these five URLs are what should be assessed, not that any is eligible.",
       "supportedByDiscoveryRecords": [
         "d-0442",
         "d-0443",

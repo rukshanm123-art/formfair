@@ -34,7 +34,7 @@ import {
   unresolvedDiscoveryRounds, openDiscoveryPermits, robotsCheckIsFresh, isDiscoverySuperseded,
   reopenCandidateSet, closeDiscoveryPermit, permitAudit, PERMIT_DISPOSITIONS, corpusBlockers,
   quarantineArtefact, recordDeviation, agencyResolutions, agencyResolution, reResolveExhaustion,
-  answerChain,
+  answerChain, sha256,
   renderBacklog, renderBacklogByUrl, renderPrerequisite, recordRender, findRender,
   findRenderForUrl, assertRenderEvidenceUsable, assertPermitUsable, adoptRender,
   reResolveCandidateSet, staleSetBindings,
@@ -156,7 +156,14 @@ async function doCapture() {
   const url = require_('url');
   const pageId = require_('page-id');
   const category = require_('category');
-  const evidence = require_('evidence');
+  // Amendment 40. `--retrieve-only` fetches the page and records the bytes without asserting
+  // anything about them, so the researcher can read the markup before deciding. Inclusion evidence
+  // is exactly what such a run has not got yet.
+  const retrieveOnly = has('retrieve-only');
+  const evidence = retrieveOnly ? null : require_('evidence');
+  if (retrieveOnly && flag('evidence')) {
+    die('--evidence cannot be given with --retrieve-only: a retrieval concludes nothing. Promote it afterwards.');
+  }
   const settleMs = Number(flag('settle-ms') ?? POLICY.postLoadSettleMs);
 
   const parsed = validateUrl(url);
@@ -388,7 +395,12 @@ async function doCapture() {
   }
 
   try {
-    appendAttempt(log, {
+    appendAttempt(log, retrieveOnly ? {
+      ...base, ...record, status: 'retrieved', category, pageId,
+      eligibility: Object.fromEntries(ELIGIBILITY_CRITERIA.map((c) => [c, null])),
+      attemptedModes,
+      politeness: { robots: verdict.reason, userAgent: record.userAgent, settleMs },
+    } : {
       ...base, ...record, status: 'captured',
       inclusionEvidence: evidence,
       eligibility: {
@@ -421,6 +433,64 @@ async function doCapture() {
   console.log(`captured ${pageId} (${record.htmlSha256.slice(0, 12)})`);
   console.log(`ledger: ${ledgerPath}`);
   console.log(draftHeld ? `draft held: ${draftHeld}` : 'draft written');
+}
+
+/**
+ * Promote an assessment-only retrieval into the corpus, from the bytes already held.
+ *
+ * Amendment 40. The page is NOT requested again: the file on disk is re-hashed against the digest
+ * the retrieval recorded, and the capture is written from that same file. A promotion that
+ * re-fetched would be assessing a different response from the one the researcher read, and the
+ * eligibility decision would then rest on bytes nobody looked at.
+ */
+function doPromote() {
+  const dir = require_('out');
+  const logPath = logPathFor(dir);
+  const log = readLog(logPath);
+  const id = require_('id');
+  const evidence = require_('evidence');
+
+  const retrieved = log.attempts.find((a) => a.id === id);
+  if (!retrieved) die(`no recorded attempt with id ${id}`);
+  if (retrieved.status !== 'retrieved') {
+    die(`${id} is a ${retrieved.status} attempt; only an assessment-only retrieval is promoted`);
+  }
+  if (log.attempts.some((a) => a.status === 'captured' && a.promotedFrom === id)) {
+    die(`${id} has already been promoted`);
+  }
+
+  // The bytes are re-hashed before anything is claimed about them. A retrieval whose file was
+  // edited or replaced after it was read must not become a capture on the strength of its record.
+  const file = join(resolve(dir), 'captures', retrieved.file);
+  let actual;
+  try {
+    actual = sha256(readFileSync(file));
+  } catch (error) {
+    die(`${id} names ${retrieved.file}, which cannot be read: ${error.message}`);
+  }
+  if (actual !== retrieved.htmlSha256) {
+    die(
+      `${retrieved.file} does not match the digest ${id} recorded ` +
+        `(${actual.slice(0, 12)} on disk, ${retrieved.htmlSha256.slice(0, 12)} recorded). ` +
+        'The evidence changed after it was retrieved; nothing is promoted.'
+    );
+  }
+
+  const { id: _drop, examinedAt: _at, status: _st, eligibility: _el, approval: _ap, ...carried } = retrieved;
+  appendAttempt(log, {
+    ...carried,
+    examinedAt: now(),
+    status: 'captured',
+    promotedFrom: id,
+    inclusionEvidence: evidence,
+    eligibility: Object.fromEntries(ELIGIBILITY_CRITERIA.map((c) => [c, true])),
+    approval: APPROVAL.PENDING,
+  });
+  writeLog(logPath, log);
+  writeDerived({ log, dir, frameSha256: flag('frame-sha256'), drawOrderSha256: flag('draw-order-sha256'), synthetic: has('synthetic') });
+  const record = log.attempts.at(-1);
+  console.log(`promoted ${id} -> ${record.id}: ${retrieved.pageId} (${actual.slice(0, 12)})`);
+  console.log('No request was made; the bytes are the ones already held.');
 }
 
 function doExclude() {
@@ -1686,7 +1756,7 @@ function doClosePermit() {
 
 const commands = { packet: doPacket, candidates: doCandidates, lock: doLock, 'approve-set': doApproveSet,
   'supersede-set': doSupersedeSet, publish: doPublish, next: doNext, capture: doCapture, exclude: doExclude, discovery: doDiscovery, budget: doBudget, approve: doApprove, status: doStatus, build: doBuild, exhaust: doExhaust, 'preflight-discovery': doPreflightDiscovery, 'reopen-set': doReopenSet, 'close-permit': doClosePermit,
-  deviation: doDeviation, 'recheck-robots': doRecheckRobots, 're-resolve': doReResolve,
+  deviation: doDeviation, 'recheck-robots': doRecheckRobots, promote: doPromote, 're-resolve': doReResolve,
   'render-discovery': doRenderDiscovery, 'correct-discovery': doCorrectDiscovery,
   'classify-render': doClassifyRender, 'adopt-render': doAdoptRender,
   're-resolve-set': doReResolveSet, 'continue-headed': doContinueHeaded };

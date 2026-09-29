@@ -86,7 +86,7 @@ function checkAttempt(attempt) {
   if (!attempt.agency) problems.push('agency is required');
   if (!attempt.website) problems.push('website is required');
   if (!attempt.url) problems.push('url is required');
-  if (!['captured', 'excluded', 'failed', 'capture-blocked', 'discovery'].includes(attempt.status)) {
+  if (!['captured', 'retrieved', 'excluded', 'failed', 'capture-blocked', 'discovery'].includes(attempt.status)) {
     problems.push('status must be captured, excluded, failed, capture-blocked or discovery');
   }
   // capture-v1.0.6. `capture-blocked` says the harness could not retrieve the page, and says
@@ -216,6 +216,26 @@ function checkAttempt(attempt) {
         'escape the per-category limit'
     );
   }
+  // Amendment 40. Assessment-only retrieval: the bytes, their digest and the browser that fetched
+  // them, and NO eligibility claim. The capture path asserts criteria three and four as true on its
+  // captured branch, so obtaining a page in order to decide whether it qualifies meant asserting
+  // that it did - which is how `c-0494` came to record a page with zero controls as satisfying all
+  // five. A retrieval that concludes nothing cannot make that mistake, and the researcher then
+  // excludes from it or promotes it without requesting the page a second time.
+  if (attempt.status === 'retrieved') {
+    if (!attempt.pageId) problems.push('a retrieved attempt needs a pageId');
+    if (!attempt.file) problems.push('a retrieved attempt needs a file');
+    if (!attempt.htmlSha256) problems.push('a retrieved attempt needs htmlSha256');
+    if (attempt.inclusionEvidence) {
+      problems.push('a retrieved attempt must not carry inclusionEvidence; it claims nothing');
+    }
+    if (ELIGIBILITY_CRITERIA.some((c) => attempt.eligibility?.[c] !== null)) {
+      problems.push(
+        'a retrieved attempt must leave every eligibility criterion null; it records what was ' +
+          'fetched, not what it means'
+      );
+    }
+  }
   if (attempt.status === 'captured') {
     if (!attempt.pageId) problems.push('a captured attempt needs a pageId');
     if (!attempt.file) problems.push('a captured attempt needs a file');
@@ -226,7 +246,8 @@ function checkAttempt(attempt) {
       problems.push('a captured attempt must satisfy all five eligibility criteria');
     }
   }
-  if (attempt.status !== 'captured' && attempt.status !== 'discovery' && !attempt.exclusionReason) {
+  if (attempt.status !== 'captured' && attempt.status !== 'retrieved' &&
+      attempt.status !== 'discovery' && !attempt.exclusionReason) {
     problems.push('a non-captured attempt needs an exclusionReason');
   }
   return problems;
@@ -240,7 +261,24 @@ function checkAttempt(attempt) {
 export function appendAttempt(log, attempt) {
   const problems = checkAttempt(attempt);
   if (problems.length) throw new Error(`invalid capture attempt:\n  ${problems.join('\n  ')}`);
-  if (attempt.pageId && log.attempts.some((a) => a.pageId === attempt.pageId)) {
+  // Amendment 40. A promotion carries its retrieval's pageId BY DESIGN: it is the same page, the
+  // same bytes and the same file, recorded now with an eligibility decision attached. The id
+  // collision rule exists to stop two different pages sharing one identity, which this is not.
+  const promotionOf = attempt.promotedFrom
+    ? log.attempts.find((a) => a.id === attempt.promotedFrom)
+    : null;
+  if (attempt.promotedFrom && !promotionOf) {
+    throw new Error(`promotedFrom names ${attempt.promotedFrom}, which is not a recorded attempt`);
+  }
+  if (promotionOf && promotionOf.status !== 'retrieved') {
+    throw new Error(
+      `${attempt.promotedFrom} is a ${promotionOf.status} attempt; only an assessment-only ` +
+        'retrieval is promoted'
+    );
+  }
+  if (attempt.pageId && log.attempts.some(
+    (a) => a.pageId === attempt.pageId && a.id !== attempt.promotedFrom
+  )) {
     throw new Error(`pageId ${attempt.pageId} is already recorded`);
   }
   // Per AGENCY, not globally: a third-party form linked by two agencies is genuine
@@ -449,7 +487,11 @@ export function appendAttempt(log, attempt) {
           `attempt supersedes (${attempt.agency} / ${attempt.url})`
       );
     }
-    if (target.approval !== APPROVAL.REJECTED) {
+    // Amendment 40. A retrieval is not a decision, so there is nothing to reject before resolving
+    // it. Its whole purpose is to be read and then settled - excluded from, or promoted - and
+    // requiring a rejection first would mean recording a verdict on the page in order to be allowed
+    // to record the verdict on the page.
+    if (target.status !== 'retrieved' && target.approval !== APPROVAL.REJECTED) {
       throw new Error(
         `attempt ${target.id} is ${target.approval}, not rejected; only a rejected decision ` +
           'is corrected by superseding it'
@@ -458,6 +500,10 @@ export function appendAttempt(log, attempt) {
     if (isSuperseded(log, target)) {
       throw new Error(`attempt ${target.id} has already been superseded`);
     }
+  } else if (attempt.promotedFrom) {
+    // Amendment 40. A promotion is the same candidate, the same URL and the same bytes; the
+    // duplicate-URL rule exists to stop one page being counted twice, and a promotion counts once.
+    // `promotedFrom` is validated above against a real retrieval of this page.
   } else if (priorForUrl.length > 0) {
     // A rejected decision is corrected by recording a NEW attempt that supersedes it. The
     // original stays in the log: a correction that erases what it corrected is not a
@@ -529,7 +575,9 @@ export function appendAttempt(log, attempt) {
   // The effort bound, enforced rather than remembered. Discovery pages do not consume it:
   // a sitemap or a search results page is inspected to FIND candidates, it is not one.
   if (attempt.status !== 'discovery') {
-    const budget = remainingBudget(log.attempts, { agency: attempt.agency, category: attempt.category });
+    const budget = remainingBudget(log.attempts, {
+      agency: attempt.agency, category: attempt.category, url: attempt.url,
+    });
     if (budget.exhausted) {
       throw new Error(
         `effort bound reached for ${attempt.agency}: at most ${MAX_CANDIDATES_PER_CATEGORY} candidates ` +
@@ -3879,9 +3927,14 @@ export function checkCaptureFiles(log, capturesDir) {
   }
   const owned = new Map();
   for (const a of log.attempts) {
-    if (a.status !== 'captured' || !a.file) continue;
-    if (owned.has(a.file)) problems.push(`two captured attempts name ${a.file}`);
-    owned.set(a.file, a);
+    // Amendment 40. A retrieved attempt owns its bytes too. Promotion reuses the SAME file rather
+    // than fetching the page again, so one file may be named by a retrieval and by the capture
+    // promoted from it; only two CAPTURED records naming one file is a double-count.
+    if (!['captured', 'retrieved'].includes(a.status) || !a.file) continue;
+    if (owned.has(a.file) && owned.get(a.file).status === 'captured' && a.status === 'captured') {
+      problems.push(`two captured attempts name ${a.file}`);
+    }
+    if (!owned.has(a.file) || a.status === 'captured') owned.set(a.file, a);
   }
   for (const file of present) {
     if (!owned.has(file)) {

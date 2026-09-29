@@ -168,7 +168,7 @@ const FRAME_FILES = [
  * exhaustion records at all. A manifest that misnames its own protocol is worse than one that
  * omits it: a reader checking which rules a corpus was sealed under would be told the wrong ones.
  */
-export const SOLO_PROTOCOL_TAG = 'solo-protocol-v1.0.17';
+export const SOLO_PROTOCOL_TAG = 'solo-protocol-v1.0.18';
 
 /**
  * Two resolutions, mirrored from the capture package and checked equal by a test.
