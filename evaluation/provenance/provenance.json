@@ -13,8 +13,8 @@
   },
   "counts": {
     "discoveryPages": 422,
-    "candidatesAssessed": 18,
-    "captured": 2,
+    "candidatesAssessed": 19,
+    "captured": 3,
     "excluded": 15,
     "failed": 1,
     "captureBlocked": 0,
