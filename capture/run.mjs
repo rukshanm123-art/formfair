@@ -1203,6 +1203,13 @@ export function deriveLedger(log) {
       a.pageId ?? '',
       a.htmlSha256 ?? '',
       a.approval,
+      // Amendment 38. The approval time and its stated reason, published with the row they
+      // decide. `c-0441`'s inclusion evidence flagged a category question for review, and the
+      // note that resolved it - citing the amendment that had already settled the classification
+      // before capture - lived only in the ignored log. The tracked audit therefore carried the
+      // doubt and not its answer, which reads worse than either alone.
+      a.approvedAt ?? '',
+      a.approvalNote ?? '',
     ]
       .map((v) => {
         const s = v === null || v === undefined ? '' : String(v);
@@ -1210,7 +1217,7 @@ export function deriveLedger(log) {
       })
       .join(',')
   );
-  const header = LEDGER_HEADER.trimEnd() + ',approval\n';
+  const header = LEDGER_HEADER.trimEnd() + ',approval,approvedAt,approvalNote\n';
   return header + rows.join('\n') + (rows.length ? '\n' : '');
 }
 
@@ -1461,6 +1468,29 @@ export function publishProvenance(log, { to, capturesRoot = null }) {
     // Deviations from the frozen protocol, published with the evidence they name so a reader does
     // not have to take the prose account on trust.
     deviations: (log.deviations ?? []).map((d) => ({ ...d })),
+    // Amendment 38. The robots observations the permits rest on. Every request in this scan is
+    // authorised by one of these, and `r-0029` - the 404 that permitted the NZSIS capture - was
+    // reachable only as prose inside another record's evidence text. A permission nobody can look
+    // up is a permission a reader has to take on trust.
+    //
+    // Sanitised deliberately. `body` is never published: it is a third-party document, and for a
+    // valid text/plain robots file `representation.text` holds that same body a second time. The
+    // representation is rebuilt field by field rather than spread, so a future field on the
+    // classifier cannot silently start publishing content.
+    robotsChecks: (log.robotsChecks ?? []).map((c) => ({
+      id: c.id, origin: c.origin ?? null, url: c.url ?? null, fetchedAt: c.fetchedAt ?? null,
+      httpStatus: c.httpStatus ?? null, disposition: c.disposition ?? null,
+      contentType: c.contentType ?? null, bytes: c.bytes ?? null, sha256: c.sha256 ?? null,
+      representation: c.representation
+        ? {
+            valid: c.representation.valid ?? null,
+            reason: c.representation.reason ?? null,
+            mediaType: c.representation.mediaType ?? null,
+            charset: c.representation.charset ?? null,
+            challenge: c.representation.challenge ?? null,
+          }
+        : null,
+    })),
     // The render registry: provenance and digests only. The rendered markup is third-party content
     // and stays in the ignored data tree; nothing here reproduces any of it.
     renders: (log.renders ?? []).map((r) => ({
@@ -1490,6 +1520,10 @@ export function publishProvenance(log, { to, capturesRoot = null }) {
       discovered: set.discovered.length, locked: set.locked.length,
       droppedBeyondBound: set.droppedBeyondBound?.length ?? 0,
       lockedAt: set.lockedAt, approval: set.approval, approvedAt: set.approvedAt ?? null,
+      // Amendment 38. Superseded sets published their approval note from the start; active ones
+      // did not, so the reasoning behind a set still in force was the only version a reader
+      // could not see.
+      approvalNote: set.approvalNote ?? null,
       supportedByDiscoveryRecords: set.discoveryRecordIds ?? [],
       discoveryMethods: set.discoveryMethods ?? [],
     })),

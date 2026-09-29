@@ -3264,3 +3264,64 @@ All three are `no-candidates` for `account-registration`, confirming what the pl
 
 The rendered DOM did show results the plain fetch did not, which is the point of rendering; it did not
 change the finding.
+
+## Amendment 38 — the publication carries the reasoning, and the permissions it rests on
+
+*Frozen as `selection-v1.0.36` and `solo-protocol-v1.0.16`, 29 September 2026.*
+
+A publication-only correction. No request was made, nothing was recaptured, no outcome, candidate
+set, category or selected page changed, and FormFair was not run.
+
+### What was wrong
+
+The omission only became visible once the third corpus page was approved, because it took an
+approved capture to expose it.
+
+`c-0441` — the NZSIS national-security reporting form — was captured with inclusion evidence that
+flagged a category question for review: the page is a form for reporting information to the agency
+rather than applying for a service, and `d-0307` had asserted the service-application
+classification without arguing it. That flag was published in the tracked ledger. The note that
+**resolved** it was not. `approvalNote` and `approvedAt` were recorded in the log, which is
+untracked research data, and the published audit therefore carried the doubt without its answer —
+a worse state than either alone, because a reader could see the objection and nothing addressing
+it. The resolution was already decisive and already frozen: Amendment 29 classified this exact
+page as a service-application candidate and argued it, two days before the capture.
+
+The same gap ran in the other direction for permissions. Every request in this scan is authorised
+by a robots observation, and none of those observations was published. `r-0029` — the HTTP 404 that
+permitted the NZSIS capture under RFC 9309 section 2.3.1.3 — appeared in the tracked files only as
+prose inside another record's evidence text, where it happened to be mentioned. A permission a
+reader cannot look up is a permission they have to take on trust, which is the thing this audit
+exists to avoid.
+
+Active candidate sets were the third case. A superseded set published its `approvalNote` from the
+start; an active one did not. The reasoning behind a set **still in force** was the only version a
+reader could not see.
+
+### The rule
+
+1. `selection-ledger.csv` carries `approvedAt` and `approvalNote` as the two columns after
+   `approval`. Every row has both fields, empty where there is no approval note, so the row shape
+   does not shift with the prose.
+2. `provenance.json` carries a `robotsChecks` record for every check: `id`, `origin`, `url`,
+   `fetchedAt`, `httpStatus`, `disposition`, `contentType`, `bytes`, `sha256`, and the
+   representation classification (`valid`, `reason`, `mediaType`, `charset`, `challenge`).
+3. **The response body is never published.** Neither `body`, nor the copy of that same body that
+   `classifyRepresentation` returns as `representation.text` for a valid robots file. The
+   representation is rebuilt field by field rather than spread, so a field added to the classifier
+   later cannot silently begin publishing content.
+4. Active `candidateSets` publish `approvalNote`, as superseded ones already did.
+
+### What holds it
+
+Seven cases in `capture/test/provenance.test.mjs`: the `c-0441` case, that an approved capture
+publishes its approval time and its resolution in full rather than truncated; that a row with no
+note still carries both columns; the `r-0029` case, that a referenced 404 is published as an
+`allow-all` observation with its digest and byte count; that no robots body reaches either file,
+including `representation.text` for a valid file and a challenge document for an invalid one, while
+the `Imperva/Incapsula` classification itself still does; that an approval note containing commas,
+double quotes and newlines survives as one field and does not become a second record; that an
+active set publishes its note; and that captured markup remains absent from both files.
+
+No capture tag accompanies this. Browser behaviour, retrieval, pacing and the permit boundary are
+untouched; only what is written into the two tracked files changes.

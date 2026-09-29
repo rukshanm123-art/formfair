@@ -127,6 +127,428 @@
       "requestsAffected": 0
     }
   ],
+  "robotsChecks": [
+    {
+      "id": "r-0001",
+      "origin": "https://www.health.govt.nz",
+      "url": "https://www.health.govt.nz/robots.txt",
+      "fetchedAt": "2026-09-25T05:16:25Z",
+      "httpStatus": 200,
+      "disposition": "rules",
+      "contentType": null,
+      "bytes": 2914,
+      "sha256": "209335a6afa4ff0426d7d48fa18b9979aa1b9e9ac511265435ee935552d5b75d",
+      "representation": null
+    },
+    {
+      "id": "r-0002",
+      "origin": "https://consult.health.govt.nz",
+      "url": "https://consult.health.govt.nz/robots.txt",
+      "fetchedAt": "2026-09-25T05:17:00Z",
+      "httpStatus": 200,
+      "disposition": "rules",
+      "contentType": null,
+      "bytes": 85,
+      "sha256": "bad4b8f5fd8f1ec6b96c865ab43b86784e65965788c76a2402e61342fdf4f9d6",
+      "representation": null
+    },
+    {
+      "id": "r-0003",
+      "origin": "https://ethics.health.govt.nz",
+      "url": "https://ethics.health.govt.nz/robots.txt",
+      "fetchedAt": "2026-09-25T05:17:27Z",
+      "httpStatus": 200,
+      "disposition": "rules",
+      "contentType": null,
+      "bytes": 89,
+      "sha256": "ad718a5883332b6a81fff8e835445b1239368583eb7522d532b699d60391c940",
+      "representation": null
+    },
+    {
+      "id": "r-0004",
+      "origin": "https://acart.health.govt.nz",
+      "url": "https://acart.health.govt.nz/robots.txt",
+      "fetchedAt": "2026-09-25T05:17:47Z",
+      "httpStatus": 200,
+      "disposition": "rules",
+      "contentType": null,
+      "bytes": 89,
+      "sha256": "ad718a5883332b6a81fff8e835445b1239368583eb7522d532b699d60391c940",
+      "representation": null
+    },
+    {
+      "id": "r-0005",
+      "origin": "https://ecart.health.govt.nz",
+      "url": "https://ecart.health.govt.nz/robots.txt",
+      "fetchedAt": "2026-09-25T05:18:01Z",
+      "httpStatus": 200,
+      "disposition": "rules",
+      "contentType": null,
+      "bytes": 89,
+      "sha256": "ad718a5883332b6a81fff8e835445b1239368583eb7522d532b699d60391c940",
+      "representation": null
+    },
+    {
+      "id": "r-0006",
+      "origin": "https://neac.health.govt.nz",
+      "url": "https://neac.health.govt.nz/robots.txt",
+      "fetchedAt": "2026-09-25T05:18:14Z",
+      "httpStatus": 200,
+      "disposition": "rules",
+      "contentType": null,
+      "bytes": 89,
+      "sha256": "ad718a5883332b6a81fff8e835445b1239368583eb7522d532b699d60391c940",
+      "representation": null
+    },
+    {
+      "id": "r-0007",
+      "origin": "https://www.medsafe.govt.nz",
+      "url": "https://www.medsafe.govt.nz/robots.txt",
+      "fetchedAt": "2026-09-25T05:18:28Z",
+      "httpStatus": 200,
+      "disposition": "rules",
+      "contentType": null,
+      "bytes": 31,
+      "sha256": "b53ca6dd888e8ee7411388a888cae98163e5983849ed2ecf5a94cd20fa23cc29",
+      "representation": null
+    },
+    {
+      "id": "r-0008",
+      "origin": "https://tatai.maori.nz",
+      "url": "https://tatai.maori.nz/robots.txt",
+      "fetchedAt": "2026-09-25T05:18:43Z",
+      "httpStatus": 403,
+      "disposition": "allow-all",
+      "contentType": null,
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "representation": null
+    },
+    {
+      "id": "r-0009",
+      "origin": "https://minhealthnz.shinyapps.io",
+      "url": "https://minhealthnz.shinyapps.io/robots.txt",
+      "fetchedAt": "2026-09-25T05:18:57Z",
+      "httpStatus": 200,
+      "disposition": "rules",
+      "contentType": null,
+      "bytes": 25,
+      "sha256": "efdb5938a9736727f5cce2b60355588e4fa541d19d022d222d8a09b8efd5dcce",
+      "representation": null
+    },
+    {
+      "id": "r-0010",
+      "origin": "https://health.wd105.myworkdayjobs.com",
+      "url": "https://health.wd105.myworkdayjobs.com/robots.txt",
+      "fetchedAt": "2026-09-25T05:19:00Z",
+      "httpStatus": 200,
+      "disposition": "rules",
+      "contentType": null,
+      "bytes": 126,
+      "sha256": "72752572756c418312cec43036d2d6d6cdb144ebcadcc0601bb62bd2d878bb1c",
+      "representation": null
+    },
+    {
+      "id": "r-0011",
+      "origin": "https://minhealthnz.shinyapps.io",
+      "url": "https://minhealthnz.shinyapps.io/robots.txt",
+      "fetchedAt": "2026-09-25T06:02:59Z",
+      "httpStatus": 200,
+      "disposition": "rules",
+      "contentType": null,
+      "bytes": 25,
+      "sha256": "efdb5938a9736727f5cce2b60355588e4fa541d19d022d222d8a09b8efd5dcce",
+      "representation": null
+    },
+    {
+      "id": "r-0012",
+      "origin": "https://www.nzsis.govt.nz",
+      "url": "https://www.nzsis.govt.nz/robots.txt",
+      "fetchedAt": "2026-09-26T19:06:43Z",
+      "httpStatus": 200,
+      "disposition": "rules",
+      "contentType": null,
+      "bytes": 212,
+      "sha256": "d02032286070b4dd9d8fbd985a7bdca8af8edf52b89ff177db3bfcb2c8a9c43d",
+      "representation": null
+    },
+    {
+      "id": "r-0013",
+      "origin": "https://www.protectivesecurity.govt.nz",
+      "url": "https://www.protectivesecurity.govt.nz/robots.txt",
+      "fetchedAt": "2026-09-26T19:07:03Z",
+      "httpStatus": 200,
+      "disposition": "rules",
+      "contentType": null,
+      "bytes": 212,
+      "sha256": "d02032286070b4dd9d8fbd985a7bdca8af8edf52b89ff177db3bfcb2c8a9c43d",
+      "representation": null
+    },
+    {
+      "id": "r-0014",
+      "origin": "https://providinginformation.nzsis.govt.nz",
+      "url": "https://providinginformation.nzsis.govt.nz/robots.txt",
+      "fetchedAt": "2026-09-26T19:07:21Z",
+      "httpStatus": 404,
+      "disposition": "allow-all",
+      "contentType": null,
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "representation": null
+    },
+    {
+      "id": "r-0015",
+      "origin": "https://www.nzsis.govt.nz",
+      "url": "https://www.nzsis.govt.nz/robots.txt",
+      "fetchedAt": "2026-09-26T20:25:02Z",
+      "httpStatus": 200,
+      "disposition": "unestablished",
+      "contentType": "text/html",
+      "bytes": 212,
+      "sha256": "d02032286070b4dd9d8fbd985a7bdca8af8edf52b89ff177db3bfcb2c8a9c43d",
+      "representation": {
+        "valid": false,
+        "reason": "the media type was text/html, not text/plain",
+        "mediaType": "text/html",
+        "charset": null,
+        "challenge": "Imperva/Incapsula"
+      }
+    },
+    {
+      "id": "r-0016",
+      "origin": "https://www.protectivesecurity.govt.nz",
+      "url": "https://www.protectivesecurity.govt.nz/robots.txt",
+      "fetchedAt": "2026-09-26T20:25:12Z",
+      "httpStatus": 200,
+      "disposition": "unestablished",
+      "contentType": "text/html",
+      "bytes": 212,
+      "sha256": "d02032286070b4dd9d8fbd985a7bdca8af8edf52b89ff177db3bfcb2c8a9c43d",
+      "representation": {
+        "valid": false,
+        "reason": "the media type was text/html, not text/plain",
+        "mediaType": "text/html",
+        "charset": null,
+        "challenge": "Imperva/Incapsula"
+      }
+    },
+    {
+      "id": "r-0017",
+      "origin": "https://preventfvsv.govt.nz",
+      "url": "https://preventfvsv.govt.nz/robots.txt",
+      "fetchedAt": "2026-09-27T08:29:06Z",
+      "httpStatus": 200,
+      "disposition": "rules",
+      "contentType": "text/plain",
+      "bytes": 102,
+      "sha256": "26238980eb5042326398f2889d4f0af78a58563d56385209427650b46624a419",
+      "representation": {
+        "valid": true,
+        "reason": "a UTF-8 text/plain robots file",
+        "mediaType": "text/plain",
+        "charset": null,
+        "challenge": null
+      }
+    },
+    {
+      "id": "r-0018",
+      "origin": "https://www.tpk.govt.nz",
+      "url": "https://www.tpk.govt.nz/robots.txt",
+      "fetchedAt": "2026-09-27T08:29:13Z",
+      "httpStatus": 404,
+      "disposition": "allow-all",
+      "contentType": null,
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "representation": null
+    },
+    {
+      "id": "r-0019",
+      "origin": "https://www.tupu.nz",
+      "url": "https://www.tupu.nz/robots.txt",
+      "fetchedAt": "2026-09-27T08:29:19Z",
+      "httpStatus": 404,
+      "disposition": "allow-all",
+      "contentType": null,
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "representation": null
+    },
+    {
+      "id": "r-0020",
+      "origin": "https://www.health.govt.nz",
+      "url": "https://www.health.govt.nz/robots.txt",
+      "fetchedAt": "2026-09-27T08:29:26Z",
+      "httpStatus": 200,
+      "disposition": "rules",
+      "contentType": "text/plain; charset=UTF-8",
+      "bytes": 2914,
+      "sha256": "209335a6afa4ff0426d7d48fa18b9979aa1b9e9ac511265435ee935552d5b75d",
+      "representation": {
+        "valid": true,
+        "reason": "a UTF-8 text/plain robots file",
+        "mediaType": "text/plain",
+        "charset": "utf-8",
+        "challenge": null
+      }
+    },
+    {
+      "id": "r-0021",
+      "origin": "https://ethics.health.govt.nz",
+      "url": "https://ethics.health.govt.nz/robots.txt",
+      "fetchedAt": "2026-09-27T08:29:32Z",
+      "httpStatus": 200,
+      "disposition": "rules",
+      "contentType": "text/plain",
+      "bytes": 89,
+      "sha256": "ad718a5883332b6a81fff8e835445b1239368583eb7522d532b699d60391c940",
+      "representation": {
+        "valid": true,
+        "reason": "a UTF-8 text/plain robots file",
+        "mediaType": "text/plain",
+        "charset": null,
+        "challenge": null
+      }
+    },
+    {
+      "id": "r-0022",
+      "origin": "https://www.tkm.govt.nz",
+      "url": "https://www.tkm.govt.nz/robots.txt",
+      "fetchedAt": "2026-09-27T08:29:38Z",
+      "httpStatus": 200,
+      "disposition": "rules",
+      "contentType": "text/plain",
+      "bytes": 84,
+      "sha256": "efc496fd4366c9fa93ec69a2e05c2c5c35499a61f687d90d47e12948e2866281",
+      "representation": {
+        "valid": true,
+        "reason": "a UTF-8 text/plain robots file",
+        "mediaType": "text/plain",
+        "charset": null,
+        "challenge": null
+      }
+    },
+    {
+      "id": "r-0023",
+      "origin": "https://consult.health.govt.nz",
+      "url": "https://consult.health.govt.nz/robots.txt",
+      "fetchedAt": "2026-09-27T08:29:45Z",
+      "httpStatus": 200,
+      "disposition": "rules",
+      "contentType": "text/plain; charset=UTF-8",
+      "bytes": 85,
+      "sha256": "bad4b8f5fd8f1ec6b96c865ab43b86784e65965788c76a2402e61342fdf4f9d6",
+      "representation": {
+        "valid": true,
+        "reason": "a UTF-8 text/plain robots file",
+        "mediaType": "text/plain",
+        "charset": "utf-8",
+        "challenge": null
+      }
+    },
+    {
+      "id": "r-0024",
+      "origin": "https://www.medsafe.govt.nz",
+      "url": "https://www.medsafe.govt.nz/robots.txt",
+      "fetchedAt": "2026-09-27T08:29:51Z",
+      "httpStatus": 200,
+      "disposition": "rules",
+      "contentType": "text/plain",
+      "bytes": 31,
+      "sha256": "b53ca6dd888e8ee7411388a888cae98163e5983849ed2ecf5a94cd20fa23cc29",
+      "representation": {
+        "valid": true,
+        "reason": "a UTF-8 text/plain robots file",
+        "mediaType": "text/plain",
+        "charset": null,
+        "challenge": null
+      }
+    },
+    {
+      "id": "r-0025",
+      "origin": "https://tehaeata.govt.nz",
+      "url": "https://tehaeata.govt.nz/robots.txt",
+      "fetchedAt": "2026-09-27T08:29:58Z",
+      "httpStatus": 200,
+      "disposition": "rules",
+      "contentType": "text/plain",
+      "bytes": 2005,
+      "sha256": "17f7b0b22f4a02e7b9d4b252bf47b78870c738d7f35dcfdb043b02470e347603",
+      "representation": {
+        "valid": true,
+        "reason": "a UTF-8 text/plain robots file",
+        "mediaType": "text/plain",
+        "charset": null,
+        "challenge": null
+      }
+    },
+    {
+      "id": "r-0026",
+      "origin": "https://acart.health.govt.nz",
+      "url": "https://acart.health.govt.nz/robots.txt",
+      "fetchedAt": "2026-09-27T08:30:05Z",
+      "httpStatus": 200,
+      "disposition": "rules",
+      "contentType": "text/plain",
+      "bytes": 89,
+      "sha256": "ad718a5883332b6a81fff8e835445b1239368583eb7522d532b699d60391c940",
+      "representation": {
+        "valid": true,
+        "reason": "a UTF-8 text/plain robots file",
+        "mediaType": "text/plain",
+        "charset": null,
+        "challenge": null
+      }
+    },
+    {
+      "id": "r-0027",
+      "origin": "https://ecart.health.govt.nz",
+      "url": "https://ecart.health.govt.nz/robots.txt",
+      "fetchedAt": "2026-09-27T08:30:11Z",
+      "httpStatus": 200,
+      "disposition": "rules",
+      "contentType": "text/plain",
+      "bytes": 89,
+      "sha256": "ad718a5883332b6a81fff8e835445b1239368583eb7522d532b699d60391c940",
+      "representation": {
+        "valid": true,
+        "reason": "a UTF-8 text/plain robots file",
+        "mediaType": "text/plain",
+        "charset": null,
+        "challenge": null
+      }
+    },
+    {
+      "id": "r-0028",
+      "origin": "https://neac.health.govt.nz",
+      "url": "https://neac.health.govt.nz/robots.txt",
+      "fetchedAt": "2026-09-27T08:30:18Z",
+      "httpStatus": 200,
+      "disposition": "rules",
+      "contentType": "text/plain",
+      "bytes": 89,
+      "sha256": "ad718a5883332b6a81fff8e835445b1239368583eb7522d532b699d60391c940",
+      "representation": {
+        "valid": true,
+        "reason": "a UTF-8 text/plain robots file",
+        "mediaType": "text/plain",
+        "charset": null,
+        "challenge": null
+      }
+    },
+    {
+      "id": "r-0029",
+      "origin": "https://providinginformation.nzsis.govt.nz",
+      "url": "https://providinginformation.nzsis.govt.nz/robots.txt",
+      "fetchedAt": "2026-09-29T04:00:04Z",
+      "httpStatus": 404,
+      "disposition": "allow-all",
+      "contentType": null,
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "representation": null
+    }
+  ],
   "renders": [
     {
       "id": "g-0001",
@@ -1750,6 +2172,7 @@
       "lockedAt": "2026-09-24T09:05:31Z",
       "approval": "approved",
       "approvedAt": "2026-09-24T09:17:33Z",
+      "approvalNote": null,
       "supportedByDiscoveryRecords": [
         "d-0016",
         "d-0017",
@@ -1784,6 +2207,7 @@
       "lockedAt": "2026-09-24T09:39:39Z",
       "approval": "approved",
       "approvedAt": "2026-09-24T09:40:39Z",
+      "approvalNote": null,
       "supportedByDiscoveryRecords": [
         "d-0050",
         "d-0051",
@@ -1822,6 +2246,7 @@
       "lockedAt": "2026-09-24T10:16:12Z",
       "approval": "approved",
       "approvedAt": "2026-09-25T03:14:12Z",
+      "approvalNote": null,
       "supportedByDiscoveryRecords": [
         "d-0071",
         "d-0072",
@@ -1846,6 +2271,7 @@
       "lockedAt": "2026-09-25T03:26:42Z",
       "approval": "approved",
       "approvedAt": "2026-09-25T03:48:21Z",
+      "approvalNote": null,
       "supportedByDiscoveryRecords": [
         "d-0084",
         "d-0085",
@@ -1873,6 +2299,7 @@
       "lockedAt": "2026-09-25T03:45:43Z",
       "approval": "approved",
       "approvedAt": "2026-09-25T03:48:12Z",
+      "approvalNote": null,
       "supportedByDiscoveryRecords": [
         "d-0101",
         "d-0102",
@@ -1916,6 +2343,7 @@
       "lockedAt": "2026-09-25T03:55:28Z",
       "approval": "approved",
       "approvedAt": "2026-09-25T04:03:08Z",
+      "approvalNote": null,
       "supportedByDiscoveryRecords": [
         "d-0134",
         "d-0135",
@@ -1942,6 +2370,7 @@
       "lockedAt": "2026-09-25T04:04:52Z",
       "approval": "approved",
       "approvedAt": "2026-09-25T04:06:33Z",
+      "approvalNote": null,
       "supportedByDiscoveryRecords": [
         "d-0141",
         "d-0142",
@@ -1967,6 +2396,7 @@
       "lockedAt": "2026-09-25T06:03:08Z",
       "approval": "approved",
       "approvedAt": "2026-09-25T07:15:36Z",
+      "approvalNote": null,
       "supportedByDiscoveryRecords": [
         "d-0198",
         "d-0199",
@@ -2012,6 +2442,7 @@
       "lockedAt": "2026-09-25T07:20:36Z",
       "approval": "approved",
       "approvedAt": "2026-09-26T02:17:56Z",
+      "approvalNote": null,
       "supportedByDiscoveryRecords": [
         "d-0226",
         "d-0227",
@@ -2057,6 +2488,7 @@
       "lockedAt": "2026-09-26T03:37:47Z",
       "approval": "approved",
       "approvedAt": "2026-09-26T04:54:33Z",
+      "approvalNote": null,
       "supportedByDiscoveryRecords": [
         "d-0256",
         "d-0257",
@@ -2107,6 +2539,7 @@
       "lockedAt": "2026-09-26T20:28:52Z",
       "approval": "approved",
       "approvedAt": "2026-09-27T06:45:09Z",
+      "approvalNote": "Re-approved after re-binding. The set now stands on d-0309 rather than the superseded d-0301: d-0309 is the rendered-DOM judgement of no-candidates for account-registration, citing render g-0001 from d-0306. Zero candidates, under a discovery round that was withheld on two of three origins because both serve Imperva/Incapsula challenges in place of robots.txt. This does not mean NZSIS publishes no registration form. See v-0001 and Amendment 30.",
       "supportedByDiscoveryRecords": [
         "d-0293",
         "d-0294",
@@ -2134,6 +2567,7 @@
       "lockedAt": "2026-09-26T22:28:39Z",
       "approval": "approved",
       "approvedAt": "2026-09-27T06:28:36Z",
+      "approvalNote": "One candidate: the NZSIS national-security reporting form at providinginformation.nzsis.govt.nz, identified from render g-0001 (efe26268, 15971 bytes, re-verified). Discovery on the other two origins was withheld, not performed: both serve Imperva/Incapsula challenges in place of robots.txt, so no policy could be established and no request was made. Approving this set means this one URL is what should be assessed, not that it is eligible.",
       "supportedByDiscoveryRecords": [
         "d-0302",
         "d-0303",
