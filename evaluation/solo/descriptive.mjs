@@ -168,7 +168,7 @@ const FRAME_FILES = [
  * exhaustion records at all. A manifest that misnames its own protocol is worse than one that
  * omits it: a reader checking which rules a corpus was sealed under would be told the wrong ones.
  */
-export const SOLO_PROTOCOL_TAG = 'solo-protocol-v1.0.14';
+export const SOLO_PROTOCOL_TAG = 'solo-protocol-v1.0.15';
 
 /**
  * Two resolutions, mirrored from the capture package and checked equal by a test.
@@ -357,9 +357,15 @@ export function renderLedgerProblems(log, renderedDir) {
       if (a.permitId) problems.push(`${where} names a permit`);
       if (a.navigationPerformed !== false) problems.push(`${where} does not record navigationPerformed: false`);
       if (!a.renderId) problems.push(`${where} cites no rendered evidence`);
+      // solo-protocol-v1.0.15: the two links name different roles and must differ in a correction
+      // chain - the obligation discharged, and the prior judgement corrected. Ambiguity arises only
+      // when the superseded record is itself an obligation rather than a judgement.
       if (a.answersDiscoveryId && a.supersedesDiscoveryId &&
           a.answersDiscoveryId !== a.supersedesDiscoveryId) {
-        problems.push(`${where} answers one record and supersedes another`);
+        const sup = byId.get(a.supersedesDiscoveryId);
+        if (sup && sup.recordType !== 'judgement-only') {
+          problems.push(`${where} answers one record and supersedes another that is not a judgement`);
+        }
       }
     }
 
@@ -457,6 +463,30 @@ export function renderLedgerProblems(log, renderedDir) {
             }
           }
         }
+      }
+    }
+
+    // solo-protocol-v1.0.15. The answer link is a property of the correction CHAIN, recovered by
+    // walking every supersession backwards. A correction that drops it silently reopens the
+    // obligation it discharged; one that changes it resolves a different obligation than the chain
+    // established. A chain that never carried a link stays valid - there is nothing to have lost.
+    if (a.recordType === 'judgement-only' && !withdrawn) {
+      const seen = new Set();
+      const links = new Set();
+      let cur = a;
+      while (cur && !seen.has(cur.id)) {
+        seen.add(cur.id);
+        if (cur.answersDiscoveryId) links.add(cur.answersDiscoveryId);
+        cur = cur.supersedesDiscoveryId ? byId.get(cur.supersedesDiscoveryId) : null;
+      }
+      const where = a.id ?? '(an unidentified record)';
+      if (links.size > 1) {
+        problems.push(`${where}'s correction chain answers more than one record (${[...links].join(', ')})`);
+      } else if (links.size === 1 && a.answersDiscoveryId !== [...links][0]) {
+        problems.push(
+          `${where} is the active end of a chain answering ${[...links][0]} but names ` +
+            `${a.answersDiscoveryId ? a.answersDiscoveryId : 'none'}`
+        );
       }
     }
 
@@ -582,6 +612,23 @@ export function renderLedgerProblems(log, renderedDir) {
       if (full) verifyBytes(a.id, full, a.renderedSha256, a.renderedBytes);
     }
   }
+  // solo-protocol-v1.0.15: one active judgement per obligation. Two were accepted and were free to
+  // contradict each other, with nothing saying which answered the record.
+  {
+    const byAnswer = new Map();
+    for (const a of attempts) {
+      if (a.recordType !== 'judgement-only') continue;
+      if (!a.answersDiscoveryId || superseded.has(a.id)) continue;
+      if (!byAnswer.has(a.answersDiscoveryId)) byAnswer.set(a.answersDiscoveryId, []);
+      byAnswer.get(a.answersDiscoveryId).push(a);
+    }
+    for (const [answered, judgements] of byAnswer) {
+      if (judgements.length > 1) {
+        problems.push(`${answered} is answered by ${judgements.length} active judgements`);
+      }
+    }
+  }
+
   return problems;
 }
 

@@ -301,6 +301,21 @@ export function appendAttempt(log, attempt) {
     if (!target) {
       throw new Error(`supersedesDiscoveryId ${attempt.supersedesDiscoveryId} matches no recorded attempt`);
     }
+    // selection-v1.0.35. The chain's answer link is inherited, not dropped and not changed.
+    const inherited = answerChain(log, target);
+    if (inherited.conflict) {
+      throw new Error(
+        `the correction chain through ${target.id} answers more than one record ` +
+          `(${inherited.answers.join(', ')}); a chain of corrections resolves one obligation`
+      );
+    }
+    if (inherited.stable && attempt.answersDiscoveryId !== inherited.stable) {
+      throw new Error(
+        `this correction must keep answering ${inherited.stable}, which its chain established` +
+          (attempt.answersDiscoveryId ? `, not ${attempt.answersDiscoveryId}` : '; it names none') +
+          '. A correction that drops the link silently reopens the obligation it discharged.'
+      );
+    }
     if (target.status !== 'discovery') {
       throw new Error(`${target.id} is a ${target.status} attempt; only a discovery record is corrected this way`);
     }
@@ -2780,13 +2795,22 @@ export function checkRenderLedger(log, renderedDir) {
         problems.push(`${where} does not record navigationPerformed: false`);
       }
       if (!a.renderId) problems.push(`${where} cites no rendered evidence`);
-      // If it resolves a prior record, it resolves exactly one.
+      // selection-v1.0.35. The two links name different ROLES, and in a correction chain they must
+      // differ: `answersDiscoveryId` is the plain-retrieval obligation being discharged, and
+      // `supersedesDiscoveryId` is the prior JUDGEMENT being corrected. selection-v1.0.27 required
+      // them equal, which was written before a judgement carrying an answer could be corrected -
+      // and it refused `d-0377`, the repair that restores an answer link, for being exactly what it
+      // is. Ambiguity only arises when the superseded record is itself an obligation rather than a
+      // judgement, because then two different records are being resolved at once.
       if (a.answersDiscoveryId && a.supersedesDiscoveryId &&
           a.answersDiscoveryId !== a.supersedesDiscoveryId) {
-        problems.push(
-          `${where} answers ${a.answersDiscoveryId} and supersedes ${a.supersedesDiscoveryId}; a ` +
-            'judgement resolves one record, or it is unclear which it resolved'
-        );
+        const superseded = log.attempts.find((x) => x.id === a.supersedesDiscoveryId);
+        if (superseded && superseded.recordType !== RECORD_TYPES.JUDGEMENT_ONLY) {
+          problems.push(
+            `${where} answers ${a.answersDiscoveryId} and supersedes ${a.supersedesDiscoveryId}, which ` +
+              'is not a judgement; it is unclear which record it resolved'
+          );
+        }
       }
     }
 
@@ -2881,6 +2905,22 @@ export function checkRenderLedger(log, renderedDir) {
       }
     }
 
+    // selection-v1.0.35. The chain's answer link, and at most one active judgement per obligation.
+    if (a.recordType === RECORD_TYPES.JUDGEMENT_ONLY && !withdrawn) {
+      const inherited = answerChain(log, a);
+      if (inherited.conflict) {
+        problems.push(
+          `${a.id}'s correction chain answers more than one record (${inherited.answers.join(', ')}); ` +
+            'a chain of corrections resolves one obligation'
+        );
+      } else if (inherited.stable && a.answersDiscoveryId !== inherited.stable) {
+        problems.push(
+          `${a.id} is the active end of a chain that answers ${inherited.stable}, but names ` +
+            `${a.answersDiscoveryId ? a.answersDiscoveryId : 'none'}; the obligation it discharged would reopen`
+        );
+      }
+    }
+
     // selection-v1.0.29. The flag that discharges a backlog obligation, validated where it is
     // trusted. Checked for every record carrying it, superseded or not: a withdrawn record discharges
     // nothing, but a malformed claim is still worth naming.
@@ -2919,6 +2959,27 @@ export function checkRenderLedger(log, renderedDir) {
       if (full) verifyBytes(a.id, full, a.renderedSha256, a.renderedBytes);
     }
   }
+  // selection-v1.0.35. One active judgement per obligation. Two were accepted, and they were free to
+  // contradict each other: nothing said which of them answered the record.
+  {
+    const byAnswer = new Map();
+    for (const a of attempts) {
+      if (a.recordType !== RECORD_TYPES.JUDGEMENT_ONLY) continue;
+      if (!a.answersDiscoveryId) continue;
+      if (isDiscoverySuperseded(log, a.id)) continue;
+      if (!byAnswer.has(a.answersDiscoveryId)) byAnswer.set(a.answersDiscoveryId, []);
+      byAnswer.get(a.answersDiscoveryId).push(a);
+    }
+    for (const [answered, judgements] of byAnswer) {
+      if (judgements.length > 1) {
+        problems.push(
+          `${answered} is answered by ${judgements.length} active judgements ` +
+            `(${judgements.map((j) => `${j.id}:${j.outcome}`).join(', ')}); one obligation, one judgement`
+        );
+      }
+    }
+  }
+
   return problems;
 }
 
@@ -3228,6 +3289,42 @@ export function renderBarredProblems(log, attempt) {
 }
 
 /**
+ * The answer link a correction chain carries, recovered from the whole chain.
+ *
+ * selection-v1.0.35. `correct-discovery` copied nothing: superseding `d-0373` to give it a proper
+ * note produced `d-0374` with no `answersDiscoveryId`, and `d-0018`'s obligation silently reopened.
+ * It failed safe that once - the backlog grew rather than shrinking - but the rule cannot be "copy
+ * from the immediate target" either, because a chain three links long would lose the link at the
+ * second correction.
+ *
+ * So the link is a property of the CHAIN. It is recovered by walking every supersession backwards,
+ * and the active record must carry exactly the one the chain established. A chain that never had one
+ * - the NZSIS `d-0301` -> `d-0308` -> `d-0309` chain, written before judgements carried answers -
+ * stays valid, because there is nothing for it to have lost.
+ */
+export function answerChain(log, attempt) {
+  const chain = [];
+  const answers = new Set();
+  const seen = new Set();
+  let current = attempt;
+  while (current && !seen.has(current.id)) {
+    seen.add(current.id);
+    chain.push(current.id);
+    if (current.answersDiscoveryId) answers.add(current.answersDiscoveryId);
+    current = current.supersedesDiscoveryId
+      ? log.attempts.find((a) => a.id === current.supersedesDiscoveryId)
+      : null;
+  }
+  return {
+    chain,
+    answers: [...answers],
+    stable: answers.size === 1 ? [...answers][0] : null,
+    conflict: answers.size > 1,
+  };
+}
+
+/**
+ * Every headed observation must have exactly one valid headless predecessor./**
  * Every headed observation must have exactly one valid headless predecessor.
  *
  * selection-v1.0.33. The fallback relationship was checked only where it was WRITTEN, and once more

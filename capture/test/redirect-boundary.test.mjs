@@ -27,7 +27,7 @@ import {
   emptyLog, recordRobotsCheck, renderBacklog, appendAttempt, sha256, checkRenderLedger,
   renderRefusalProblems, quarantineArtefact, closeDiscoveryPermit, issueDiscoveryPermit,
   permitAudit, checkPermitLedger, ELIGIBILITY_CRITERIA, renderBarredProblems,
-  assertRenderEvidenceUsable,
+  assertRenderEvidenceUsable, answerChain,
 } from '../run.mjs';
 import { evaluatePolicy } from '../robots-policy.mjs';
 
@@ -997,5 +997,185 @@ describe('a rendered judgement may answer the plain record it upgrades', () => {
       outcome: 'no-candidates', category: 'service-application', candidateSetVersion: 2,
       navigationPerformed: false, checkedAt: '2026-09-28T00:00:00Z', approval: 'approved',
     }), /a judgement answers a record in its own round/);
+  });
+});
+
+describe('the answer link belongs to the correction chain', () => {
+  /**
+   * selection-v1.0.35. `correct-discovery` copied nothing, so superseding a judgement to fix its note
+   * dropped the link saying which obligation it discharged, and that obligation silently reopened. It
+   * failed safe once - but "copy from the immediate target" would still lose the link at the second
+   * correction of a three-link chain, so the link is a property of the whole chain.
+   */
+  const iso = (ms) => new Date(ms).toISOString().replace(/\.\d{3}Z$/, 'Z');
+
+  const build = () => {
+    const t = Date.now();
+    const dir = mkdtempSync(join(tmpdir(), 'ff-chain-'));
+    mkdirSync(join(dir, 'rendered'), { recursive: true });
+    const html = '<html><body><input id="q" type="text"></body></html>';
+    writeFileSync(join(dir, 'rendered', 'g1.html'), html);
+    const log = emptyLog();
+    recordRobotsCheck(log, {
+      origin: 'https://a.govt.nz', url: 'https://a.govt.nz/robots.txt', fetchedAt: iso(t - 90 * 60_000),
+      httpStatus: 200, disposition: 'rules', sha256: sha256(''), bytes: 0, body: '',
+    });
+    appendAttempt(log, {
+      examinedAt: iso(t - 3 * 24 * 3600_000), agency: 'A', website: 'https://a.govt.nz/',
+      url: 'https://a.govt.nz/apply', status: 'discovery', discoveryKind: 'navigation',
+      outcome: 'no-candidates', category: 'service-application', candidateSetVersion: 1,
+      navigatedAt: iso(t - 3 * 24 * 3600_000), approval: 'approved',
+    });
+    const obligation = log.attempts.at(-1);
+    log.discoveryPermits = [{
+      id: 'p-0001', agency: 'A', category: 'service-application', candidateSetVersion: 1,
+      url: 'https://a.govt.nz/apply', robotsCheckId: 'r-0001',
+      issuedAt: iso(t - 80 * 60_000), consumedAt: iso(t - 80 * 60_000 + 20_000),
+    }];
+    log.renders = [{
+      id: 'g-0001', url: 'https://a.govt.nz/apply', navigatedAt: iso(t - 80 * 60_000 + 10_000),
+      permitId: 'p-0001', renderFile: 'g1.html', renderedSha256: sha256(html),
+      renderedBytes: Buffer.byteLength(html), accessBarriers: [], browserMode: 'headless',
+    }];
+    appendAttempt(log, {
+      recordType: 'observation', permitId: 'p-0001', renderId: 'g-0001',
+      examinedAt: iso(t - 80 * 60_000 + 10_000), agency: 'A', website: 'https://a.govt.nz/',
+      url: 'https://a.govt.nz/apply', status: 'discovery', discoveryKind: 'navigation',
+      outcome: 'rendered', category: 'service-application', candidateSetVersion: 1,
+      navigatedAt: iso(t - 80 * 60_000 + 10_000), approval: 'approved', evidence: 'rendered-dom',
+      renderFile: 'g1.html', renderedSha256: sha256(html), renderedBytes: Buffer.byteLength(html),
+    });
+    const observation = log.attempts.at(-1);
+    log.candidateSets['A\u0000service-application'] = {
+      agency: 'A', category: 'service-application', version: 1, discovered: [], locked: [],
+      lockedAt: iso(t - 2 * 24 * 3600_000), approval: 'approved', candidateDeclaration: 'none',
+      discoveryRecordIds: [obligation.id],
+    };
+    const judgement = (over = {}) => ({
+      recordType: 'judgement-only', renderId: 'g-0001', evidenceFromDiscoveryId: observation.id,
+      examinedAt: iso(t), agency: 'A', website: 'https://a.govt.nz/', url: 'https://a.govt.nz/apply',
+      status: 'discovery', discoveryKind: 'navigation', outcome: 'no-candidates',
+      category: 'service-application', candidateSetVersion: 1, navigationPerformed: false,
+      checkedAt: iso(t), evidence: 'rendered-dom', renderFile: 'g1.html',
+      renderedSha256: sha256(html), renderedBytes: Buffer.byteLength(html), approval: 'approved',
+      ...over,
+    });
+    return { dir, log, obligation, observation, judgement };
+  };
+
+  test('a correction inheriting the link keeps the obligation discharged', () => {
+    const { dir, log, obligation, judgement } = build();
+    appendAttempt(log, judgement({ answersDiscoveryId: obligation.id }));
+    const first = log.attempts.at(-1);
+    assert.deepEqual(renderBacklog(log), []);
+    // Corrected, carrying the inherited link.
+    appendAttempt(log, judgement({ answersDiscoveryId: obligation.id, supersedesDiscoveryId: first.id }));
+    assert.deepEqual(renderBacklog(log), [], 'still discharged');
+    assert.deepEqual(checkRenderLedger(log, join(dir, 'rendered')), []);
+  });
+
+  test('THE LOST LINK: a correction that drops it is refused at write time', () => {
+    const { log, obligation, judgement } = build();
+    appendAttempt(log, judgement({ answersDiscoveryId: obligation.id }));
+    const first = log.attempts.at(-1);
+    assert.throws(() => appendAttempt(log, judgement({ supersedesDiscoveryId: first.id })),
+      /must keep answering .*; it names none/);
+  });
+
+  test('and is reported at trust time when it is already in the log', () => {
+    const { dir, log, obligation, judgement } = build();
+    appendAttempt(log, judgement({ answersDiscoveryId: obligation.id }));
+    const first = log.attempts.at(-1);
+    appendAttempt(log, judgement({ answersDiscoveryId: obligation.id, supersedesDiscoveryId: first.id }));
+    // Hand-edited afterwards, as a log nobody re-validated would be.
+    delete log.attempts.at(-1).answersDiscoveryId;
+    const problems = checkRenderLedger(log, join(dir, 'rendered'));
+    assert.ok(problems.some((p) => /active end of a chain that answers .* names none/.test(p)), problems.join('; '));
+    assert.ok(renderBacklog(log).some((a) => a.id === obligation.id), 'the obligation reopens, which is the symptom');
+  });
+
+  test('THE THIRD LINK: the link survives a correction of a correction', () => {
+    // "Copy from the immediate target" would lose it here, because the middle link carries it only
+    // by inheritance.
+    const { dir, log, obligation, judgement } = build();
+    appendAttempt(log, judgement({ answersDiscoveryId: obligation.id }));
+    const first = log.attempts.at(-1);
+    appendAttempt(log, judgement({ answersDiscoveryId: obligation.id, supersedesDiscoveryId: first.id }));
+    const second = log.attempts.at(-1);
+    assert.throws(() => appendAttempt(log, judgement({ supersedesDiscoveryId: second.id })),
+      /must keep answering/);
+    appendAttempt(log, judgement({ answersDiscoveryId: obligation.id, supersedesDiscoveryId: second.id }));
+    assert.deepEqual(renderBacklog(log), []);
+    assert.deepEqual(checkRenderLedger(log, join(dir, 'rendered')), []);
+  });
+
+  test('a correction may not change which obligation the chain answers', () => {
+    const { log, obligation, judgement } = build();
+    appendAttempt(log, judgement({ answersDiscoveryId: obligation.id }));
+    const first = log.attempts.at(-1);
+    assert.throws(() => appendAttempt(log, judgement({
+      answersDiscoveryId: obligation.id === 'd-0001' ? 'd-0002' : 'd-0001',
+      supersedesDiscoveryId: first.id,
+    })), /must keep answering|matches no recorded attempt/);
+  });
+
+  test('CONFLICT: a chain answering two records is refused', () => {
+    const { dir, log, obligation, observation, judgement } = build();
+    appendAttempt(log, judgement({ answersDiscoveryId: obligation.id }));
+    const first = log.attempts.at(-1);
+    appendAttempt(log, judgement({ answersDiscoveryId: obligation.id, supersedesDiscoveryId: first.id }));
+    // Hand-edit the middle link to answer something else, so the chain disagrees with itself.
+    log.attempts.find((a) => a.id === first.id).answersDiscoveryId = observation.id;
+    const problems = checkRenderLedger(log, join(dir, 'rendered'));
+    assert.ok(problems.some((p) => /chain answers more than one record/.test(p)), problems.join('; '));
+  });
+
+  test('DUPLICATE: two active judgements may not answer one obligation', () => {
+    const { dir, log, obligation, judgement } = build();
+    appendAttempt(log, judgement({ answersDiscoveryId: obligation.id }));
+    // A second, contradictory judgement, written straight into the log.
+    log.attempts.push({
+      ...judgement({ answersDiscoveryId: obligation.id, outcome: 'candidates-found' }),
+      id: 'd-9100',
+    });
+    const problems = checkRenderLedger(log, join(dir, 'rendered'));
+    assert.ok(
+      problems.some((p) => /is answered by 2 active judgements/.test(p)),
+      problems.join('; ')
+    );
+    // Both outcomes are visible in the complaint, so a reader sees the contradiction.
+    assert.ok(problems.some((p) => /no-candidates/.test(p) && /candidates-found/.test(p)));
+  });
+
+  test('a superseded judgement does not count as a second answer', () => {
+    const { dir, log, obligation, judgement } = build();
+    appendAttempt(log, judgement({ answersDiscoveryId: obligation.id }));
+    const first = log.attempts.at(-1);
+    appendAttempt(log, judgement({ answersDiscoveryId: obligation.id, supersedesDiscoveryId: first.id }));
+    assert.deepEqual(checkRenderLedger(log, join(dir, 'rendered')), [],
+      'one active judgement, one withdrawn: not a duplicate');
+  });
+
+  test('LEGACY: a chain that never carried an answer link stays valid', () => {
+    // The NZSIS chain d-0301 -> d-0308 -> d-0309 predates judgements carrying answers. There is
+    // nothing for it to have lost, so nothing is required of it.
+    const { dir, log, obligation, judgement } = build();
+    appendAttempt(log, judgement({ supersedesDiscoveryId: obligation.id }));
+    const first = log.attempts.at(-1);
+    appendAttempt(log, judgement({ supersedesDiscoveryId: first.id }));
+    assert.deepEqual(checkRenderLedger(log, join(dir, 'rendered')), []);
+    assert.deepEqual(answerChain(log, log.attempts.at(-1)).answers, []);
+  });
+
+  test('the two links name different roles, so a correction chain differs in both', () => {
+    // selection-v1.0.27 required answersDiscoveryId === supersedesDiscoveryId, which refused the
+    // repair that restores an answer link for being exactly what it is.
+    const { dir, log, obligation, judgement } = build();
+    appendAttempt(log, judgement({ answersDiscoveryId: obligation.id }));
+    const first = log.attempts.at(-1);
+    appendAttempt(log, judgement({ answersDiscoveryId: obligation.id, supersedesDiscoveryId: first.id }));
+    const active = log.attempts.at(-1);
+    assert.notEqual(active.answersDiscoveryId, active.supersedesDiscoveryId);
+    assert.deepEqual(checkRenderLedger(log, join(dir, 'rendered')), []);
   });
 });

@@ -3169,3 +3169,98 @@ orphans, 63 observations across 64 renders, and every earlier observation untouc
 
 No judgement has been recorded, and none of these pages has been assessed. The barred renders are
 preserved and remain refused as evidence.
+
+## Amendment 37: the answer link belongs to the chain
+
+**Dated 29 September 2026.** `selection-v1.0.35` and `solo-protocol-v1.0.15`. Moves no earlier tag.
+No capture tag: browser behaviour is unchanged.
+
+### The checkpoint that failed
+
+After the first three judgements the backlog should have fallen from 66 to 63. It fell to **64**.
+
+`d-0019` and `d-0020` were answered; `d-0018` was not. Its chain read:
+
+```
+d-0373  answers=d-0018   superseded   ← a probe record
+d-0374  answers=—        supersedes d-0373
+```
+
+`correct-discovery` carried nothing across, so superseding the probe to give it a proper note dropped
+the link saying which obligation the judgement discharged, and `d-0018` returned to the backlog. It
+**failed safe** — the obligation reopened rather than appearing discharged — and the ledgers stayed
+clean because nothing was internally inconsistent. Across sixty-six records the only symptom would
+have been a backlog that did not fall as far as it should.
+
+Two errors of mine sit behind it. I probed the mechanism **against the live log** instead of a copy,
+which is how `d-0373` came to exist with a placeholder note under untagged code. And I stated the
+expected arithmetic without checking that the mechanism carried the link.
+
+### The rule is not "copy from the target"
+
+That would still lose the link at the **second** correction of a three-link chain, because the middle
+link carries it only by inheritance. So the link is a property of the **chain**: recovered by walking
+every supersession backwards, and the active record must carry exactly the one the chain established.
+
+- A correction that **drops** the link is refused, at write time and at trust time.
+- A correction that **changes** it is refused: a chain resolves one obligation.
+- A chain whose links **disagree** is refused.
+- **At most one active judgement** may answer each obligation. Two were accepted before this, and
+  they were free to contradict each other with nothing saying which one answered the record.
+- A **legacy** chain that never carried a link stays valid — the NZSIS `d-0301` → `d-0308` → `d-0309`
+  chain predates judgements carrying answers, so there is nothing for it to have lost.
+
+All of it in both packages, at both times.
+
+### And a rule of mine that was wrong
+
+`selection-v1.0.27` required `answersDiscoveryId` to equal `supersedesDiscoveryId` when both were
+present, on the grounds that otherwise it was unclear which record had been resolved. That was written
+before a judgement carrying an answer could be corrected, and it **refused the repair** — the two
+links name different roles, and in a correction chain they necessarily differ:
+
+| link | names |
+| --- | --- |
+| `answersDiscoveryId` | the plain-retrieval **obligation** being discharged |
+| `supersedesDiscoveryId` | the prior **judgement** being corrected |
+
+Ambiguity arises only where the superseded record is itself an obligation rather than a judgement, and
+that is what is now checked.
+
+### The repair
+
+`d-0377` supersedes `d-0374`, answers `d-0018`, on the same render `g-0002` from observation `d-0310`
+with the same digest and the same outcome. It states that it restores the answer link lost during
+correction and claims no change to the evidence citation, because none occurred. `d-0373` and `d-0374`
+are preserved.
+
+### Checkpoint, after repair
+
+| | |
+| --- | --- |
+| backlog | **63 records across 54 URLs** |
+| active judgements for `d-0018`, `d-0019`, `d-0020` | **one each** |
+| render-ledger, permit-ledger, stale bindings, orphans, open permits | **0** |
+| permits | 159, unchanged — no new permit, no network request |
+
+### Tests
+
+Ten adversarial tests: the lost link refused at write time and reported at trust time, a three-link
+chain, a changed answer, a chain disagreeing with itself, duplicate active answers with both outcomes
+named in the complaint, a superseded judgement not counting as a duplicate, a valid legacy chain, and
+the two links differing by role. Six further conformance cases bring that table to **70**, of which 60
+are refusals.
+
+### The first three judgements
+
+All three are `no-candidates` for `account-registration`, confirming what the plain fetches recorded.
+
+- `https://www.tpk.govt.nz/en` — two site-search forms, sole control a text input named `q`. No
+  registration, no credential field, no personal-name field.
+- `…/search?q=register` — renders "About 80 results", ten listed: proactively released information,
+  the Māori Development Fund, housing support, careers. None is a registration.
+- `…/search?q=sign+up` — renders "About 600 results", ten listed, all news items under
+  `our-stories-and-media`. The phrase matches editorial prose, not a form.
+
+The rendered DOM did show results the plain fetch did not, which is the point of rendering; it did not
+change the finding.

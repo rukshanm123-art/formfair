@@ -541,6 +541,87 @@ const CASES = [
       l.renders[2].navigatedAt = '2026-09-28T04:00:05Z';
     },
   },
+  // selection-v1.0.35 / solo-protocol-v1.0.15. The answer link belongs to the correction chain.
+  {
+    name: 'CHAIN: a correction inheriting the answer link is accepted',
+    acceptable: true,
+    mutate: (l) => {
+      l.attempts[1].answersDiscoveryId = 'd-0001';
+      l.attempts.push({ ...l.attempts[1], id: 'd-0030', supersedesDiscoveryId: 'd-0002' });
+      l.attempts[0].url = 'https://a.govt.nz/apply';
+      l.attempts[0].recordType = undefined;
+      l.attempts[0].outcome = 'no-candidates';
+      l.attempts[0].renderId = undefined;
+      l.attempts[0].permitId = undefined;
+      l.attempts[0].navigatedAt = '2026-09-20T00:00:00Z';
+      l.attempts.push({
+        id: 'd-0031', agency: 'A', category: 'service-application', status: 'discovery',
+        discoveryKind: 'navigation', outcome: 'rendered', recordType: 'observation',
+        renderId: 'g-0001', permitId: 'p-0001', candidateSetVersion: 1,
+        url: 'https://a.govt.nz/apply', navigatedAt: '2026-09-26T19:00:00Z', approval: 'approved',
+      });
+      l.attempts[1].evidenceFromDiscoveryId = 'd-0031';
+      l.attempts[2].evidenceFromDiscoveryId = 'd-0031';
+    },
+  },
+  {
+    name: 'CHAIN: THE LOST LINK - the active correction names no answer',
+    acceptable: false,
+    mutate: (l) => {
+      l.attempts[1].answersDiscoveryId = 'd-0001';
+      l.attempts.push({ ...l.attempts[1], id: 'd-0030', supersedesDiscoveryId: 'd-0002', answersDiscoveryId: undefined });
+    },
+  },
+  {
+    name: 'CHAIN: CONFLICT - one chain answering two records',
+    acceptable: false,
+    mutate: (l) => {
+      l.attempts[1].answersDiscoveryId = 'd-0001';
+      l.attempts.push({ ...l.attempts[1], id: 'd-0030', supersedesDiscoveryId: 'd-0002', answersDiscoveryId: 'd-0031' });
+      l.attempts.push({
+        id: 'd-0031', agency: 'A', category: 'service-application', status: 'discovery',
+        discoveryKind: 'navigation', outcome: 'no-candidates', candidateSetVersion: 1,
+        url: 'https://a.govt.nz/apply', navigatedAt: '2026-09-20T00:00:00Z', approval: 'approved',
+      });
+    },
+  },
+  {
+    name: 'CHAIN: DUPLICATE - two active judgements answering one obligation',
+    acceptable: false,
+    mutate: (l) => {
+      l.attempts[1].answersDiscoveryId = 'd-0001';
+      l.attempts.push({ ...l.attempts[1], id: 'd-0030', outcome: 'no-candidates' });
+    },
+  },
+  {
+    name: 'CHAIN: a superseded judgement is not a second answer',
+    acceptable: true,
+    mutate: (l) => {
+      l.attempts[1].answersDiscoveryId = 'd-0001';
+      l.attempts.push({ ...l.attempts[1], id: 'd-0030', supersedesDiscoveryId: 'd-0002' });
+      l.attempts[0].url = 'https://a.govt.nz/apply';
+      l.attempts[0].recordType = undefined;
+      l.attempts[0].outcome = 'no-candidates';
+      l.attempts[0].renderId = undefined;
+      l.attempts[0].permitId = undefined;
+      l.attempts[0].navigatedAt = '2026-09-20T00:00:00Z';
+      l.attempts.push({
+        id: 'd-0031', agency: 'A', category: 'service-application', status: 'discovery',
+        discoveryKind: 'navigation', outcome: 'rendered', recordType: 'observation',
+        renderId: 'g-0001', permitId: 'p-0001', candidateSetVersion: 1,
+        url: 'https://a.govt.nz/apply', navigatedAt: '2026-09-26T19:00:00Z', approval: 'approved',
+      });
+      l.attempts[1].evidenceFromDiscoveryId = 'd-0031';
+      l.attempts[2].evidenceFromDiscoveryId = 'd-0031';
+    },
+  },
+  {
+    name: 'CHAIN: LEGACY - a chain that never carried an answer link is valid',
+    acceptable: true,
+    mutate: (l) => {
+      l.attempts.push({ ...l.attempts[1], id: 'd-0030', supersedesDiscoveryId: 'd-0002' });
+    },
+  },
   {
     name: 'AUTHORITY: a copy that MATCHES the registry is fine',
     acceptable: true,
@@ -647,8 +728,8 @@ describe('the two render-ledger implementations agree', () => {
     // asserted from memory. A count printed in prose and checked by nobody is decoration, which is
     // the same objection this protocol makes to an unread digest. Update these numbers deliberately
     // when adding a case, and update the protocol with them.
-    assert.equal(CASES.length, 64, 'the protocol states 64 conformance cases');
-    assert.equal(refused, 57, 'the protocol states 57 refusal cases');
+    assert.equal(CASES.length, 70, 'the protocol states 70 conformance cases');
+    assert.equal(refused, 60, 'the protocol states 60 refusal cases');
     assert.equal(accepted + refused, CASES.length, 'every case must state a verdict');
   });
 });

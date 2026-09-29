@@ -34,6 +34,7 @@ import {
   unresolvedDiscoveryRounds, openDiscoveryPermits, robotsCheckIsFresh, isDiscoverySuperseded,
   reopenCandidateSet, closeDiscoveryPermit, permitAudit, PERMIT_DISPOSITIONS, corpusBlockers,
   quarantineArtefact, recordDeviation, agencyResolutions, agencyResolution, reResolveExhaustion,
+  answerChain,
   renderBacklog, renderBacklogByUrl, renderPrerequisite, recordRender, findRender,
   findRenderForUrl, assertRenderEvidenceUsable, assertPermitUsable, adoptRender,
   reResolveCandidateSet, staleSetBindings,
@@ -1436,8 +1437,16 @@ function doCorrectDiscovery() {
   // has the right outcome and names the wrong source, and refusing an unchanged outcome left no way
   // to fix that without rewriting the record - which append-only history forbids. Something must
   // change; it need not be the outcome.
+  // selection-v1.0.35. The chain's answer link is inherited, so a correction that RESTORES a link the
+  // chain established is itself a change - and is the one repair `d-0374` needs. Nothing about the
+  // evidence citation changed there, so claiming it did would be false.
+  const inherited = answerChain(log, target);
+  if (inherited.conflict) {
+    die(`the chain through ${targetId} answers more than one record (${inherited.answers.join(', ')})`);
+  }
+  const restoresAnswerLink = inherited.stable !== null && !target.answersDiscoveryId;
   const correctsCitation = has('recite-evidence');
-  if (target.outcome === outcome && !correctsCitation) {
+  if (target.outcome === outcome && !correctsCitation && !restoresAnswerLink) {
     die(
       `${targetId} already records ${outcome}. A correction must change something: pass ` +
         '`--recite-evidence` to correct the evidence citation while keeping the judgement.'
@@ -1476,6 +1485,9 @@ function doCorrectDiscovery() {
   appendAttempt(log, {
     recordType: 'judgement-only',
     supersedesDiscoveryId: targetId,
+    // Inherited from the whole chain, not copied from the immediate target: a three-link chain would
+    // otherwise lose the link at the second correction.
+    ...(inherited.stable ? { answersDiscoveryId: inherited.stable } : {}),
     evidenceFromDiscoveryId: observation.id,
     renderId,
     examinedAt: now(), agency: target.agency, website: target.website, url: target.url,
@@ -1494,9 +1506,11 @@ function doCorrectDiscovery() {
   writeDerived({ log, dir, frameSha256: flag('frame-sha256'), drawOrderSha256: flag('draw-order-sha256'), synthetic: has('synthetic') });
   const record = log.attempts.at(-1);
   console.log(
-    correctsCitation && target.outcome === outcome
-      ? `recorded ${record.id}: corrects the evidence citation of ${targetId}, judgement unchanged (${outcome})`
-      : `recorded ${record.id}: corrects ${targetId}, ${target.outcome} -> ${outcome}`
+    restoresAnswerLink && target.outcome === outcome && !correctsCitation
+      ? `recorded ${record.id}: restores the answer link on ${targetId} (answers ${inherited.stable}), judgement unchanged (${outcome})`
+      : correctsCitation && target.outcome === outcome
+        ? `recorded ${record.id}: corrects the evidence citation of ${targetId}, judgement unchanged (${outcome})`
+        : `recorded ${record.id}: corrects ${targetId}, ${target.outcome} -> ${outcome}`
   );
   console.log(`evidence: ${renderId} from ${observation.id}, ${render.renderFile} sha256 ${render.renderedSha256.slice(0, 16)} (re-verified)`);
   console.log(`${targetId} is preserved unchanged; no request was made for this correction`);
