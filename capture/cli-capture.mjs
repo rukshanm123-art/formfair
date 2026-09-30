@@ -44,6 +44,7 @@ import {
   DISCOVERY_KINDS, DISCOVERY_METHODS, DISCOVERY_OUTCOMES, remainingBudget, canonicalise,
   SEARCH_TERMS, parseDrawOrder, nextWork, isSuperseded, MAX_QUALIFIED_AGENCIES,
   TECHNICAL_ATTRITION_OUTCOMES, JUDGEMENT_OUTCOMES, setKey,
+  TERMINAL_STATUSES,
 } from './selection.mjs';
 import { readFileSync as readFile } from 'node:fs';
 import { buildPacket, renderPacket } from './packet.mjs';
@@ -649,9 +650,15 @@ function doStatus() {
   // recurred: with `retrieved` added the printed lines again failed to sum to the total above
   // them, and the one record missing was the one that decides nothing - which is exactly the
   // record a reader most needs to see counted separately.
+  // Amendment 45. And it recurred a THIRD time: `eligible-not-selected` was added as a terminal
+  // disposition in Amendment 44 without being added here, so four records fell into UNACCOUNTED.
+  // The guard added in Amendment 41 reported it correctly and nobody re-ran `status` to look. The
+  // printed statuses are now derived from the frozen lists rather than retyped, so a new status
+  // cannot be added to the model and forgotten in the report.
+  console.log(`  not selected  ${by((a) => a.status === 'eligible-not-selected')}   (eligible; lost the frozen tie-break)`);
   console.log(`  retrieved     ${by((a) => a.status === 'retrieved')}   (evidence only; decides nothing)`);
   console.log(`  discovery     ${by((a) => a.status === 'discovery')}`);
-  const printed = by((a) => ['captured', 'excluded', 'failed', 'capture-blocked', 'retrieved', 'discovery'].includes(a.status));
+  const printed = by((a) => [...TERMINAL_STATUSES, 'retrieved', 'discovery'].includes(a.status));
   if (printed !== log.attempts.length) {
     console.log(`  UNACCOUNTED   ${log.attempts.length - printed} attempt(s) match no printed status`);
   }

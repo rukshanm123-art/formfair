@@ -168,7 +168,7 @@ const FRAME_FILES = [
  * exhaustion records at all. A manifest that misnames its own protocol is worse than one that
  * omits it: a reader checking which rules a corpus was sealed under would be told the wrong ones.
  */
-export const SOLO_PROTOCOL_TAG = 'solo-protocol-v1.0.21';
+export const SOLO_PROTOCOL_TAG = 'solo-protocol-v1.0.22';
 
 /**
  * Two resolutions, mirrored from the capture package and checked equal by a test.
@@ -317,6 +317,16 @@ export function terminalDecisionProblems(log) {
     if (selected.status !== 'captured') {
       problems.push(`${where} names ${selected.id}, which is a ${selected.status} attempt, not a capture`);
     }
+    // Amendment 45. A REJECTED capture decides nothing, so a record resting on it rests on
+    // nothing. The capture package's corpus gate refused this state and the sealer did not, which
+    // is the divergence an independent implementation exists to prevent rather than create: a
+    // tampered log reaching the seal by another route would have passed.
+    if (selected.approval === 'rejected') {
+      problems.push(
+        `${where} rests on the selection ${selected.id}, which has been REJECTED; the tie-break ` +
+          'must be decided again before this record stands'
+      );
+    }
     if (selected.agency !== a.agency || selected.category !== a.category ||
         selected.candidateSetVersion !== a.candidateSetVersion) {
       problems.push(`${where} names ${selected.id}, which belongs to a different locked set`);
@@ -345,8 +355,15 @@ export function terminalDecisionProblems(log) {
     if (a.htmlSha256 !== undefined && src.htmlSha256 !== a.htmlSha256) {
       problems.push(`${a.id} cites ${src.id}, whose digest differs`);
     }
-    if (a.bytes !== undefined && src.bytes !== a.bytes) {
-      problems.push(`${a.id} cites ${src.id}, whose byte length differs`);
+    // Amendment 45. `htmlBytes`, not `bytes`. No record has ever carried a field called `bytes`,
+    // so this check was reading undefined on both sides and could never fire: tampering with
+    // `c-0653.htmlBytes` produced zero sealer problems while a digest change was caught. A check
+    // that cannot fail is worse than no check, because the passing seal was read as verification.
+    if (a.htmlBytes !== undefined && src.htmlBytes !== a.htmlBytes) {
+      problems.push(
+        `${a.id} cites ${src.id}, whose byte length differs (${src.htmlBytes} recorded on the ` +
+          `retrieval, ${a.htmlBytes} claimed here)`
+      );
     }
     if (a.supersedesAttemptId === a.evidenceFromAttemptId) {
       problems.push(`${a.id} supersedes the very retrieval it cites as evidence (${src.id})`);

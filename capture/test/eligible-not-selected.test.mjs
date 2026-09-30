@@ -188,3 +188,73 @@ describe('the outcome is published, not just recorded', () => {
     assert.equal(widths.size, 1, 'rows disagree on column count');
   });
 });
+
+/**
+ * Amendment 45: three gaps found by driving the live log rather than the fixtures.
+ *
+ * Each is a case where the model gained a state and a reader of it did not. The first was reported
+ * by the very guard added to catch it; the third was a check that could never fire, which is worse
+ * than no check, because the passing seal was read as verification.
+ */
+describe('a new status must reach every reader of the log', () => {
+  const printedStatuses = () => [...TERMINAL_STATUSES, 'retrieved', 'discovery'];
+
+  test('every status the model allows is a status the report prints', () => {
+    // The omission that produced "UNACCOUNTED 4": `eligible-not-selected` was added to the model
+    // in Amendment 44 and not to the printed totals. Derived from the frozen list now, so the two
+    // cannot drift apart again.
+    const modelled = ['captured', 'retrieved', 'excluded', 'eligible-not-selected', 'failed',
+      'capture-blocked', 'discovery'];
+    for (const status of modelled) {
+      assert.ok(printedStatuses().includes(status), `${status} is in the model but not printed`);
+    }
+    assert.equal(printedStatuses().length, modelled.length);
+  });
+});
+
+describe('the sealer refuses what the corpus gate refuses', () => {
+  const tampered = (mutate) => {
+    const { log, capture, laterRetrieval } = round();
+    appendAttempt(log, notSelected({ evidenceFromAttemptId: laterRetrieval, notSelectedInFavourOf: capture }));
+    assert.deepEqual(terminalDecisionProblems(log), [], 'the fixture was not clean to begin with');
+    mutate(log, { capture, notSelectedId: log.attempts.at(-1).id });
+    return log;
+  };
+
+  test('a REJECTED selection fails the seal, not only the corpus gate', () => {
+    // Reproduced against the live log: the corpus gate raised tie-break-unsound and the sealer
+    // returned zero. An independent implementation that agrees only on the happy path is not an
+    // independent check.
+    const log = tampered((l, { capture }) => {
+      l.attempts.find((a) => a.id === capture).approval = APPROVAL.REJECTED;
+    });
+    assert.ok(corpusBlockers(log).some((b) => b.kind === 'tie-break-unsound'));
+    const sealer = terminalDecisionProblems(log);
+    assert.ok(sealer.some((p) => /has been REJECTED/.test(p)), sealer.join('; ') || '(no problems)');
+  });
+
+  test('a tampered byte length fails the seal, as a tampered digest already did', () => {
+    // The check read `bytes`, a field no record has ever carried, so it compared undefined with
+    // undefined and could not fire.
+    const byLength = tampered((l, { notSelectedId }) => {
+      l.attempts.find((a) => a.id === notSelectedId).htmlBytes = 1;
+    });
+    assert.ok(
+      terminalDecisionProblems(byLength).some((p) => /byte length differs/.test(p)),
+      'a tampered htmlBytes passed the seal'
+    );
+
+    const byDigest = tampered((l, { notSelectedId }) => {
+      l.attempts.find((a) => a.id === notSelectedId).htmlSha256 = 'f'.repeat(64);
+    });
+    assert.ok(terminalDecisionProblems(byDigest).some((p) => /digest differs/.test(p)));
+  });
+
+  test('the length check names both values, so a reader can see which is wrong', () => {
+    const log = tampered((l, { notSelectedId }) => {
+      l.attempts.find((a) => a.id === notSelectedId).htmlBytes = 1;
+    });
+    const problem = terminalDecisionProblems(log).find((p) => /byte length differs/.test(p));
+    assert.match(problem, /2048 recorded on the retrieval, 1 claimed here/);
+  });
+});

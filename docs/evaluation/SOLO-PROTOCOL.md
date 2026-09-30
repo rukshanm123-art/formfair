@@ -3709,3 +3709,45 @@ different round refused; a category mismatch refused earlier still by the citati
 its own guard; a selection that does not sort first refused; a rejected selection re-opening the
 tie-break at the corpus gate; the sealer refusing a tampered sort order independently; and the
 ledger publishing the status and the selection with a stable row shape.
+
+## Amendment 45 — a new state must reach every reader of the log
+
+*Frozen as `selection-v1.0.42`, `capture-v1.0.17` and `solo-protocol-v1.0.22`, 30 September 2026.*
+
+Code only. No page was requested again, and `c-0648` and `c-0653`–`c-0656` are unchanged: the five
+outcome records were substantively correct, and all three faults were in what read them.
+
+### The three faults
+
+**1. The status report omitted the new disposition.** `eligible-not-selected` was added to the model
+in Amendment 44 and not to the printed totals, so four records fell into `UNACCOUNTED` — a count
+printed by the very guard added in Amendment 41 to catch exactly this. The guard worked and nobody
+re-ran `status` to read it. **This is the third occurrence of the same omission**: `capture-blocked`
+in `capture-v1.0.7`, `retrieved` in Amendment 41, and now this. The printed statuses are therefore
+no longer retyped; they are derived from `TERMINAL_STATUSES` plus `retrieved` and `discovery`, so a
+status added to the model cannot be forgotten in the report.
+
+**2. The sealer accepted a rejected selection.** Setting `c-0648.approval = "rejected"` raised the
+capture package's `tie-break-unsound` blocker and produced **zero** sealer problems. A rejected
+capture decides nothing, so a record resting on it rests on nothing. An independent implementation
+that agrees only on the happy path is not an independent check — it is a second chance to pass.
+
+**3. The sealer's byte-length check could never fire.** It compared `a.bytes` with `src.bytes`, and
+**no record has ever carried a field called `bytes`** — the length lives in `htmlBytes`. Both sides
+were `undefined`, so tampering with `c-0653.htmlBytes` produced zero problems while a digest change
+was correctly caught. A check that cannot fail is worse than no check, because a seal that passes it
+is read as verification. The check now names both values, so a reader can see which one is wrong.
+
+### How they were found
+
+By driving the **live log** — reproducing each tampered state against the real records — rather than
+by running the fixtures, all of which passed. Faults 2 and 3 are both of a kind the fixtures could
+not reach: one is a divergence between two implementations that agree on valid input, and the other
+is a comparison of two absent fields, which is vacuously true on every well-formed log.
+
+### What holds it
+
+Four cases appended to `capture/test/eligible-not-selected.test.mjs`: every status the model allows
+is a status the report prints, asserted against the frozen list rather than a copy; a rejected
+selection failing the seal as well as the corpus gate; a tampered `htmlBytes` failing the seal as a
+tampered digest already did; and the length problem naming both values.
