@@ -212,10 +212,14 @@ describe('the publication carries the approval reasoning and the permissions it 
     appendAttempt(log, capture(clock(), { approvalNote: note, approvedAt: '2026-09-29T04:15:34Z' }));
     const { csv } = publish(log);
 
+    // Positions, not tail offsets: Amendment 42 appended the evidence-provenance columns after
+    // these, and a test that assumes it is last breaks every time the schema grows.
     const header = csv.split('\n')[0].split(',');
-    assert.equal(header.at(-3), 'approval');
-    assert.equal(header.at(-2), 'approvedAt');
-    assert.equal(header.at(-1), 'approvalNote');
+    for (const column of ['approval', 'approvedAt', 'approvalNote']) {
+      assert.ok(header.includes(column), `${column} is not a ledger column`);
+    }
+    assert.equal(header.indexOf('approvedAt'), header.indexOf('approval') + 1);
+    assert.equal(header.indexOf('approvalNote'), header.indexOf('approvedAt') + 1);
     assert.ok(csv.includes('2026-09-29T04:15:34Z'), 'the approval time is not published');
     // The WHOLE note, not a truncation: a resolution cut off mid-sentence is not a resolution.
     assert.ok(csv.includes(note), 'the approval note is not published in full');
@@ -227,7 +231,13 @@ describe('the publication carries the approval reasoning and the permissions it 
     const { csv } = publish(log);
     const [header, row] = csv.trim().split('\n');
     assert.equal(row.split(',').length, header.split(',').length);
-    assert.ok(row.endsWith(',,'), 'the two new columns are not present as empty fields');
+    // The approval columns are empty for a discovery record; located by name, since later
+    // amendments append further columns after them.
+    const cols = header.split(',');
+    const fields = row.split(',');
+    for (const column of ['approvedAt', 'approvalNote']) {
+      assert.equal(fields[cols.indexOf(column)], '', `${column} is not an empty field here`);
+    }
   });
 
   test('a robots check is published as a referenceable observation', () => {
@@ -315,8 +325,10 @@ describe('the publication carries the approval reasoning and the permissions it 
     const body = csv.slice(csv.indexOf('\n') + 1);
     const recordStarts = body.split('\n').filter((l) => /^2026-\d\d-\d\dT/.test(l));
     assert.equal(recordStarts.length, log.attempts.length);
+    // The continuation line closes the quoted field and then carries the remaining columns, so it
+    // STARTS with the closing quote rather than ending the row there.
     assert.ok(
-      body.split('\n').includes('Not enquiry-or-contact."'),
+      body.split('\n').some((l) => l.startsWith('Not enquiry-or-contact."')),
       'the embedded newline did not stay inside the quoted field'
     );
   });

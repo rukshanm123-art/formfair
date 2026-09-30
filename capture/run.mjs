@@ -275,12 +275,52 @@ function checkAttempt(attempt) {
 }
 
 /**
+ * Free text may not restate what the structured fields already carry. Amendment 42.
+ *
+ * `c-0576` was approved-ready with a fabricated digest: its reason read "sha256 0e7b3cb3ee1b" while
+ * the file hashed to `fa4c2f68…`. The record's own `htmlSha256` was right and the citation check had
+ * verified it against the retrieval - the invented string lived in the free-text reason, where
+ * nothing checks anything. Every gate in this package compares fields to fields, so none of them
+ * could have caught it; it was found by reading the prose against the file.
+ *
+ * So prose stops being a second source of truth. A digest-shaped token is refused outright: name the
+ * evidence record instead, and let the ledger render the digest from the field. A byte count is
+ * refused only when the record HAS `htmlBytes` - describing some other artefact, such as the
+ * 212-byte challenge document served in place of a robots file, is still legitimate prose.
+ */
+const FREE_TEXT_FIELDS = Object.freeze(['exclusionReason', 'inclusionEvidence', 'note', 'approvalNote']);
+
+export function restatedEvidenceProblems(attempt) {
+  const problems = [];
+  for (const field of FREE_TEXT_FIELDS) {
+    const text = attempt[field];
+    if (typeof text !== 'string' || text === '') continue;
+    for (const m of text.matchAll(/\b[0-9a-f]{12,}\b/g)) {
+      problems.push(
+        `${field} states the digest-shaped token ${JSON.stringify(m[0])}. Do not restate a digest ` +
+          'in free text: cite the evidence record by id and let the ledger render htmlSha256 from ' +
+          'the verified field.'
+      );
+    }
+    if (attempt.htmlBytes !== undefined && attempt.htmlBytes !== null) {
+      for (const m of text.matchAll(/\b(\d{4,})[ -]byte(?:s)?\b/g)) {
+        problems.push(
+          `${field} states ${m[1]} bytes while this record carries htmlBytes=${attempt.htmlBytes}. ` +
+            'Do not restate a length this record already records; the ledger renders it.'
+        );
+      }
+    }
+  }
+  return problems;
+}
+
+/**
  * Appends one attempt. Rejects a duplicate pageId or URL so a rerun cannot silently
  * double-count, and refuses an attempt that fails its own checks rather than recording
  * something the seal will later have to interpret.
  */
 export function appendAttempt(log, attempt) {
-  const problems = checkAttempt(attempt);
+  const problems = [...checkAttempt(attempt), ...restatedEvidenceProblems(attempt)];
   if (problems.length) throw new Error(`invalid capture attempt:\n  ${problems.join('\n  ')}`);
   // Amendment 40. A promotion carries its retrieval's pageId BY DESIGN: it is the same page, the
   // same bytes and the same file, recorded now with an eligibility decision attached. The id
@@ -1366,6 +1406,15 @@ export function deriveLedger(log) {
       // doubt and not its answer, which reads worse than either alone.
       a.approvedAt ?? '',
       a.approvalNote ?? '',
+      // Amendment 42. The evidence provenance, rendered from the VERIFIED structured fields rather
+      // than restated in prose. `c-0576` asserted a digest in its free-text reason that nobody had
+      // read - the record's own `htmlSha256` was correct and the citation check had verified it, but
+      // the prose was a second, unchecked source of truth for the same fact. One source, and it is
+      // the one the machinery checks.
+      a.htmlBytes ?? '',
+      a.evidenceFromAttemptId ?? '',
+      a.promotedFrom ?? '',
+      a.supersedesAttemptId ?? '',
     ]
       .map((v) => {
         const s = v === null || v === undefined ? '' : String(v);
@@ -1373,7 +1422,8 @@ export function deriveLedger(log) {
       })
       .join(',')
   );
-  const header = LEDGER_HEADER.trimEnd() + ',approval,approvedAt,approvalNote\n';
+  const header = LEDGER_HEADER.trimEnd() +
+    ',approval,approvedAt,approvalNote,htmlBytes,evidenceFromAttemptId,promotedFrom,supersedesAttemptId\n';
   return header + rows.join('\n') + (rows.length ? '\n' : '');
 }
 

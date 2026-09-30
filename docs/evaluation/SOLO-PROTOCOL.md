@@ -3554,3 +3554,73 @@ While resolving a tag-name collision, `capture-v1.0.8` was deleted locally in er
 from the remote; the annotated tag object hash was verified identical and the remote reference never
 moved. No protocol deviation is recorded, because nothing in the research evidence chain was
 affected.
+
+## Amendment 42 — free text may not restate what the fields carry
+
+*Frozen as `selection-v1.0.40`, `capture-v1.0.15` and `solo-protocol-v1.0.20`, 30 September 2026.*
+
+### What was wrong
+
+`c-0576` reached the approval gate with a **fabricated digest**. Its reason read *"sha256
+0e7b3cb3ee1b"*; the file hashes to `fa4c2f68…` at 106,370 bytes, and the retrieval it cited,
+`c-0575`, recorded that same correct digest. The record's own `htmlSha256` was right, and Amendment
+41's citation check had verified it against the retrieval. The invented string lived in the
+free-text reason, where nothing checks anything.
+
+Every gate in this package compares **fields to fields**, so not one of them could have caught it.
+It was found by a reader comparing the prose to the file. The lesson is not that a sixth gate is
+needed but that **prose should not be a second source of truth** for a fact the structured fields
+already carry and the machinery already verifies.
+
+### The rule
+
+1. A free-text field — `exclusionReason`, `inclusionEvidence`, `note`, `approvalNote` — may not
+   contain a **digest-shaped token** (12 or more hex characters). Cite the evidence record by id.
+   A *correct* digest is refused for the same reason as a wrong one: prose that happens to agree
+   today can disagree tomorrow.
+2. A free-text field may not restate a **byte length** the record itself carries in `htmlBytes`.
+   Describing some other artefact's length remains legitimate — the 212-byte challenge document
+   served in place of a robots file is not this record's evidence.
+3. The **selection ledger renders the provenance instead**, from the verified fields: `htmlBytes`,
+   `evidenceFromAttemptId`, `promotedFrom` and `supersedesAttemptId` join the existing
+   `htmlSha256`. A reader gets the digest, the length and every evidence link without the prose
+   asserting any of them.
+
+Enforced in `appendAttempt`, so it binds every write path. History is untouched: the guard runs at
+append time and does not rewrite or invalidate a recorded note.
+
+### The audit of every prose digest already in the log
+
+Because one fabrication was found, all of them were checked rather than assumed. The log contains
+**114 digest claims in prose**, across 112 records.
+
+- **107 match a digest the log verifies** somewhere — a render's `renderedSha256`, a robots check's
+  `sha256`, or an attempt's `htmlSha256`.
+- **2 are the one fabrication**, `c-0576`'s reason and its rejection note, already superseded by
+  `c-0578`.
+- **5 describe retained response bodies from the NZSIS rounds** — `d-0295`, `d-0298`, `d-0299`,
+  `d-0300`, `d-0301` — and those bodies are no longer among the retained files, so **nothing now
+  verifies them**. Their notes describe specific contents (`_Incapsula_Resource` and an Incapsula
+  incident id, the host's own "page is not found" document, a client-rendered shell with a single
+  `static/main.min.js` and release `v1.2.0-rc1`), and their outcomes —
+  `retrieval-blocked`, `unavailable`, `retrieval-inconclusive` — rest on those contents rather than
+  on the digests. They are recorded here as **unverifiable rather than wrong**, and they are left
+  exactly as written.
+
+A first pass of this audit also flagged `c-0499`. That was the audit's own false positive: the
+digest `b35b127a9a51` is correct for the captured `cadet-join.html` file and for `c-0494`, and
+`c-0499` was flagged only because, predating `--evidence-from`, it carries no digest field of its
+own for the check to reach through. Counting it as a third fabrication would have been an error of
+the same kind as the one being fixed.
+
+### What holds it
+
+Ten cases in `capture/test/restated-evidence.test.mjs`: the exact `c-0576` shape refused; a correct
+digest refused too; all four free-text fields covered; a citing note accepted; a byte count about
+another artefact allowed; a byte count refused only when the record carries the length; short hex
+such as record ids, dates and `HTTP 403` left alone; the guard firing inside `appendAttempt`; and
+the ledger rendering digest, length and every evidence link as columns with a stable row shape.
+
+Two Amendment 38 tests located the approval columns by tail offset and broke when these columns
+were appended; they now locate them by name, since a test that assumes a column is last breaks
+every time the schema grows.
