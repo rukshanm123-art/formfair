@@ -13,13 +13,13 @@
   },
   "counts": {
     "discoveryPages": 541,
-    "candidatesAssessed": 31,
+    "candidatesAssessed": 37,
     "captured": 6,
-    "excluded": 23,
+    "excluded": 27,
     "failed": 1,
     "captureBlocked": 0,
     "pendingApprovalAttempts": 0,
-    "pendingApprovalCandidateSets": 1
+    "pendingApprovalCandidateSets": 0
   },
   "discoveryByMethod": {
     "navigation": 217,
@@ -4080,9 +4080,9 @@
       "locked": 2,
       "droppedBeyondBound": 0,
       "lockedAt": "2026-09-30T01:35:41Z",
-      "approval": "pending",
-      "approvedAt": null,
-      "approvalNote": null,
+      "approval": "approved",
+      "approvedAt": "2026-09-30T01:46:07Z",
+      "approvalNote": "Approved. Two candidates from 66 active records across ten websites: https://www.defencecareers.mil.nz/apply, reached from \"Apply Now\" on the Defence Careers home page (g-0087), and https://www.cadetnet.org.nz/2025/08/11/applications-2025_international_sea_cadet_exchanges/, a dated post announcing applications that only the internal search reached (g-0112, g-0114, g-0116). Both are admitted on path and title alone under Amendment 8 as specific content pages rather than home pages or directory indexes; neither was opened during discovery, so nothing yet establishes that either carries a form. Thirteen active records yielded no candidate judgement: robots-unestablished x2 (Veterans' Affairs, an Imperva challenge in place of robots.txt, withheld with no content request) and retrieval-blocked x11 (the Air Force Museum searches and the CadetNet headless attempts and sitemap, all Cloudflare or reCAPTCHA, several with headed fallbacks recorded). Defence Careers' internal search was disallowed for three terms by the \"*\" group and recorded without being requested. Approving this set means these two URLs are what should be assessed, not that either is eligible.",
       "supportedByDiscoveryRecords": [
         "d-0506",
         "d-0507",
