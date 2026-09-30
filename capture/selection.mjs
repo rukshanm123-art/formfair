@@ -270,12 +270,49 @@ export function isExhausted(log, agency) {
  * category with no set yet is work to do. For an agency that has already qualified, it is not:
  * qualification is precisely what stops the later categories being searched.
  */
+/**
+ * The statuses that SETTLE a candidate. Amendment 41.
+ *
+ * `status !== 'discovery'` was the de facto test for "this candidate has been decided", and it was
+ * correct while every non-discovery record was a decision. Amendment 40 added `retrieved`, which is
+ * evidence and nothing else, and every one of those tests silently began accepting it. The
+ * consequence, reproduced on a copy of the live log: delete the exclusion `c-0504`, mark the
+ * retrieval `c-0503` approved, and `nextWork` advances to the next category while `corpusBlockers`
+ * reports nothing - with `complete-signup/` never actually decided.
+ *
+ * So the notion is named once and shared. A retrieval is not here, and must never qualify, settle
+ * or exhaust anything.
+ */
+export const TERMINAL_STATUSES = Object.freeze(['captured', 'excluded', 'failed', 'capture-blocked']);
+
+/** True for a record that decides a candidate. Evidence-only retrievals are excluded. */
+export const isTerminalDecision = (attempt) => TERMINAL_STATUSES.includes(attempt?.status);
+
+/** True for an evidence-only retrieval: bytes held, nothing concluded. */
+export const isEvidenceOnly = (attempt) => attempt?.status === 'retrieved';
+
+/**
+ * The active terminal decisions for one candidate URL, by canonical URL within an agency.
+ *
+ * `supersededIds` is passed in rather than recomputed so that both packages can use their own
+ * supersession walk without this function needing one.
+ */
+export function terminalDecisionsFor(attempts, { agency, url, supersededIds = new Set() }) {
+  const want = canonicalise(url);
+  return attempts.filter(
+    (a) => a.agency === agency && isTerminalDecision(a) &&
+      canonicalise(a.url) === want && !supersededIds.has(a.id)
+  );
+}
+
 export function unfinishedFor(log, agency, { requireEveryCategory = true } = {}) {
   // An attempt that is pending or rejected is unfinished business for this agency, and work
   // does not move past it - not to the next candidate, not to the next category and not to the
   // next agency. A rejected decision must be superseded by a corrected one.
+  // Amendment 41. A retrieval carries no approval at all, so it is neither pending business nor a
+  // resolution; it is excluded here rather than left to be read as one.
   const unresolved = log.attempts.filter(
-    (a) => a.agency === agency && a.status !== 'discovery' &&
+    (a) => a.agency === agency && a.status !== 'discovery' && !isEvidenceOnly(a) &&
       (a.approval === 'pending' || (a.approval === 'rejected' && !isSuperseded(log, a)))
   );
   if (unresolved.length > 0) {
@@ -301,11 +338,27 @@ export function unfinishedFor(log, agency, { requireEveryCategory = true } = {})
         reason: `the locked candidate set is ${set.approval ?? 'pending'} and must be approved before assessment`,
       };
     }
-    const outcomes = new Set(
-      log.attempts.filter((a) => a.agency === agency && a.status !== 'discovery').map((a) => a.url)
+    // Amendment 41. TERMINAL decisions only. An evidence-only retrieval settles nothing, and
+    // counting it here is what let the category advance with `complete-signup/` undecided.
+    const superseded = new Set(
+      log.attempts.map((a) => a.supersedesAttemptId).filter((id) => id !== undefined && id !== null)
     );
-    const pending = set.locked.filter((u) => !outcomes.has(u));
+    const pending = set.locked.filter(
+      (u) => terminalDecisionsFor(log.attempts, { agency, url: u, supersededIds: superseded }).length === 0
+    );
     if (pending.length > 0) return { agency, category, pending };
+    // Exactly one, not at least one: two live decisions about one candidate leave the category
+    // with two answers and no way to say which it acted on.
+    const contested = set.locked
+      .map((u) => ({ url: u, decisions: terminalDecisionsFor(log.attempts, { agency, url: u, supersededIds: superseded }) }))
+      .filter((c) => c.decisions.length > 1);
+    if (contested.length > 0) {
+      return {
+        agency, category,
+        contested: contested.map((c) => ({ url: c.url, decisions: c.decisions.map((d) => d.id) })),
+        reason: 'a locked candidate has more than one active terminal decision',
+      };
+    }
     // Every locked candidate has an approved outcome and none qualified: the category is
     // finished, not abandoned, so the next one may be searched.
   }

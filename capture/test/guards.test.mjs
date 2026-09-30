@@ -361,7 +361,7 @@ describe('unfinished work blocks both the next step and the corpus', () => {
     set.locked = ['https://w.govt.nz/form.docx'];
     assert.throws(
       () => deriveDraft(log, opts),
-      /locked candidate\(s\) with no outcome/
+      /locked candidate\(s\) with no terminal decision/
     );
   });
 
@@ -1416,7 +1416,7 @@ describe('status and the corpus gate cannot disagree', () => {
     const blockers = corpusBlockers(log);
     assert.ok(blockers.some((b) => b.kind === 'unassessed-candidates'),
       `status must report it: ${JSON.stringify(blockers.map((b) => b.kind))}`);
-    assert.throws(() => deriveDraft(log, opts), /locked candidate\(s\) with no outcome/);
+    assert.throws(() => deriveDraft(log, opts), /locked candidate\(s\) with no terminal decision/);
   });
 
   test('a permit-ledger problem is reported as well as refused', () => {

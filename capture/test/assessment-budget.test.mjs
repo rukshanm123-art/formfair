@@ -69,7 +69,7 @@ describe('the effort bound counts distinct candidate URLs', () => {
     const log = emptyLog();
     prepareSet(log, AGENCY, CAT, [1, 2, 3, 4, 5].map(url));
     for (const n of [1, 2, 3, 4, 5]) {
-      appendAttempt(log, attempt({ status: 'retrieved', url: url(n),
+      appendAttempt(log, attempt({ status: 'retrieved', url: url(n), approval: 'not-applicable',
         pageId: `w-govt-nz-candidate-${n}`, file: `w-govt-nz-candidate-${n}.html`,
         htmlSha256: 'a'.repeat(64), exclusionReason: undefined }));
       // and again, as resolving that retrieval does
@@ -89,6 +89,7 @@ describe('the effort bound counts distinct candidate URLs', () => {
 describe('an assessment-only retrieval concludes nothing', () => {
   const retrieved = (over = {}) => ({
     agency: AGENCY, category: CAT, website: 'https://w.govt.nz/', status: 'retrieved', url: url(1),
+    approval: 'not-applicable',
     pageId: 'w-govt-nz-candidate-1', file: 'w-govt-nz-candidate-1.html', htmlSha256: 'a'.repeat(64),
     eligibility: Object.fromEntries(ELIGIBILITY_CRITERIA.map((c) => [c, null])),
     ...over,
@@ -152,7 +153,8 @@ describe('an assessment-only retrieval concludes nothing', () => {
     appendAttempt(log, retrieved());
     // A promoted capture names the same file; that is one candidate, not two.
     appendAttempt(log, {
-      ...retrieved(), status: 'captured', promotedFrom: log.attempts.at(-1).id, website: 'https://w.govt.nz/',
+      ...retrieved(), status: 'captured', promotedFrom: log.attempts.at(-1).id,
+      website: 'https://w.govt.nz/', approval: 'pending',
       inclusionEvidence: 'a name field is visible without submitting',
       eligibility: Object.fromEntries(ELIGIBILITY_CRITERIA.map((c) => [c, true])),
     });

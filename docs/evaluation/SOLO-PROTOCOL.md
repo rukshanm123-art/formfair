@@ -3471,3 +3471,86 @@ bytes without a claim; a retrieval refused for asserting any criterion, for carr
 evidence, or for missing its file, digest or page id; a retrieval needing no `exclusionReason`
 where every other non-capture does; and a promoted capture sharing its retrieval's file without
 reading as an orphan or a double-count.
+
+## Amendment 41 — evidence does not settle a candidate
+
+*Frozen as `selection-v1.0.39`, `capture-v1.0.14` and `solo-protocol-v1.0.19`, 30 September 2026.*
+
+### The attack
+
+Amendment 40 added `retrieved` for a sound reason: obtaining a page should not assert that it
+qualifies. But `status !== 'discovery'` was the de facto test for *"this candidate has been
+decided"*, used in `nextWork`, in `corpusBlockers`, in the draft derivation and in the exhaustion
+logic — correct while every non-discovery record was a decision, and silently satisfied by the new
+status everywhere.
+
+Reproduced on a copy of the live log, three steps:
+
+1. delete the exclusion `c-0504`;
+2. mark the retrieval `c-0503` approved;
+3. approve the other four exclusions.
+
+`nextWork` advanced to NZDF service-application and `corpusBlockers` reported **nothing**, while
+`https://www.cadetnet.org.nz/complete-signup/` had never been decided at all. An evidence-only
+retrieval counted as a completed decision, so **a candidate could be settled by the act of
+retrieving it** — the opposite of the guarantee Amendment 40 was added to provide.
+
+### The rule
+
+1. **A retrieval carries `approval: not-applicable`.** Not pending, not approved, not rejected:
+   there is no decision to approve. Leaving it `pending` made it unfinished business that approving
+   would "resolve", and no other status may borrow the state.
+2. **Only a terminal decision settles a candidate.** `TERMINAL_STATUSES` is `captured`, `excluded`,
+   `failed`, `capture-blocked`. A retrieval is not among them and **never qualifies, settles or
+   exhausts** anything.
+3. **Every locked candidate requires exactly one active terminal decision.** Not at least one: two
+   live decisions leave the category with two answers and no way to say which it acted on.
+4. **One shared function, not four opinions.** `TERMINAL_STATUSES`, `isTerminalDecision`,
+   `isEvidenceOnly` and `terminalDecisionsFor` are defined once in `selection.mjs` and used by
+   `nextWork`, `status`, `corpusBlockers`, the draft and the resolution logic; the sealer carries an
+   independent implementation, `terminalDecisionProblems`, so a state reaching the seal by a route
+   that never touched the capture CLI still fails.
+5. **Status reports retrievals separately**, on their own line and outside the decision counts. The
+   printed statuses are checked against the attempt total, because the same omission had already
+   happened once: with `retrieved` added the lines again failed to sum, and the missing record was
+   the one that decides nothing.
+6. **An exclusion written from a retrieval cites it structurally**, through
+   `evidenceFromAttemptId`, verified at write time against the retrieval's agency, category,
+   canonical URL, digest and byte length. It **must not supersede the retrieval it cites**:
+   superseding the evidence withdraws it from the active record, leaving the finding resting on
+   nothing checkable. A supersession claim from a record that has itself been superseded does not
+   keep evidence withdrawn, which is what makes the repair below expressible in one record.
+
+### The two repairs to the live log
+
+**`c-0504` superseded its own evidence.** It has been rejected and superseded by **`c-0505`**,
+which cites `c-0503` instead and carries its digest. No request was made; the finding about the page
+is unchanged.
+
+**`c-0503` carried `approval: pending`,** written by `capture-v1.0.13` before the
+`not-applicable` state existed. That field is migrated in place, with the reason recorded on the
+record itself as `approvalMigrationNote`. This is a **field migration, not a correction of a
+finding**: a retrieval decides nothing, so `pending` was never a fact about the world, and no
+outcome, digest, byte, eligibility value or retrieved byte changed. It is disclosed here rather
+than done quietly because editing any recorded field is otherwise outside what this protocol
+permits.
+
+### What holds it
+
+Thirteen cases in `capture/test/terminal-decision.test.mjs`, including **the exact three-step attack
+above** as a regression test, run against both the capture package and the sealer: a retrieval alone
+leaving the candidate undecided in `corpusBlockers`, in the sealer and in `nextWork`; the approval
+refused at write time for all three decision states; no decision permitted to borrow
+`not-applicable`; the exclusion settling it and work then advancing; two live decisions refused
+rather than silently preferred; a citation refused for superseding its own evidence, for mismatched
+agency, category or URL, for a mismatched digest or byte length, and for naming something that is
+not a retrieval; a retrieval withdrawn by a live supersession refused as evidence, and citable again
+once that record is itself superseded; and the shared predicates agreeing on what settles a
+candidate.
+
+### A development note, not part of the evidence chain
+
+While resolving a tag-name collision, `capture-v1.0.8` was deleted locally in error and restored
+from the remote; the annotated tag object hash was verified identical and the remote reference never
+moved. No protocol deviation is recorded, because nothing in the research evidence chain was
+affected.

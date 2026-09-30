@@ -17,7 +17,7 @@
  * selecting or capturing.
  */
 
-import { existsSync, readFileSync, mkdirSync } from 'node:fs';
+import { existsSync, readFileSync, mkdirSync, statSync } from 'node:fs';
 import { join, resolve, relative } from 'node:path';
 import { chromium } from 'playwright';
 import {
@@ -397,6 +397,13 @@ async function doCapture() {
   try {
     appendAttempt(log, retrieveOnly ? {
       ...base, ...record, status: 'retrieved', category, pageId,
+      approval: APPROVAL.NOT_APPLICABLE,
+      // Amendment 41. The byte length, recorded so a citation has something to verify besides the
+      // digest. The digest is the binding check - a file of a different length will not match it -
+      // but a stated length is cheap, and a citation that names both is checkable by eye.
+      ...(record.file
+        ? { htmlBytes: statSync(join(capturesDir, record.file)).size }
+        : {}),
       eligibility: Object.fromEntries(ELIGIBILITY_CRITERIA.map((c) => [c, null])),
       attemptedModes,
       politeness: { robots: verdict.reason, userAgent: record.userAgent, settleMs },
@@ -508,11 +515,34 @@ function doExclude() {
   const eligibility = Object.fromEntries(ELIGIBILITY_CRITERIA.map((c) => [c, null]));
   if (fails) eligibility[fails] = false;
 
+  // Amendment 41. An exclusion written from an assessment-only retrieval names it structurally and
+  // CARRIES ITS BYTES, so the citation can be verified rather than taken on trust. Copying the
+  // digest and length here is what makes the check in `appendAttempt` mean anything: a citation
+  // that matched on ids alone would still let the evidence be swapped underneath it.
+  const evidenceFrom = flag('evidence-from');
+  let carried = {};
+  if (evidenceFrom) {
+    const source = log.attempts.find((a) => a.id === evidenceFrom);
+    if (!source) die(`--evidence-from names ${evidenceFrom}, which is not a recorded attempt`);
+    if (source.status !== 'retrieved') {
+      die(`${evidenceFrom} is a ${source.status} attempt; --evidence-from cites an assessment-only retrieval`);
+    }
+    // The digest and length only. The pageId and file belong to the RETRIEVAL, which owns those
+    // bytes and keeps its identity; copying them onto the exclusion collided with the retrieval's
+    // own pageId and would have given one page two owners.
+    carried = {
+      evidenceFromAttemptId: evidenceFrom,
+      htmlSha256: source.htmlSha256,
+      ...(source.htmlBytes !== undefined ? { htmlBytes: source.htmlBytes } : {}),
+    };
+  }
+
   appendAttempt(log, {
     examinedAt: now(),
     agency: require_('agency'), website: require_('website'), url: require_('url'),
     status: 'excluded', exclusionReason: require_('reason'), category: flag('category') ?? undefined,
     eligibility,
+    ...carried,
     ...(flag('supersedes-attempt-id') ? { supersedesAttemptId: flag('supersedes-attempt-id') } : {}),
   });
   writeLog(logPath, log);
@@ -571,7 +601,16 @@ function doStatus() {
   // capture-v1.0.7. Both statuses were missing, so the four printed lines did not sum to the
   // total above them and a `capture-blocked` page appeared nowhere in the report at all.
   console.log(`  blocked       ${by((a) => a.status === 'capture-blocked')}`);
+  // Amendment 41. Reported on its own line, and NOT among the decisions. The same omission
+  // recurred: with `retrieved` added the printed lines again failed to sum to the total above
+  // them, and the one record missing was the one that decides nothing - which is exactly the
+  // record a reader most needs to see counted separately.
+  console.log(`  retrieved     ${by((a) => a.status === 'retrieved')}   (evidence only; decides nothing)`);
   console.log(`  discovery     ${by((a) => a.status === 'discovery')}`);
+  const printed = by((a) => ['captured', 'excluded', 'failed', 'capture-blocked', 'retrieved', 'discovery'].includes(a.status));
+  if (printed !== log.attempts.length) {
+    console.log(`  UNACCOUNTED   ${log.attempts.length - printed} attempt(s) match no printed status`);
+  }
 
   const approvedCaptures = by((a) => a.status === 'captured' && a.approval === APPROVAL.APPROVED);
   console.log(`approved captures ${approvedCaptures} of a target of ${MAX_QUALIFIED_AGENCIES}`);

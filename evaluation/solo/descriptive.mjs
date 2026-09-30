@@ -168,7 +168,7 @@ const FRAME_FILES = [
  * exhaustion records at all. A manifest that misnames its own protocol is worse than one that
  * omits it: a reader checking which rules a corpus was sealed under would be told the wrong ones.
  */
-export const SOLO_PROTOCOL_TAG = 'solo-protocol-v1.0.18';
+export const SOLO_PROTOCOL_TAG = 'solo-protocol-v1.0.19';
 
 /**
  * Two resolutions, mirrored from the capture package and checked equal by a test.
@@ -234,6 +234,86 @@ export const RESOLUTION_REASONS = Object.freeze({
  * the observation's own category and round, because one render legitimately supports a separate
  * judgement in every category it was examined under.
  */
+/**
+ * Amendment 41, mirrored. A locked candidate is settled only by a terminal decision, and an
+ * evidence-only retrieval is not one.
+ *
+ * Independent of the capture package on purpose. The attack this closes was reproduced on a copy of
+ * the live log: delete the exclusion, mark the retrieval approved, approve the rest, and both
+ * `nextWork` and `corpusBlockers` fell silent while a locked candidate had never been decided. A
+ * seal must refuse that state even when it is reached by a route that never touched the capture CLI.
+ */
+export function terminalDecisionProblems(log) {
+  const TERMINAL = ['captured', 'excluded', 'failed', 'capture-blocked'];
+  const problems = [];
+  const attempts = Array.isArray(log.attempts) ? log.attempts : [];
+  const superseded = new Set(
+    attempts.map((a) => a.supersedesAttemptId).filter((id) => id !== undefined && id !== null)
+  );
+  const canon = (u) => { try { const x = new URL(u); x.hash = ''; return x.href; } catch { return String(u); } };
+
+  // A retrieval decides nothing, so it must not wear a decision's approval.
+  for (const a of attempts) {
+    if (a.status !== 'retrieved') continue;
+    if (a.approval !== 'not-applicable') {
+      problems.push(
+        `${a.id} is an evidence-only retrieval recording approval ${JSON.stringify(a.approval)}; ` +
+          'it must be not-applicable'
+      );
+    }
+  }
+  for (const a of attempts) {
+    if (a.status !== 'retrieved' && a.approval === 'not-applicable') {
+      problems.push(`${a.id} is a ${a.status} attempt recording approval not-applicable`);
+    }
+  }
+
+  for (const [key, set] of Object.entries(log.candidateSets ?? {})) {
+    const [agency, category] = key.split('\u0000');
+    for (const url of set.locked ?? []) {
+      const decisions = attempts.filter(
+        (a) => a.agency === agency && TERMINAL.includes(a.status) &&
+          canon(a.url) === canon(url) && !superseded.has(a.id)
+      );
+      const where = `${agency} / ${category}: ${url}`;
+      if (decisions.length === 0) {
+        const held = attempts.find(
+          (a) => a.status === 'retrieved' && a.agency === agency && canon(a.url) === canon(url)
+        );
+        problems.push(
+          `${where} has no active terminal decision` +
+            (held ? ` (${held.id} holds its bytes, which decides nothing)` : '')
+        );
+      } else if (decisions.length > 1) {
+        problems.push(
+          `${where} has ${decisions.length} active terminal decisions (${decisions.map((d) => d.id).join(', ')})`
+        );
+      }
+    }
+  }
+
+  // An exclusion citing a retrieval must match it on agency, category, canonical URL and bytes.
+  for (const a of attempts) {
+    if (!a.evidenceFromAttemptId) continue;
+    const src = attempts.find((x) => x.id === a.evidenceFromAttemptId);
+    if (!src) { problems.push(`${a.id} cites ${a.evidenceFromAttemptId}, which does not exist`); continue; }
+    if (src.status !== 'retrieved') problems.push(`${a.id} cites ${src.id}, which is a ${src.status} attempt`);
+    if (src.agency !== a.agency) problems.push(`${a.id} cites ${src.id}, whose agency differs`);
+    if (src.category !== a.category) problems.push(`${a.id} cites ${src.id}, whose category differs`);
+    if (canon(src.url) !== canon(a.url)) problems.push(`${a.id} cites ${src.id}, whose URL differs`);
+    if (a.htmlSha256 !== undefined && src.htmlSha256 !== a.htmlSha256) {
+      problems.push(`${a.id} cites ${src.id}, whose digest differs`);
+    }
+    if (a.bytes !== undefined && src.bytes !== a.bytes) {
+      problems.push(`${a.id} cites ${src.id}, whose byte length differs`);
+    }
+    if (a.supersedesAttemptId === a.evidenceFromAttemptId) {
+      problems.push(`${a.id} supersedes the very retrieval it cites as evidence (${src.id})`);
+    }
+  }
+  return problems;
+}
+
 export function unjudgedRenderProblems(log) {
   const problems = [];
   const attempts = Array.isArray(log.attempts) ? log.attempts : [];
@@ -1177,6 +1257,11 @@ export function sealCorpus({
         // Amendment 39. Evidence retrieved and never read must not reach a seal.
         for (const problem of unjudgedRenderProblems(log)) {
           problems.push(`unjudgedRender: ${problem}`);
+        }
+
+        // Amendment 41. A candidate settled by evidence alone must not reach a seal.
+        for (const problem of terminalDecisionProblems(log)) {
+          problems.push(`terminalDecision: ${problem}`);
         }
 
         // The symmetric check: a sealed page must be an approved capture in the log.

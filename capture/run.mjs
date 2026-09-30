@@ -26,6 +26,7 @@ import {
   canonicalise, setKey, MAX_QUALIFIED_AGENCIES, CATEGORY_ORDER, lockCandidates, isSuperseded,
   DISCOVERY_METHODS, DISCOVERY_OUTCOMES, nextWork, isExhausted, TECHNICAL_ATTRITION_OUTCOMES,
   JUDGEMENT_OUTCOMES, RECORD_TYPES,
+  TERMINAL_STATUSES, isTerminalDecision, isEvidenceOnly, terminalDecisionsFor,
 } from './selection.mjs';
 
 export const LOG_SCHEMA = 'formfair/capture-log@1';
@@ -39,7 +40,14 @@ export const ELIGIBILITY_CRITERIA = Object.freeze([
   'normalHtmlOrBrowserRenderedNotPdfOrNative',
 ]);
 
-export const APPROVAL = Object.freeze({ PENDING: 'pending', APPROVED: 'approved', REJECTED: 'rejected' });
+export const APPROVAL = Object.freeze({
+  PENDING: 'pending', APPROVED: 'approved', REJECTED: 'rejected',
+  // Amendment 41. An evidence-only retrieval has no decision to approve. Leaving it `pending`
+  // made it unfinished business that approving would "resolve", and approving it then satisfied
+  // every gate that tested `status !== 'discovery'` - so a candidate could be settled by the act
+  // of retrieving it. There is nothing to approve, so the field says so.
+  NOT_APPLICABLE: 'not-applicable',
+});
 
 const sha256 = (v) => createHash('sha256').update(v).digest('hex');
 
@@ -210,6 +218,12 @@ function checkAttempt(attempt) {
   }
   // A candidate with no category would not be counted against any category's limit, which
   // let five more account-registration candidates through after the limit was reached.
+  if (attempt.status !== 'retrieved' && attempt.approval === APPROVAL.NOT_APPLICABLE) {
+    problems.push(
+      `only an evidence-only retrieval may record approval ${JSON.stringify(APPROVAL.NOT_APPLICABLE)}; ` +
+        `a ${attempt.status} attempt is a decision and must be approved or rejected`
+    );
+  }
   if (attempt.status !== 'discovery' && !CATEGORIES.includes(attempt.category)) {
     problems.push(
       `every candidate needs a category from ${CATEGORIES.join(', ')}; omitting it would ` +
@@ -223,6 +237,13 @@ function checkAttempt(attempt) {
   // five. A retrieval that concludes nothing cannot make that mistake, and the researcher then
   // excludes from it or promotes it without requesting the page a second time.
   if (attempt.status === 'retrieved') {
+    if (attempt.approval !== APPROVAL.NOT_APPLICABLE) {
+      problems.push(
+        `a retrieved attempt must record approval ${JSON.stringify(APPROVAL.NOT_APPLICABLE)}, not ` +
+          `${JSON.stringify(attempt.approval)}: it holds evidence and decides nothing, so there is ` +
+          'nothing to approve or reject'
+      );
+    }
     if (!attempt.pageId) problems.push('a retrieved attempt needs a pageId');
     if (!attempt.file) problems.push('a retrieved attempt needs a file');
     if (!attempt.htmlSha256) problems.push('a retrieved attempt needs htmlSha256');
@@ -476,6 +497,58 @@ export function appendAttempt(log, attempt) {
   // Checked whenever it is present, not only when the URL already has attempts. Validating
   // it inside that branch meant an id naming a DIFFERENT page was accepted in silence, and
   // the rejected decision it claimed to correct stayed open.
+  // Amendment 41. An exclusion written from a retrieval names that retrieval STRUCTURALLY, and the
+  // link is verified rather than trusted. `c-0504` superseded its own evidence, which erased the
+  // retrieval from the active record and left the exclusion resting on nothing a reader could
+  // check. The citation is a separate field from supersession because they say different things:
+  // supersession withdraws a decision, citation points at evidence that stays.
+  if (attempt.evidenceFromAttemptId) {
+    const source = log.attempts.find((a) => a.id === attempt.evidenceFromAttemptId);
+    if (!source) {
+      throw new Error(`evidenceFromAttemptId names ${attempt.evidenceFromAttemptId}, which is not a recorded attempt`);
+    }
+    if (source.status !== 'retrieved') {
+      throw new Error(
+        `${source.id} is a ${source.status} attempt; evidenceFromAttemptId cites an ` +
+          'assessment-only retrieval'
+      );
+    }
+    if (source.agency !== attempt.agency) {
+      throw new Error(`${source.id} is ${source.agency}, not ${attempt.agency}`);
+    }
+    if (source.category !== attempt.category) {
+      throw new Error(`${source.id} is category ${source.category}, not ${attempt.category}`);
+    }
+    if (canonicalise(source.url) !== canonicalise(attempt.url)) {
+      throw new Error(`${source.id} is ${source.url}, not ${attempt.url}`);
+    }
+    // The retrieval must still be active evidence. A supersession CLAIM from a record that has
+    // itself been superseded does not keep the evidence withdrawn - otherwise `c-0504`, rejected
+    // and replaced, would go on hiding `c-0503` from the record that cites it - but a live
+    // supersession does, and citing withdrawn evidence must fail.
+    // This attempt is not in the log yet, so a record IT supersedes does not read as superseded.
+    // Counting its own supersession is what makes the repair expressible in one record.
+    const activeSupersession = log.attempts.find(
+      (a) => a.supersedesAttemptId === source.id &&
+        a.id !== attempt.supersedesAttemptId && !isSuperseded(log, a)
+    );
+    if (activeSupersession) {
+      throw new Error(
+        `${source.id} has been superseded by ${activeSupersession.id} and is no longer active ` +
+          'evidence; it cannot be cited'
+      );
+    }
+    // The bytes themselves, by length and digest. A citation that matched only on ids would still
+    // let the evidence be swapped underneath it.
+    for (const [field, label] of [['htmlSha256', 'digest'], ['htmlBytes', 'byte length']]) {
+      if (attempt[field] !== undefined && attempt[field] !== source[field]) {
+        throw new Error(
+          `this attempt records ${label} ${JSON.stringify(attempt[field])} but cites ${source.id}, ` +
+            `whose ${label} is ${JSON.stringify(source[field])}`
+        );
+      }
+    }
+  }
   if (attempt.supersedesAttemptId) {
     const target = log.attempts.find((a) => a.id === attempt.supersedesAttemptId);
     if (!target) {
@@ -491,6 +564,15 @@ export function appendAttempt(log, attempt) {
     // it. Its whole purpose is to be read and then settled - excluded from, or promoted - and
     // requiring a rejection first would mean recording a verdict on the page in order to be allowed
     // to record the verdict on the page.
+    // Amendment 41. Superseding the evidence you rest on withdraws it from the active record: the
+    // exclusion then cites nothing checkable. `c-0504` did exactly that to `c-0503`.
+    if (attempt.evidenceFromAttemptId && attempt.supersedesAttemptId === attempt.evidenceFromAttemptId) {
+      throw new Error(
+        `this attempt cites ${attempt.evidenceFromAttemptId} as its evidence and also supersedes it. ` +
+          'A retrieval that is superseded is no longer active evidence; cite it and supersede the ' +
+          'decision it replaces instead.'
+      );
+    }
     if (target.status !== 'retrieved' && target.approval !== APPROVAL.REJECTED) {
       throw new Error(
         `attempt ${target.id} is ${target.approval}, not rejected; only a rejected decision ` +
@@ -500,6 +582,11 @@ export function appendAttempt(log, attempt) {
     if (isSuperseded(log, target)) {
       throw new Error(`attempt ${target.id} has already been superseded`);
     }
+  } else if (attempt.evidenceFromAttemptId) {
+    // Amendment 41. A decision written FROM a retrieval of the same page is the second record for
+    // that URL by design, and it does not supersede the retrieval - the evidence stays active so
+    // the decision can be checked against it. The citation is verified above on agency, category,
+    // canonical URL and bytes, which is a stronger test than the duplicate rule performs.
   } else if (attempt.promotedFrom) {
     // Amendment 40. A promotion is the same candidate, the same URL and the same bytes; the
     // duplicate-URL rule exists to stop one page being counted twice, and a promotion counts once.
@@ -1066,7 +1153,7 @@ export function exhaustAgency(log, drawOrder, { agency = null } = {}) {
       throw new Error(`${target} / ${category} is ${set.approval ?? 'pending'}, not approved`);
     }
     const decided = new Set(
-      log.attempts.filter((a) => a.agency === target && a.status !== 'discovery').map((a) => a.url)
+      log.attempts.filter((a) => a.agency === target && isTerminalDecision(a)).map((a) => a.url)
     );
     const unassessed = (set.locked ?? []).filter((u) => !decided.has(u));
     if (unassessed.length) {
@@ -1247,7 +1334,7 @@ export function categorySettled(log, { agency, category }) {
   const set = log.candidateSets[setKey(agency, category)];
   if (!set?.lockedAt) return { settled: false, reason: 'not locked' };
   const decided = new Set(
-    log.attempts.filter((a) => a.agency === agency && a.status !== 'discovery').map((a) => a.url)
+    log.attempts.filter((a) => a.agency === agency && isTerminalDecision(a)).map((a) => a.url)
   );
   const pending = set.locked.filter((u) => !decided.has(u));
   return { settled: pending.length === 0, pending };
@@ -1310,7 +1397,7 @@ export function agenciesAwaitingExhaustion(log) {
       const set = log.candidateSets?.[setKey(agency, category)];
       if (!set?.lockedAt || set.approval !== APPROVAL.APPROVED) return false;
       const decided = new Set(
-        log.attempts.filter((a) => a.agency === agency && a.status !== 'discovery').map((a) => a.url)
+        log.attempts.filter((a) => a.agency === agency && isTerminalDecision(a)).map((a) => a.url)
       );
       return (set.locked ?? []).every((u) => decided.has(u));
     });
@@ -3795,7 +3882,7 @@ export function corpusBlockers(log, { capturesRoot = null } = {}) {
   const blockers = [];
   const add = (kind, summary, items = []) => blockers.push({ kind, summary, items });
 
-  const pending = log.attempts.filter((a) => a.approval === APPROVAL.PENDING);
+  const pending = log.attempts.filter((a) => a.approval === APPROVAL.PENDING && !isEvidenceOnly(a));
   if (pending.length) {
     add('pending-attempts', `${pending.length} attempt(s) still pending researcher approval`,
       pending.map((a) => `${a.id} ${a.url}`));
@@ -3810,7 +3897,8 @@ export function corpusBlockers(log, { capturesRoot = null } = {}) {
   }
 
   const dangling = log.attempts.filter(
-    (a) => a.status !== 'discovery' && a.approval === APPROVAL.REJECTED && !isSuperseded(log, a)
+    (a) => a.status !== 'discovery' && !isEvidenceOnly(a) &&
+      a.approval === APPROVAL.REJECTED && !isSuperseded(log, a)
   );
   if (dangling.length) {
     add('unsuperseded-rejections', `${dangling.length} rejected attempt(s) have not been superseded by a correction`,
@@ -3818,17 +3906,38 @@ export function corpusBlockers(log, { capturesRoot = null } = {}) {
   }
 
   // The check `status` was missing entirely.
+  // Amendment 41. TERMINAL decisions, and exactly one each. This read `status !== 'discovery'` and
+  // so accepted an evidence-only retrieval as an outcome: with the exclusion deleted and the
+  // retrieval marked approved, it reported nothing while a locked candidate was undecided.
+  const supersededAttempts = new Set(
+    log.attempts.map((a) => a.supersedesAttemptId).filter((id) => id !== undefined && id !== null)
+  );
   const unassessed = [];
+  const contested = [];
   for (const set of Object.values(log.candidateSets ?? {})) {
-    const decided = new Set(
-      log.attempts.filter((a) => a.agency === set.agency && a.status !== 'discovery').map((a) => a.url)
-    );
-    for (const url of (set.locked ?? []).filter((u) => !decided.has(u))) {
-      unassessed.push(`${set.agency} / ${set.category}: ${url}`);
+    for (const url of set.locked ?? []) {
+      const decisions = terminalDecisionsFor(log.attempts, {
+        agency: set.agency, url, supersededIds: supersededAttempts,
+      });
+      if (decisions.length === 0) {
+        const held = log.attempts.find(
+          (a) => isEvidenceOnly(a) && a.agency === set.agency && canonicalise(a.url) === canonicalise(url)
+        );
+        unassessed.push(
+          `${set.agency} / ${set.category}: ${url}` +
+            (held ? ` - ${held.id} holds its bytes, but a retrieval decides nothing` : '')
+        );
+      } else if (decisions.length > 1) {
+        contested.push(`${set.agency} / ${set.category}: ${url} - ${decisions.map((d) => d.id).join(', ')}`);
+      }
     }
   }
   if (unassessed.length) {
-    add('unassessed-candidates', `${unassessed.length} locked candidate(s) with no outcome`, unassessed);
+    add('unassessed-candidates', `${unassessed.length} locked candidate(s) with no terminal decision`, unassessed);
+  }
+  if (contested.length) {
+    add('contested-candidates',
+      `${contested.length} locked candidate(s) have more than one active terminal decision`, contested);
   }
 
   // Amendment 39. Log-wide here, not per round: the corpus is built from every round at once,
