@@ -13,13 +13,13 @@
   },
   "counts": {
     "discoveryPages": 605,
-    "candidatesAssessed": 37,
-    "captured": 6,
-    "excluded": 27,
+    "candidatesAssessed": 47,
+    "captured": 7,
+    "excluded": 31,
     "failed": 1,
     "captureBlocked": 0,
-    "pendingApprovalAttempts": 0,
-    "pendingApprovalCandidateSets": 1
+    "pendingApprovalAttempts": 5,
+    "pendingApprovalCandidateSets": 0
   },
   "discoveryByMethod": {
     "navigation": 235,
@@ -4877,9 +4877,9 @@
       "locked": 5,
       "droppedBeyondBound": 0,
       "lockedAt": "2026-09-30T02:12:26Z",
-      "approval": "pending",
-      "approvedAt": null,
-      "approvalNote": null,
+      "approval": "approved",
+      "approvedAt": "2026-09-30T02:36:34Z",
+      "approvalNote": "Approved. Five candidates from 64 active records across ten websites, exactly at the frozen bound of five with none dropped. Every one carries a name-collecting control on the page as rendered rather than behind a link: the Defence Careers contact form (FirstName, Surname, Email, Enquiry, Message, reCAPTCHA) and the four museum and cadet-forces contact forms. Thirteen active records yielded no candidate judgement: robots-unestablished x2, Veterans' Affairs withheld for a third round under its Imperva challenge with no content request, and retrieval-blocked x11, chiefly the Air Force Museum searches and the CadetNet headless attempts. Defence Careers' internal search was disallowed for all three terms and recorded without being requested. CadetNet's emergency-contacts and cadet-school-contact-list pages were not admitted: both are directories of contact details rather than direct links to a form. Approving this set means these five URLs are what should be assessed, not that any is eligible.",
       "supportedByDiscoveryRecords": [
         "d-0579",
         "d-0580",

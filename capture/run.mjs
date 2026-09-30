@@ -660,9 +660,17 @@ export function appendAttempt(log, attempt) {
     }
   }
   // The five-second minimum between top-level navigations, checked rather than trusted.
+  //
+  // Amendment 43. A PROMOTION is exempt, because it makes no request: it re-hashes bytes already
+  // held and records the decision about them. It also inherits the retrieval's `navigatedAt`, which
+  // is when those bytes were actually fetched, so as soon as any later page is retrieved the
+  // interval goes NEGATIVE and the promotion is refused - which is what happened to `c-0643` after
+  // the other four candidates were retrieved. Pacing is an obligation on traffic; a record that
+  // generates none cannot breach it, and holding it to the rule would make the frozen tie-break
+  // unexecutable whenever the selected page is not the last one fetched.
   const at = Date.parse(attempt.navigatedAt ?? attempt.capturedAt ?? '');
   const previous = lastNavigation(log);
-  if (!Number.isNaN(at) && previous !== null) {
+  if (!attempt.promotedFrom && !Number.isNaN(at) && previous !== null) {
     const gap = at - previous;
     if (gap < POLICY.minDelayBetweenNavigationsMs) {
       throw new Error(

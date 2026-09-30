@@ -162,3 +162,58 @@ describe('an assessment-only retrieval concludes nothing', () => {
     assert.deepEqual(problems, []);
   });
 });
+
+describe('a promotion makes no request, so pacing does not apply to it', () => {
+  /**
+   * Amendment 43. `promote` re-hashes bytes already held; it generates no traffic. It also inherits
+   * the retrieval's `navigatedAt`, which is when those bytes were fetched, so once any later page
+   * is retrieved the interval to "the previous navigation" is NEGATIVE.
+   *
+   * That is not hypothetical: selecting NZDF's enquiry-or-contact page meant promoting the FIRST of
+   * five retrievals, and the promotion was refused with "only -52000 ms since the previous
+   * navigation". Held to the rule, the frozen tie-break becomes unexecutable whenever the selected
+   * page is not the last one fetched - which is four times in five.
+   */
+  const at = (s) => new Date(Date.UTC(2026, 8, 30, 2, 0, s)).toISOString().replace(/\.\d{3}Z$/, 'Z');
+
+  const round = () => {
+    const log = emptyLog();
+    prepareSet(log, AGENCY, CAT, [url(1), url(2), url(3)]);
+    // First candidate retrieved, then a second one a minute later.
+    appendAttempt(log, retrievedAt(url(1), 'w-govt-nz-candidate-1', at(0)));
+    appendAttempt(log, retrievedAt(url(2), 'w-govt-nz-candidate-2', at(52)));
+    return log;
+  };
+  const retrievedAt = (u, pageId, when) => ({
+    agency: AGENCY, category: CAT, website: 'https://w.govt.nz/', url: u,
+    status: 'retrieved', approval: 'not-applicable', navigatedAt: when,
+    pageId, file: `${pageId}.html`, htmlSha256: 'a'.repeat(64), htmlBytes: 1024,
+    eligibility: Object.fromEntries(ELIGIBILITY_CRITERIA.map((c) => [c, null])),
+  });
+
+  test('promoting the EARLIER retrieval is allowed despite a negative interval', () => {
+    const log = round();
+    const first = log.attempts.find((a) => a.url === url(1) && a.status === 'retrieved');
+    appendAttempt(log, {
+      ...first, id: undefined, status: 'captured', promotedFrom: first.id,
+      inclusionEvidence: 'all five criteria are satisfied; selected by the frozen tie-break',
+      eligibility: Object.fromEntries(ELIGIBILITY_CRITERIA.map((c) => [c, true])),
+      approval: 'pending',
+    });
+    const promoted = log.attempts.at(-1);
+    assert.equal(promoted.status, 'captured');
+    assert.equal(promoted.promotedFrom, first.id);
+    // It keeps the retrieval's navigation time: that is when the bytes were fetched.
+    assert.equal(promoted.navigatedAt, at(0));
+  });
+
+  test('a real navigation is still paced', () => {
+    const log = round();
+    // A third, unretrieved candidate, fetched two seconds after the second: a genuine navigation
+    // inside the five-second minimum, which must still be refused.
+    assert.throws(
+      () => appendAttempt(log, retrievedAt(url(3), 'w-govt-nz-candidate-3', at(54))),
+      /since the previous navigation/
+    );
+  });
+});
