@@ -94,7 +94,7 @@ function checkAttempt(attempt) {
   if (!attempt.agency) problems.push('agency is required');
   if (!attempt.website) problems.push('website is required');
   if (!attempt.url) problems.push('url is required');
-  if (!['captured', 'retrieved', 'excluded', 'failed', 'capture-blocked', 'discovery'].includes(attempt.status)) {
+  if (!['captured', 'retrieved', 'excluded', 'eligible-not-selected', 'failed', 'capture-blocked', 'discovery'].includes(attempt.status)) {
     problems.push('status must be captured, excluded, failed, capture-blocked or discovery');
   }
   // capture-v1.0.6. `capture-blocked` says the harness could not retrieve the page, and says
@@ -257,6 +257,35 @@ function checkAttempt(attempt) {
       );
     }
   }
+  // Amendment 44. A candidate that satisfied every criterion and lost only the tie-break.
+  //
+  // Recorded as `excluded` with all five criteria null, "eligible but not selected" was legible
+  // only in prose: the log could not compute how many candidates were eligible, and the tie-break
+  // could not be checked against anything. `doExclude`'s own comment makes this argument about
+  // criterion-five counts; it applies with equal force here.
+  if (attempt.status === 'eligible-not-selected') {
+    if (ELIGIBILITY_CRITERIA.some((c) => attempt.eligibility?.[c] !== true)) {
+      problems.push(
+        'an eligible-not-selected attempt must record every eligibility criterion as true; it is ' +
+          'not an exclusion on eligibility'
+      );
+    }
+    if (!attempt.exclusionReason) {
+      problems.push('an eligible-not-selected attempt needs a reason stating the tie-break');
+    }
+    if (!attempt.evidenceFromAttemptId) {
+      problems.push(
+        'an eligible-not-selected attempt must cite the assessment-only retrieval it was judged ' +
+          'from, so the eligibility claim rests on named evidence'
+      );
+    }
+    if (!attempt.notSelectedInFavourOf) {
+      problems.push(
+        'an eligible-not-selected attempt must name the captured candidate that was selected ' +
+          'instead, in notSelectedInFavourOf'
+      );
+    }
+  }
   if (attempt.status === 'captured') {
     if (!attempt.pageId) problems.push('a captured attempt needs a pageId');
     if (!attempt.file) problems.push('a captured attempt needs a file');
@@ -267,8 +296,8 @@ function checkAttempt(attempt) {
       problems.push('a captured attempt must satisfy all five eligibility criteria');
     }
   }
-  if (attempt.status !== 'captured' && attempt.status !== 'retrieved' &&
-      attempt.status !== 'discovery' && !attempt.exclusionReason) {
+  if (!['captured', 'retrieved', 'discovery', 'eligible-not-selected'].includes(attempt.status) &&
+      !attempt.exclusionReason) {
     problems.push('a non-captured attempt needs an exclusionReason');
   }
   return problems;
@@ -587,6 +616,46 @@ export function appendAttempt(log, attempt) {
             `whose ${label} is ${JSON.stringify(source[field])}`
         );
       }
+    }
+  }
+  // Amendment 44. The tie-break claim is checked against the log, not taken on trust.
+  if (attempt.notSelectedInFavourOf) {
+    const selected = log.attempts.find((a) => a.id === attempt.notSelectedInFavourOf);
+    if (!selected) {
+      throw new Error(`notSelectedInFavourOf names ${attempt.notSelectedInFavourOf}, which is not a recorded attempt`);
+    }
+    if (selected.status !== 'captured') {
+      throw new Error(
+        `${selected.id} is a ${selected.status} attempt; notSelectedInFavourOf must name the ` +
+          'CAPTURED candidate that was selected'
+      );
+    }
+    for (const [field, label] of [['agency', 'agency'], ['category', 'category'],
+      ['candidateSetVersion', 'round']]) {
+      if (selected[field] !== attempt[field]) {
+        throw new Error(
+          `${selected.id} is ${label} ${JSON.stringify(selected[field])}, not ` +
+            `${JSON.stringify(attempt[field])}; the selection must come from the same locked set`
+        );
+      }
+    }
+    const set = log.candidateSets?.[setKey(attempt.agency, attempt.category)];
+    const locked = set?.locked ?? [];
+    const mine = canonicalise(attempt.url);
+    const theirs = canonicalise(selected.url);
+    for (const [url, who] of [[mine, 'this candidate'], [theirs, 'the selected candidate']]) {
+      if (!locked.includes(url)) {
+        throw new Error(`${who} (${url}) is not in the locked set for ${attempt.agency} / ${attempt.category}`);
+      }
+    }
+    // The frozen tie-break takes the alphabetically first eligible canonical URL, so a candidate
+    // that sorts BEFORE the selection cannot have lost to it.
+    if (!(theirs < mine)) {
+      throw new Error(
+        `${selected.id} (${theirs}) does not sort before this candidate (${mine}); the frozen ` +
+          'tie-break takes the alphabetically first eligible canonical URL, so this record would ' +
+          'claim a selection the rule did not make'
+      );
     }
   }
   if (attempt.supersedesAttemptId) {
@@ -1421,6 +1490,9 @@ export function deriveLedger(log) {
       // the one the machinery checks.
       a.htmlBytes ?? '',
       a.evidenceFromAttemptId ?? '',
+      // Amendment 44. Which capture won the tie-break, published so an eligible-but-not-selected
+      // outcome can be verified from the ledger instead of read out of its prose.
+      a.notSelectedInFavourOf ?? '',
       a.promotedFrom ?? '',
       a.supersedesAttemptId ?? '',
     ]
@@ -1431,7 +1503,7 @@ export function deriveLedger(log) {
       .join(',')
   );
   const header = LEDGER_HEADER.trimEnd() +
-    ',approval,approvedAt,approvalNote,htmlBytes,evidenceFromAttemptId,promotedFrom,supersedesAttemptId\n';
+    ',approval,approvedAt,approvalNote,htmlBytes,evidenceFromAttemptId,notSelectedInFavourOf,promotedFrom,supersedesAttemptId\n';
   return header + rows.join('\n') + (rows.length ? '\n' : '');
 }
 
@@ -3992,6 +4064,30 @@ export function corpusBlockers(log, { capturesRoot = null } = {}) {
   }
   if (unassessed.length) {
     add('unassessed-candidates', `${unassessed.length} locked candidate(s) with no terminal decision`, unassessed);
+  }
+
+  // Amendment 44. An eligible-but-not-selected record asserts that something else was chosen.
+  // Checked here as well as at write time, because the capture it names could be rejected later.
+  const tieBreak = [];
+  for (const a of log.attempts) {
+    if (a.status !== 'eligible-not-selected' || supersededAttempts.has(a.id)) continue;
+    const selected = log.attempts.find((x) => x.id === a.notSelectedInFavourOf);
+    if (!selected || selected.status !== 'captured') {
+      tieBreak.push(`${a.id} names ${a.notSelectedInFavourOf}, which is not a captured attempt`);
+      continue;
+    }
+    if (selected.approval === APPROVAL.REJECTED) {
+      tieBreak.push(
+        `${a.id} rests on the selection ${selected.id}, which has been REJECTED; the tie-break ` +
+          'must be decided again before this record stands'
+      );
+    }
+    if (!(canonicalise(selected.url) < canonicalise(a.url))) {
+      tieBreak.push(`${a.id} names ${selected.id}, which does not sort before it`);
+    }
+  }
+  if (tieBreak.length) {
+    add('tie-break-unsound', `${tieBreak.length} eligible-not-selected record(s) rest on an unsound selection`, tieBreak);
   }
   if (contested.length) {
     add('contested-candidates',

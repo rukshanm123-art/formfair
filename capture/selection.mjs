@@ -283,7 +283,9 @@ export function isExhausted(log, agency) {
  * So the notion is named once and shared. A retrieval is not here, and must never qualify, settle
  * or exhaust anything.
  */
-export const TERMINAL_STATUSES = Object.freeze(['captured', 'excluded', 'failed', 'capture-blocked']);
+export const TERMINAL_STATUSES = Object.freeze([
+  'captured', 'excluded', 'eligible-not-selected', 'failed', 'capture-blocked',
+]);
 
 /** True for a record that decides a candidate. Evidence-only retrievals are excluded. */
 export const isTerminalDecision = (attempt) => TERMINAL_STATUSES.includes(attempt?.status);

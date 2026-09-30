@@ -168,7 +168,7 @@ const FRAME_FILES = [
  * exhaustion records at all. A manifest that misnames its own protocol is worse than one that
  * omits it: a reader checking which rules a corpus was sealed under would be told the wrong ones.
  */
-export const SOLO_PROTOCOL_TAG = 'solo-protocol-v1.0.20';
+export const SOLO_PROTOCOL_TAG = 'solo-protocol-v1.0.21';
 
 /**
  * Two resolutions, mirrored from the capture package and checked equal by a test.
@@ -244,7 +244,7 @@ export const RESOLUTION_REASONS = Object.freeze({
  * seal must refuse that state even when it is reached by a route that never touched the capture CLI.
  */
 export function terminalDecisionProblems(log) {
-  const TERMINAL = ['captured', 'excluded', 'failed', 'capture-blocked'];
+  const TERMINAL = ['captured', 'excluded', 'eligible-not-selected', 'failed', 'capture-blocked'];
   const problems = [];
   const attempts = Array.isArray(log.attempts) ? log.attempts : [];
   const superseded = new Set(
@@ -289,6 +289,47 @@ export function terminalDecisionProblems(log) {
           `${where} has ${decisions.length} active terminal decisions (${decisions.map((d) => d.id).join(', ')})`
         );
       }
+    }
+  }
+
+  // Amendment 44, mirrored. An eligible-but-not-selected record claims that every criterion was
+  // satisfied and that another candidate in the same locked set won the frozen tie-break. Both
+  // halves are checked independently here, because a seal must refuse a tie-break that the rule
+  // did not make even when the capture package never saw the log.
+  const canonUrl = (u) => { try { const x = new URL(u); x.hash = ''; return x.href; } catch { return String(u); } };
+  for (const a of attempts) {
+    if (a.status !== 'eligible-not-selected' || superseded.has(a.id)) continue;
+    const where = `${a.id} (${a.agency} / ${a.category})`;
+    const CRITERIA = ['publiclyReachableWithoutSigningIn', 'reachedFromFrameWebsiteForThatAgency',
+      'asksForTheNameOfANaturalPerson', 'nameFieldVisibleWithoutEnteringDataOrSubmitting',
+      'normalHtmlOrBrowserRenderedNotPdfOrNative'];
+    if (CRITERIA.some((c) => a.eligibility?.[c] !== true)) {
+      problems.push(`${where} is eligible-not-selected but does not record every criterion as true`);
+    }
+    if (!a.evidenceFromAttemptId) {
+      problems.push(`${where} is eligible-not-selected and cites no assessment-only retrieval`);
+    }
+    const selected = attempts.find((x) => x.id === a.notSelectedInFavourOf);
+    if (!selected) {
+      problems.push(`${where} names no captured selection (notSelectedInFavourOf=${a.notSelectedInFavourOf ?? 'absent'})`);
+      continue;
+    }
+    if (selected.status !== 'captured') {
+      problems.push(`${where} names ${selected.id}, which is a ${selected.status} attempt, not a capture`);
+    }
+    if (selected.agency !== a.agency || selected.category !== a.category ||
+        selected.candidateSetVersion !== a.candidateSetVersion) {
+      problems.push(`${where} names ${selected.id}, which belongs to a different locked set`);
+    }
+    if (!(canonUrl(selected.url) < canonUrl(a.url))) {
+      problems.push(
+        `${where} names ${selected.id}, which does not sort before it; the frozen tie-break takes ` +
+          'the alphabetically first eligible canonical URL'
+      );
+    }
+    const set = (log.candidateSets ?? {})[`${a.agency}\u0000${a.category}`];
+    for (const [u, who] of [[canonUrl(a.url), 'this candidate'], [canonUrl(selected.url), 'its selection']]) {
+      if (!(set?.locked ?? []).includes(u)) problems.push(`${where}: ${who} is not in the locked set`);
     }
   }
 

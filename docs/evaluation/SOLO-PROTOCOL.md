@@ -3624,3 +3624,88 @@ the ledger rendering digest, length and every evidence link as columns with a st
 Two Amendment 38 tests located the approval columns by tail offset and broke when these columns
 were appended; they now locate them by name, since a test that assumes a column is last breaks
 every time the schema grows.
+
+## Amendment 43 — a promotion makes no request, so pacing does not apply to it
+
+*Frozen as `selection-v1.0.41`, `capture-v1.0.16` and `solo-protocol-v1.0.21`, 30 September 2026.*
+
+### Chronology, recorded because it is a departure from how this protocol is meant to change
+
+This change **shipped before it was frozen**. Commit `ee1e511` altered capture behaviour, and the
+amendment existed only in a code comment, a test and the commit message: nothing in this document,
+and the newest tags still pointed at `476722b`. That is the wrong order — the rule is written and
+tagged, then the behaviour follows — and it is recorded here rather than tidied away. No page was
+requested again to correct it; the fix is documentary.
+
+### What was wrong
+
+`promote` re-hashes bytes already held and writes the decision about them. It makes **no request**.
+It also inherits the retrieval's `navigatedAt`, which is when those bytes were actually fetched, so
+as soon as any later page is retrieved the interval to "the previous navigation" goes **negative**.
+
+Promoting `c-0643` — the Air Force Museum contact page, the alphabetically first of five eligible
+candidates — was refused with *"only -52000 ms since the previous navigation"*, because the other
+four had been retrieved after it. Held to the pacing rule, the frozen tie-break becomes
+**unexecutable whenever the selected page is not the last one fetched**: four times in five here,
+and more often as a set grows.
+
+### The rule
+
+A record carrying `promotedFrom` is exempt from the five-second minimum between top-level
+navigations. Pacing is an obligation on **traffic**, and a record that generates none cannot breach
+it. The exemption is scoped to that field alone: a real navigation inside the minimum is still
+refused, and a test asserts both halves.
+
+## Amendment 44 — "eligible but not selected" is a disposition, not a sentence
+
+*Frozen as `selection-v1.0.41`, `capture-v1.0.16` and `solo-protocol-v1.0.21`, 30 September 2026.*
+
+### What was wrong
+
+NZDF's enquiry-or-contact round produced **five eligible candidates**, so the frozen tie-break alone
+decided which entered the corpus. The four that lost were recorded as `excluded` with every
+eligibility criterion `null` — which means *not established* — while their reasons stated in prose
+that all five criteria were satisfied.
+
+Two things were therefore unverifiable. The log could not report **how many candidates were
+eligible**, which is the numerator of any eligibility rate this study reports. And the tie-break
+claim rested on nothing a gate could check: no record named the capture that won, so nothing would
+have caught a selection the rule did not make. `doExclude`'s own reasoning about criterion-five
+counts applies here with equal force.
+
+### The rule
+
+A new terminal disposition, `eligible-not-selected`, which requires:
+
+1. **Every one of the five eligibility criteria recorded as `true`.** It is not an exclusion on
+   eligibility, and no criterion may be recorded as failed.
+2. **A citation of the assessment-only retrieval** it was judged from, in `evidenceFromAttemptId`,
+   so the eligibility claim rests on named evidence rather than on the record's own assertion.
+3. **The selected capture named** in `notSelectedInFavourOf`, which must be a `captured` attempt in
+   the **same locked set** — same agency, category and round — with both URLs in that set.
+4. **The selection sorting before this candidate** by canonical URL, since the frozen tie-break
+   takes the alphabetically first eligible canonical URL and a candidate sorting earlier cannot have
+   lost to a later one.
+5. It **settles** a candidate, so it joins `TERMINAL_STATUSES`, and it **never qualifies** an agency
+   — only an approved capture does.
+
+Validated at write time in `appendAttempt`, again at the corpus gate — where a **rejected**
+selection re-opens the tie-break rather than leaving it standing — and independently in the sealer.
+Published in the selection ledger, which gains a `notSelectedInFavourOf` column beside the status.
+
+### The four records
+
+`c-0649` to `c-0652` were **rejected and superseded append-only** by `c-0653` to `c-0656`, each
+citing the retrieval it was already judged from and naming `c-0648` as the selection. No page was
+requested again. The rejection reasons say plainly that the outcome was structurally wrong rather
+than substantively wrong: the finding was right, and only prose carried it.
+
+### What holds it
+
+Eleven cases in `capture/test/eligible-not-selected.test.mjs`: the disposition settling a candidate;
+all five criteria required true, with both an all-null and a single-false fixture refused; the
+retrieval citation required; the selection required; a non-capture refused as a selection; a
+different round refused; a category mismatch refused earlier still by the citation check, which is
+its own guard; a selection that does not sort first refused; a rejected selection re-opening the
+tie-break at the corpus gate; the sealer refusing a tampered sort order independently; and the
+ledger publishing the status and the selection with a stable row shape.

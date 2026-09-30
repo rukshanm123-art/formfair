@@ -450,6 +450,50 @@ async function doCapture() {
  * re-fetched would be assessing a different response from the one the researcher read, and the
  * eligibility decision would then rest on bytes nobody looked at.
  */
+/**
+ * Record a candidate that satisfied every criterion and lost only the frozen tie-break.
+ *
+ * Amendment 44. Written as an `excluded` record with all five criteria null, this outcome was
+ * legible only in prose: the log could not report how many candidates were eligible, and the
+ * tie-break rested on nothing checkable. The disposition records every criterion as true, cites the
+ * retrieval it was judged from, and names the capture that won - which `appendAttempt` then checks
+ * belongs to the same locked set and sorts before this candidate.
+ */
+function doNotSelected() {
+  const dir = require_('out');
+  const logPath = logPathFor(dir);
+  const log = readLog(logPath);
+  const evidenceFrom = require_('evidence-from');
+  const inFavourOf = require_('in-favour-of');
+
+  const source = log.attempts.find((a) => a.id === evidenceFrom);
+  if (!source) die(`--evidence-from names ${evidenceFrom}, which is not a recorded attempt`);
+  if (source.status !== 'retrieved') {
+    die(`${evidenceFrom} is a ${source.status} attempt; --evidence-from cites an assessment-only retrieval`);
+  }
+
+  appendAttempt(log, {
+    examinedAt: now(),
+    agency: require_('agency'), website: require_('website'), url: require_('url'),
+    status: 'eligible-not-selected',
+    category: flag('category') ?? undefined,
+    candidateSetVersion: flag('set-version') ? Number(flag('set-version')) : source.candidateSetVersion,
+    // Every criterion true: this is not an exclusion on eligibility.
+    eligibility: Object.fromEntries(ELIGIBILITY_CRITERIA.map((c) => [c, true])),
+    evidenceFromAttemptId: evidenceFrom,
+    htmlSha256: source.htmlSha256,
+    ...(source.htmlBytes !== undefined ? { htmlBytes: source.htmlBytes } : {}),
+    notSelectedInFavourOf: inFavourOf,
+    exclusionReason: require_('reason'),
+    ...(flag('supersedes-attempt-id') ? { supersedesAttemptId: flag('supersedes-attempt-id') } : {}),
+  });
+  writeLog(logPath, log);
+  writeDerived({ log, dir, frameSha256: flag('frame-sha256'), drawOrderSha256: flag('draw-order-sha256'), synthetic: has('synthetic') });
+  const record = log.attempts.at(-1);
+  console.log(`recorded ${record.id}: eligible-not-selected, in favour of ${inFavourOf}`);
+  console.log(`all five criteria true, judged from ${evidenceFrom}. No request was made.`);
+}
+
 function doPromote() {
   const dir = require_('out');
   const logPath = logPathFor(dir);
@@ -1795,7 +1839,8 @@ function doClosePermit() {
 
 const commands = { packet: doPacket, candidates: doCandidates, lock: doLock, 'approve-set': doApproveSet,
   'supersede-set': doSupersedeSet, publish: doPublish, next: doNext, capture: doCapture, exclude: doExclude, discovery: doDiscovery, budget: doBudget, approve: doApprove, status: doStatus, build: doBuild, exhaust: doExhaust, 'preflight-discovery': doPreflightDiscovery, 'reopen-set': doReopenSet, 'close-permit': doClosePermit,
-  deviation: doDeviation, 'recheck-robots': doRecheckRobots, promote: doPromote, 're-resolve': doReResolve,
+  deviation: doDeviation, 'recheck-robots': doRecheckRobots, promote: doPromote,
+  'not-selected': doNotSelected, 're-resolve': doReResolve,
   'render-discovery': doRenderDiscovery, 'correct-discovery': doCorrectDiscovery,
   'classify-render': doClassifyRender, 'adopt-render': doAdoptRender,
   're-resolve-set': doReResolveSet, 'continue-headed': doContinueHeaded };
