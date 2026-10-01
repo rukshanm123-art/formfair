@@ -3842,3 +3842,58 @@ whatever the page offers. Five more cover the append-only correction: the correc
 counting as attrition while the original is preserved, a re-classification refused for naming a
 permit, the corrected observation outstanding until explicitly judged, the barred render still
 unusable as evidence, and both packages agreeing the corrected log is clean.
+
+## Amendment 47 — three published tags are revoked, not corrected
+
+*Frozen as `selection-v1.0.44`, `capture-v1.0.19` and `solo-protocol-v1.0.24`, 1 October 2026.*
+
+Amendment 46 is **not rewritten**. Its rule, its implementation and the live correction it
+authorised are all sound; what was wrong was the attestation that froze them.
+
+### What happened
+
+Three tags were created and pushed against `60038c0`, a commit that contains **no Amendment 46
+implementation**. The commit carrying it was never made: the heredoc supplying its message was
+consumed by an earlier command in the same shell chain, so `git commit` produced nothing, `HEAD`
+never moved, and the `git tag` commands ran against the previous commit and were pushed. It was
+caught only because a trailing `echo` printed the unchanged hash.
+
+The amendment's own text, written before the tagging, states that it was frozen under those three
+names. That sentence is now wrong, and it is left standing — the record of a mistake belongs in the
+record.
+
+### Why they are revoked rather than fixed
+
+Once a tag name has been published, deleting or moving it can leave different clones resolving the
+same version to different objects: a reader who fetched earlier keeps the old object, a reader who
+clones later gets the new one, and neither can tell. Preserving the mistake and issuing a corrected
+version is the stronger audit trail. **They are never deleted, moved or recreated.**
+
+| revoked tag | annotated tag object | peels to | replaced by |
+| --- | --- | --- | --- |
+| `selection-v1.0.43` | `8d2c496bd9ff46942f5c7e8c83d4d5dfa56b1c21` | `60038c0` | `selection-v1.0.44` |
+| `capture-v1.0.18` | `1788be428fe8469ba0f31c1cd1a72c54c89dcc36` | `60038c0` | `capture-v1.0.19` |
+| `solo-protocol-v1.0.23` | `c384b5e88d570acff8958f715ea196cd58b635a5` | `60038c0` | `solo-protocol-v1.0.24` |
+
+`solo-protocol-v1.0.23` was the worst of the three, because it was not merely published: it was
+**named by the running code**. `SOLO_PROTOCOL_TAG` and `SOLO_SEALER_TAG` both declared it as the
+version in force, so the sealer asserted conformance to a tag that attested to nothing. Both now
+name `solo-protocol-v1.0.24`.
+
+### The rule
+
+1. A revoked tag is recorded in `evaluation/provenance/revoked-tags.json`, tracked in the
+   repository, with its **annotated tag object id**, its **peeled commit**, the date, the reason and
+   its replacement.
+2. **Nothing may name a revoked tag as the version in force.** A test asserts that neither
+   `SOLO_PROTOCOL_TAG` nor `SOLO_SEALER_TAG` appears in the revocation record, that the two agree so
+   one cannot be corrected without the other, and that no entry is replaced by another revoked tag.
+3. A replacement tag's message **states which invalid tag it replaces**, so the relationship is
+   legible from `git tag -n` without reading this document.
+
+### What is not reopened
+
+`d-0684`, `d-0685` and `g-0163` stand, and no page was requested again. The evidence and the
+substantive correction were never in question — only the freeze attestation was. Six cases in
+`evaluation/solo/test/revoked-tags.test.mjs` hold the rule, including one that proves the guard
+fires on the specific name that was revoked rather than passing vacuously.

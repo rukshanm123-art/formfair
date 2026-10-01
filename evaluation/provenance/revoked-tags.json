@@ -1,0 +1,30 @@
+{
+  "schema": "formfair/revoked-tags@1",
+  "note": "Published tags that attest to a freeze they do not contain. They are NEVER deleted, moved or recreated: once a tag name has been pushed, reusing it can leave different clones resolving one version to different objects. The mistake is preserved and a corrected version issued instead. Nothing may name a revoked tag as the version in force.",
+  "revoked": [
+    {
+      "tag": "selection-v1.0.43",
+      "tagObject": "8d2c496bd9ff46942f5c7e8c83d4d5dfa56b1c21",
+      "peeledCommit": "60038c078039c0890c4ad0d70c9adb97fac565dc",
+      "revokedAt": "2026-10-01",
+      "reason": "Created against the wrong commit. It attests to Amendment 46, and 60038c0 contains no Amendment 46 implementation: the commit carrying it was never made, because the heredoc supplying the commit message was consumed by an earlier command in the same shell chain, so HEAD never moved and the tag commands ran against the previous commit.",
+      "replacedBy": "selection-v1.0.44"
+    },
+    {
+      "tag": "capture-v1.0.18",
+      "tagObject": "1788be428fe8469ba0f31c1cd1a72c54c89dcc36",
+      "peeledCommit": "60038c078039c0890c4ad0d70c9adb97fac565dc",
+      "revokedAt": "2026-10-01",
+      "reason": "Created against the wrong commit, for the same reason as selection-v1.0.43. It attests to the Amendment 46 detector and correct-barriers command, neither of which exists in 60038c0.",
+      "replacedBy": "capture-v1.0.19"
+    },
+    {
+      "tag": "solo-protocol-v1.0.23",
+      "tagObject": "c384b5e88d570acff8958f715ea196cd58b635a5",
+      "peeledCommit": "60038c078039c0890c4ad0d70c9adb97fac565dc",
+      "revokedAt": "2026-10-01",
+      "reason": "Created against the wrong commit, for the same reason as selection-v1.0.43. It attests to Amendment 46 and was additionally named by SOLO_PROTOCOL_TAG and SOLO_SEALER_TAG, so the running code claimed a version in force that attested to nothing.",
+      "replacedBy": "solo-protocol-v1.0.24"
+    }
+  ]
+}
