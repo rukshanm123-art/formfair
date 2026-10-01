@@ -3969,3 +3969,49 @@ genuinely different lineage still a conflict.
 Two existing tests encoded the superseded rules and were updated rather than worked around: one
 asserted the old message for `rendered`, and one failed because the lineage walk initially followed
 judgements.
+
+## Amendment 49 — the test script must run every test file
+
+*Frozen as `selection-v1.0.46`, `capture-v1.0.21` and `solo-protocol-v1.0.26`, 1 October 2026.*
+
+No live record changes and no page is requested again. The implementations frozen by the earlier tags
+were **correct**; what was wrong is how much their CI job proved.
+
+### What was wrong
+
+`capture/package.json` named its ten test files explicitly, and the CI capture job runs that script
+under Xvfb. Seven newer files were never added to it:
+
+```
+assessment-budget  eligible-not-selected  reclassification  registration-affordance
+restated-evidence  terminal-decision      unjudged-renders
+```
+
+So CI executed **445** tests while the suite contained **540**. The 95 omitted tests all pass when
+run directly — there was no functional failure — but a green badge proved 445 and was read as proving
+the whole suite. Among the omissions was the Amendment 48 regression suite, written specifically to
+hold the repair that the same tags were created to freeze. The tags contained the right code; their
+CI job did not demonstrate it.
+
+### The pattern this belongs to
+
+This is the **third** hand-maintained list in this project to drift from the thing it enumerates:
+`capture-blocked` missing from the status totals in `capture-v1.0.7`, `retrieved` missing in
+Amendment 41, `eligible-not-selected` missing in Amendment 45. Each time the fix was to derive the
+list rather than retype it. The same fix applies here.
+
+### The rule
+
+1. `capture/package.json`'s test script is `node --test test/*.test.mjs`. A glob cannot fall behind
+   the directory; a list can, and did.
+2. A test asserts it: the script must match that pattern, must name no file individually, and the
+   suite it would run must cover every `*.test.mjs` present. The guard is itself one of those files,
+   so it cannot be skipped by the mechanism it guards against.
+
+The suite is now **543** tests — the 540 that existed plus three in the guard.
+
+### What this does not change
+
+`selection-v1.0.43`–`45`, `capture-v1.0.18`–`20` and `solo-protocol-v1.0.23`–`25` are all preserved
+and unmoved, including the three revoked under Amendment 47. Nothing is deleted or recreated; this is
+a forward-only correction, like every other in this sequence.
