@@ -13,13 +13,13 @@
   },
   "counts": {
     "discoveryPages": 672,
-    "candidatesAssessed": 51,
-    "captured": 7,
-    "excluded": 31,
+    "candidatesAssessed": 57,
+    "captured": 8,
+    "excluded": 34,
     "failed": 1,
     "captureBlocked": 0,
-    "pendingApprovalAttempts": 0,
-    "pendingApprovalCandidateSets": 1
+    "pendingApprovalAttempts": 4,
+    "pendingApprovalCandidateSets": 0
   },
   "discoveryByMethod": {
     "navigation": 265,
@@ -6020,9 +6020,9 @@
       "locked": 4,
       "droppedBeyondBound": 0,
       "lockedAt": "2026-10-01T06:13:48Z",
-      "approval": "pending",
-      "approvedAt": null,
-      "approvalNote": null,
+      "approval": "approved",
+      "approvedAt": "2026-10-01T06:17:55Z",
+      "approvalNote": "Approved. Four candidates in canonical order from 63 active records across 12 websites, using all four discovery methods, within the frozen bound of five. Twelve frame-origin robots policies were refreshed because the earlier checks had crossed 24 hours, and all twelve are byte-identical to the previous observation with no disposition changed; servewise.alcohol.org.nz's policy was ESTABLISHED FOR THE FIRST TIME, returning 404 and therefore allow-all, and no content request has been made to it. Stated disallows were honoured without requesting the paths: www.healthnz.govt.nz publishes Disallow: / and was not requested in any category, which matters because it is the largest website in this agency's frame; Safer Gambling and Smokefree disallow /search, their own search form's action, closing the internal-search method on those two websites by policy, and also /user/register; HealthEd and the resource store disallow /account. Sixteen active records in THIS ROUND yielded no candidate judgement, all retrieval-blocked, from five origins that refuse non-browser fetches with HTTP 403 on robots, sitemap and content alike, two of them refusing headed Chromium as well. Two of the four candidates are already known to be unreachable by the frozen method and are admitted deliberately so the log shows registration forms were located rather than absent: /account/register is closed by stated policy, and my.health.nz's sign-up is a client-side dialog with no addressable URL. Approving this set means these four URLs are what should be assessed, not that any is eligible.",
       "supportedByDiscoveryRecords": [
         "d-0657",
         "d-0658",
