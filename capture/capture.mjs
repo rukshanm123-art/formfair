@@ -192,6 +192,43 @@ export async function detectBlocking(page, httpStatus) {
     const text = (document.body?.innerText ?? '').slice(0, 4000).toLowerCase();
     const saysSignIn = /(^|\W)(sign in|log in|login required)(\W|$)/.test(text);
 
+    // Amendment 46. A VISIBLE registration affordance, found by inspecting real controls rather
+    // than prose.
+    //
+    // `jobs.tewhatuora.govt.nz` returned HTTP 200 and 213 nodes carrying a login form, a job
+    // search and two "Register" links, and was classified a sign-in wall: its job-search inputs
+    // were excluded as search fields, so `readableOutsideCredentials` computed 0, and the
+    // discriminator only asked whether the PASSWORD-bearing form had a name field. A registration
+    // route sitting beside the login form, which is this exact layout, was invisible to it. That
+    // contradicts the frozen interpretation, which excludes a page only when the intended form
+    // cannot be VIEWED without authenticating.
+    //
+    // Scoped deliberately: only `a`, `button`, `[role="button"]` and submit/button inputs, only
+    // when visible, and matched on the element's own label text or value - never on body prose, a
+    // comment or a script, any of which can say "register" about something else entirely.
+    const REGISTER_LABEL = /\b(register|sign\s?up|signup|create (?:an? )?account|join (?:now|us|up))\b/i;
+    const affordanceNodes = [
+      ...document.querySelectorAll('a, button, [role="button"], input[type="submit"], input[type="button"]'),
+    ].filter(visible);
+    const registrationAffordances = affordanceNodes
+      .map((el) => {
+        const label = (
+          el.tagName === 'INPUT'
+            ? (el.value ?? '')
+            : (el.innerText ?? el.textContent ?? '')
+        ).replace(/\s+/g, ' ').trim();
+        const aria = (el.getAttribute('aria-label') ?? '').replace(/\s+/g, ' ').trim();
+        const matched = REGISTER_LABEL.test(label) ? label : (REGISTER_LABEL.test(aria) ? aria : null);
+        if (!matched) return null;
+        return {
+          label: matched.slice(0, 80),
+          element: el.tagName.toLowerCase(),
+          target: el.tagName === 'A' ? (el.getAttribute('href') ?? null) : null,
+        };
+      })
+      .filter(Boolean)
+      .slice(0, 10);
+
     // A login form's username box is part of the barrier, not the form the study wants, so
     // content inputs are counted OUTSIDE any form that carries a password field.
     const passwordForms = new Set(
@@ -219,6 +256,7 @@ export async function detectBlocking(page, httpStatus) {
       passwords,
       saysSignIn,
       asksForAName,
+      registrationAffordances,
       contentInputs: contentInputs.length,
       textareas: textareas.length,
       readableOutsideCredentials:
@@ -251,13 +289,21 @@ export async function detectBlocking(page, httpStatus) {
       `${found.passwords} password field(s): ${found.credentialFieldNames.join(', ')}`
     );
     // A sign-in wall: the page says so, carries credentials, offers nothing readable beyond
-    // them, and does not ask for a person's name - which a registration form would.
-    if (found.saysSignIn && found.readableOutsideCredentials === 0 && !found.asksForAName) {
+    // them, does not ask for a person's name - which a registration form would - AND offers no
+    // visible way to register. Amendment 46 added the last condition. Removing the barrier only
+    // permits researcher judgement; it does not declare the page eligible.
+    if (found.saysSignIn && found.readableOutsideCredentials === 0 && !found.asksForAName &&
+        (found.registrationAffordances ?? []).length === 0) {
       accessBarriers.push('sign-in wall');
     }
   }
 
-  return { accessBarriers, submissionProtection, authenticationSignals };
+  // Recorded structurally, so the decision not to call this a sign-in wall is auditable rather
+  // than implicit in a barrier's absence.
+  return {
+    accessBarriers, submissionProtection, authenticationSignals,
+    registrationAffordances: found.registrationAffordances ?? [],
+  };
 }
 
 /** A sign-in wall is a fact about the page; everything else may be bot management. */

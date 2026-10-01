@@ -22,6 +22,7 @@ import { join, resolve, relative } from 'node:path';
 import { chromium } from 'playwright';
 import {
   capturePage, validateUrl, validatePageId, CATEGORIES, captureDisposition, needsHeadedFallback,
+  detectBlocking, VIEWPORT, LOCALE,
 } from './capture.mjs';
 import { renderDiscoveryPage, RENDERED_METHODS } from './render-discovery.mjs';
 import { POLICY, createPacer } from './politeness.mjs';
@@ -35,7 +36,7 @@ import {
   reopenCandidateSet, closeDiscoveryPermit, permitAudit, PERMIT_DISPOSITIONS, corpusBlockers,
   quarantineArtefact, recordDeviation, agencyResolutions, agencyResolution, reResolveExhaustion,
   answerChain, sha256,
-  renderBacklog, renderBacklogByUrl, renderPrerequisite, recordRender, findRender,
+  renderBacklog, renderBacklogByUrl, renderPrerequisite, recordRender, findRender, RENDERED_DIR,
   findRenderForUrl, assertRenderEvidenceUsable, assertPermitUsable, adoptRender,
   reResolveCandidateSet, staleSetBindings,
 } from './run.mjs';
@@ -493,6 +494,115 @@ function doNotSelected() {
   const record = log.attempts.at(-1);
   console.log(`recorded ${record.id}: eligible-not-selected, in favour of ${inFavourOf}`);
   console.log(`all five criteria true, judged from ${evidenceFrom}. No request was made.`);
+}
+
+/**
+ * Re-classify a barred render's barriers from the bytes already held. Amendment 46.
+ *
+ * No request and no permit: the retained file is re-hashed against the digest the render recorded,
+ * loaded into a browser page from memory, and the SAME `detectBlocking` is run over it. Re-running
+ * the real detector matters - a second implementation reading the saved HTML would be free to
+ * disagree with the one that classifies every future capture.
+ *
+ * The correction REPLACES the active barrier metadata rather than adding a judgement that cites a
+ * render still marked barred, because `assertRenderEvidenceUsable` refuses a barred render as a
+ * basis for judgement and should go on refusing one. Both originals are preserved: the barred
+ * render keeps its entry, and the observation that carried it is superseded, not rewritten.
+ *
+ * One limitation, recorded on the new render rather than left implicit: the page is reloaded from
+ * its retained markup without its external stylesheets, so visibility is computed from the DOM and
+ * inline styles alone. For an anchor or button carrying a registration label that is the same
+ * answer; for an element hidden only by an external rule it need not be.
+ */
+async function doCorrectBarriers() {
+  const dir = require_('out');
+  const logPath = logPathFor(dir);
+  const log = readLog(logPath);
+  const renderId = require_('render');
+  const supersedes = require_('supersedes');
+
+  const render = findRender(log, renderId);
+  if (!render) die(`${renderId} is not a recorded render`);
+  const target = log.attempts.find((a) => a.id === supersedes);
+  if (!target) die(`${supersedes} matches no recorded attempt`);
+  if (target.renderId !== renderId) {
+    die(`${supersedes} carries render ${target.renderId}, not ${renderId}`);
+  }
+
+  const renderedDir = join(resolve(dir), RENDERED_DIR);
+  const file = join(renderedDir, render.renderFile);
+  let bytes;
+  try { bytes = readFileSync(file); } catch (error) {
+    die(`${renderId} names ${render.renderFile}, which cannot be read: ${error.message}`);
+  }
+  const actual = sha256(bytes);
+  if (actual !== render.renderedSha256) {
+    die(
+      `${render.renderFile} does not match the digest ${renderId} recorded. The evidence changed ` +
+        'after it was retrieved; nothing is re-classified.'
+    );
+  }
+
+  const browser = await chromium.launch({ headless: true });
+  let blocking;
+  try {
+    const page = await browser.newPage({ viewport: VIEWPORT, locale: LOCALE });
+    // From memory, with no network: the bytes are the ones already held.
+    await page.route('**/*', (route) => route.abort());
+    await page.setContent(bytes.toString('utf8'), { waitUntil: 'domcontentloaded' });
+    blocking = await detectBlocking(page, render.httpStatus ?? 200);
+  } finally {
+    await browser.close();
+  }
+
+  const corrected = recordRender(log, {
+    url: render.url, finalUrl: render.finalUrl ?? null,
+    navigatedAt: render.navigatedAt, permitId: render.permitId ?? null,
+    httpStatus: render.httpStatus ?? null, loadState: render.loadState ?? null,
+    renderFile: render.renderFile,
+    renderedSha256: render.renderedSha256, renderedBytes: render.renderedBytes,
+    domNodes: render.domNodes ?? null, linkCount: render.linkCount ?? null,
+    formCount: render.formCount ?? null, controlCount: render.controlCount ?? null,
+    buttonCount: render.buttonCount ?? null,
+    accessBarriers: blocking.accessBarriers,
+    submissionProtection: blocking.submissionProtection,
+    authenticationSignals: blocking.authenticationSignals,
+    registrationAffordances: blocking.registrationAffordances,
+    browser: render.browser ?? null, browserMode: render.browserMode ?? null,
+    settleMs: render.settleMs ?? null,
+    adoptedFrom: target.id,
+    correctsRender: renderId,
+    reclassifiedAt: now(),
+    reclassificationNote: flag('note') ?? null,
+  });
+
+  appendAttempt(log, {
+    recordType: 'observation',
+    renderId: corrected.id,
+    supersedesDiscoveryId: target.id,
+    examinedAt: now(), agency: target.agency, website: target.website, url: target.url,
+    status: 'discovery', discoveryKind: target.discoveryKind,
+    outcome: blocking.accessBarriers.length ? 'retrieval-blocked' : 'rendered',
+    category: target.category, candidateSetVersion: target.candidateSetVersion,
+    // No request was made, so no permit authorised this record and it carries no navigation time
+    // of its own: the render it cites holds when those bytes were actually fetched.
+    navigationPerformed: false,
+    checkedAt: now(),
+    evidence: 'rendered-dom',
+    renderFile: render.renderFile,
+    renderedSha256: render.renderedSha256,
+    renderedBytes: render.renderedBytes,
+    attemptedModes: target.attemptedModes ?? [],
+    note: require_('reason'),
+    approval: APPROVAL.APPROVED,
+  });
+  writeLog(logPath, log);
+  writeDerived({ log, dir, frameSha256: flag('frame-sha256'), drawOrderSha256: flag('draw-order-sha256'), synthetic: has('synthetic') });
+  const record = log.attempts.at(-1);
+  console.log(`re-classified ${renderId} -> ${corrected.id}; ${target.id} -> ${record.id} (${record.outcome})`);
+  console.log(`barriers: ${JSON.stringify(blocking.accessBarriers)}`);
+  console.log(`registration affordances: ${JSON.stringify(blocking.registrationAffordances)}`);
+  console.log('No request was made; the bytes are the ones already held.');
 }
 
 function doPromote() {
@@ -1847,7 +1957,7 @@ function doClosePermit() {
 const commands = { packet: doPacket, candidates: doCandidates, lock: doLock, 'approve-set': doApproveSet,
   'supersede-set': doSupersedeSet, publish: doPublish, next: doNext, capture: doCapture, exclude: doExclude, discovery: doDiscovery, budget: doBudget, approve: doApprove, status: doStatus, build: doBuild, exhaust: doExhaust, 'preflight-discovery': doPreflightDiscovery, 'reopen-set': doReopenSet, 'close-permit': doClosePermit,
   deviation: doDeviation, 'recheck-robots': doRecheckRobots, promote: doPromote,
-  'not-selected': doNotSelected, 're-resolve': doReResolve,
+  'not-selected': doNotSelected, 'correct-barriers': doCorrectBarriers, 're-resolve': doReResolve,
   'render-discovery': doRenderDiscovery, 'correct-discovery': doCorrectDiscovery,
   'classify-render': doClassifyRender, 'adopt-render': doAdoptRender,
   're-resolve-set': doReResolveSet, 'continue-headed': doContinueHeaded };

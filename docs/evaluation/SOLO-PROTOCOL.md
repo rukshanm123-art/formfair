@@ -3751,3 +3751,94 @@ Four cases appended to `capture/test/eligible-not-selected.test.mjs`: every stat
 is a status the report prints, asserted against the frozen list rather than a copy; a rejected
 selection failing the seal as well as the corpus gate; a tampered `htmlBytes` failing the seal as a
 tampered digest already did; and the length problem naming both values.
+
+## Amendment 46 — a visible way to register means the page is not a sign-in wall
+
+*Frozen as `selection-v1.0.43`, `capture-v1.0.18` and `solo-protocol-v1.0.23`, 1 October 2026.*
+
+### When this was triggered
+
+By a **held-out observation**, and the timing matters: the candidate set for Health New Zealand's
+account-registration round was **not yet locked**, **no candidate had been assessed**, and
+**FormFair had not been run** — against this page or any other. The correction therefore changed
+what discovery could see, not what an analysis had already reported.
+
+### What was wrong
+
+`jobs.tewhatuora.govt.nz`, the agency's own jobs website, returned **HTTP 200** and rendered 213
+nodes in 32,339 bytes: a login form, a password-retrieval form, a job-search form, and **three
+visible "Register" anchors**. It was recorded `retrieval-blocked` on a `sign-in wall` — a record
+asserting that *nothing was read* about a page that was read in full.
+
+The logic was working exactly as written. `looksLikeSearch` excluded the job-search inputs because
+their form's action matches `/search/`, so `readableOutsideCredentials` computed **0**; the page says
+"Sign In"; and the discriminator asked only whether the **password-bearing** form carried a
+personal-name field, which it does not. A registration route sitting *beside* the login form — this
+exact layout — was invisible to the test.
+
+That contradicts the interpretation already fixed in this document: *a page is excluded only when
+the intended form or name field cannot be viewed without authenticating.* The `Register` control was
+plainly viewable. Three consequences followed: the record stated something false, it suppressed the
+agency's strongest account-registration lead, and it inflated technical attrition with a record that
+is not attrition.
+
+### The rule
+
+A **visible registration affordance** is detected and recorded, and a sign-in wall is now declared
+only in its absence.
+
+1. Affordances are sought in `a`, `button`, `[role="button"]` and submit/button inputs **only**,
+   **only when visible**, and matched on the element's own label text, value or `aria-label`.
+   Hidden elements, scripts, comments and incidental body prose do **not** count — any of them can
+   say "register" about something that is not there.
+2. `sign-in wall` requires **all five**: sign-in language, a password form, no readable form content
+   outside it, no personal-name field in it, **and no visible registration affordance**.
+3. The affordance's label, element and target are recorded structurally on the render as
+   `registrationAffordances`, so the decision not to call a page a sign-in wall is auditable rather
+   than implicit in a barrier's absence.
+4. **Clearing the barrier permits researcher judgement; it does not declare the page eligible.**
+
+### The correction to the live evidence
+
+`d-0676` and `g-0158` are **preserved**. `correct-barriers` re-hashed the retained 32,339 bytes
+against the digest `g-0158` recorded, reloaded them into a browser page from memory with the network
+aborted, and ran **the same `detectBlocking`** over them — not a second implementation, which would
+be free to disagree with the one that classifies every future capture. It then appended render
+`g-0163` with the corrected metadata and observation `d-0684`, outcome `rendered`, superseding
+`d-0676`.
+
+The correction **replaces the active barrier metadata** rather than adding a judgement that cites a
+barred render: `assertRenderEvidenceUsable` refuses a barred render as a basis for judgement and
+goes on refusing `g-0158`, which is the point. A re-classification makes no request, so it carries
+**no permit and no `navigatedAt`** — and must not borrow the permit its predecessor consumed, which
+is checked.
+
+`d-0685` then judged it `candidates-found`, admitting
+`…JobSeekerToolBoxAction?in_organId=19739&in_create_account_button=Register` as a candidate. It
+enters the locked set in normal canonical order and is assessed later like any other.
+
+**One limitation, recorded on the render rather than left implicit:** the page is reloaded from its
+markup without its external stylesheets, so visibility is computed from the DOM and inline styles
+alone. For an anchor carrying a registration label that is the same answer; for an element hidden
+only by an external rule it need not be.
+
+### What this does not justify
+
+Nothing else is reopened. The two reCAPTCHA-blocked records on `depression.org.nz` and
+`smallsteps.org.nz` were barred in **both** browser modes and remain technical attrition; the
+blanket exclusion on `www.healthnz.govt.nz` and the path-specific exclusions on Safer Gambling,
+Smokefree, HealthEd and the resource store remain **stated policy**, honoured as written. Active
+technical attrition falls by exactly one, from 58 to 57.
+
+### What holds it
+
+Thirteen cases in `capture/test/registration-affordance.test.mjs`, eight of them driving the real
+`detectBlocking` over built markup: the exact separate-login-plus-visible-register layout; a genuine
+login-only wall still blocked; the affordance found on a button, a `role="button"` and a submit
+input; hidden registration controls — `display:none`, a hidden ancestor, the `hidden` attribute —
+leaving the barrier in place; "Register" in a script or a comment not counting; incidental prose not
+counting; a cleared barrier asserting nothing about eligibility; and an HTTP 403 remaining a barrier
+whatever the page offers. Five more cover the append-only correction: the corrected record no longer
+counting as attrition while the original is preserved, a re-classification refused for naming a
+permit, the corrected observation outstanding until explicitly judged, the barred render still
+unusable as evidence, and both packages agreeing the corrected log is clean.

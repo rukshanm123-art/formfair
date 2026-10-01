@@ -157,7 +157,21 @@ function checkAttempt(attempt) {
       }
       if (attempt.recordType === RECORD_TYPES.OBSERVATION) {
         if (!attempt.renderId) problems.push('an observation needs renderId, the render it recorded');
-        if (!attempt.permitId) problems.push('an observation needs the permit that authorised its request');
+        // Amendment 46. A RE-CLASSIFICATION made no request, so it has no permit of its own and
+        // must not borrow the one its predecessor consumed. It is an observation because it records
+        // what the retained bytes show; it declares `navigationPerformed: false` and names the
+        // record it supersedes, and those two together are what distinguish it from an observation
+        // that quietly lost its permit.
+        const reclassification = attempt.navigationPerformed === false && attempt.supersedesDiscoveryId;
+        if (!attempt.permitId && !reclassification) {
+          problems.push('an observation needs the permit that authorised its request');
+        }
+        if (attempt.permitId && reclassification) {
+          problems.push(
+            'a re-classification made no request and must not name a permit; the permit its ' +
+              'predecessor consumed authorised that request, not this record'
+          );
+        }
         if (!['rendered', 'retrieval-blocked'].includes(attempt.outcome)) {
           problems.push(
             `an observation records ${JSON.stringify(attempt.outcome)}; it may only be rendered or ` +
