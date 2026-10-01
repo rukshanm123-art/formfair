@@ -84,6 +84,20 @@ export const RECORD_TYPES = Object.freeze({
   OBSERVATION: 'observation',
   /** A conclusion drawn from evidence already held. Makes no request. */
   JUDGEMENT_ONLY: 'judgement-only',
+  /**
+   * A re-reading of bytes already retrieved, under a corrected classifier. Amendment 48.
+   *
+   * Amendment 46 wrote its correction as an OBSERVATION, and an observation means a retrieval: it
+   * must name the permit that authorised the request, carry the time of that request, and declare
+   * that navigation occurred. `d-0684` could satisfy none of those honestly, because no request was
+   * made - and the alternative, copying `p-0285` and its navigation time onto a second record,
+   * would have made two records claim one retrieval and dressed a metadata correction as traffic.
+   *
+   * So the third kind is named. It makes no request, holds no permit and no navigation time,
+   * supersedes the record whose classification it corrects, and cites the render carrying the
+   * corrected metadata for the SAME retained bytes.
+   */
+  RECLASSIFICATION: 'reclassification',
 });
 
 /**

@@ -46,6 +46,7 @@ import {
   SEARCH_TERMS, parseDrawOrder, nextWork, isSuperseded, MAX_QUALIFIED_AGENCIES,
   TECHNICAL_ATTRITION_OUTCOMES, JUDGEMENT_OUTCOMES, setKey,
   TERMINAL_STATUSES,
+  RECORD_TYPES,
 } from './selection.mjs';
 import { readFileSync as readFile } from 'node:fs';
 import { buildPacket, renderPacket } from './packet.mjs';
@@ -529,6 +530,47 @@ async function doCorrectBarriers() {
     die(`${supersedes} carries render ${target.renderId}, not ${renderId}`);
   }
 
+  // Amendment 48. `--reuse-corrected` re-states an EXISTING corrected render rather than computing
+  // another one. Needed to repair Amendment 46's own record: `g-0163` already carries the corrected
+  // metadata for these bytes, and producing a third render of one retrieval would multiply the
+  // evidence rather than correct the record that cites it. The file is still re-hashed, because a
+  // record that rests on bytes must rest on the bytes that are there.
+  const reuse = flag('reuse-corrected');
+  if (reuse) {
+    const existing = findRender(log, reuse);
+    if (!existing) die(`--reuse-corrected names ${reuse}, which is not a recorded render`);
+    if (existing.renderFile !== render.renderFile) {
+      die(`${reuse} names a different file (${existing.renderFile}) than ${renderId} (${render.renderFile})`);
+    }
+    const onDisk = sha256(readFileSync(join(resolve(dir), RENDERED_DIR, existing.renderFile)));
+    if (onDisk !== existing.renderedSha256) {
+      die(`${existing.renderFile} does not match the digest ${reuse} recorded; nothing is re-stated`);
+    }
+    appendAttempt(log, {
+      recordType: RECORD_TYPES.RECLASSIFICATION,
+      renderId: existing.id,
+      supersedesDiscoveryId: target.id,
+      examinedAt: now(), agency: target.agency, website: target.website, url: target.url,
+      status: 'discovery', discoveryKind: target.discoveryKind,
+      outcome: (existing.accessBarriers ?? []).length ? 'retrieval-blocked' : 'rendered',
+      category: target.category, candidateSetVersion: target.candidateSetVersion,
+      navigationPerformed: false, checkedAt: now(),
+      evidence: 'rendered-dom',
+      renderFile: existing.renderFile,
+      renderedSha256: existing.renderedSha256,
+      renderedBytes: existing.renderedBytes,
+      attemptedModes: target.attemptedModes ?? [],
+      note: require_('reason'),
+      approval: APPROVAL.APPROVED,
+    });
+    writeLog(logPath, log);
+    writeDerived({ log, dir, frameSha256: flag('frame-sha256'), drawOrderSha256: flag('draw-order-sha256'), synthetic: has('synthetic') });
+    const rec = log.attempts.at(-1);
+    console.log(`re-stated ${reuse} as a reclassification: ${target.id} -> ${rec.id} (${rec.outcome})`);
+    console.log('No request was made and no new render was produced.');
+    return;
+  }
+
   const renderedDir = join(resolve(dir), RENDERED_DIR);
   const file = join(renderedDir, render.renderFile);
   let bytes;
@@ -577,7 +619,8 @@ async function doCorrectBarriers() {
   });
 
   appendAttempt(log, {
-    recordType: 'observation',
+    // Amendment 48: a re-reading of bytes already held, not a retrieval.
+    recordType: RECORD_TYPES.RECLASSIFICATION,
     renderId: corrected.id,
     supersedesDiscoveryId: target.id,
     examinedAt: now(), agency: target.agency, website: target.website, url: target.url,
@@ -787,14 +830,31 @@ function doStatus() {
       console.log(`  ${audit.recordedLate} record(s) written more than an hour after the navigation`);
     }
   }
-  const attrition = log.attempts.filter(
+  // Amendment 48. ACTIVE records only, and the withdrawn ones shown separately so the two
+  // reconcile. Counting every attrition record ever written reported 59 where 57 were active: a
+  // record corrected by a reclassification is no longer an account of a failed retrieval, and
+  // leaving it in the headline figure overstated attrition by exactly the corrections made to it.
+  const allAttrition = log.attempts.filter(
     (a) => a.status === 'discovery' && TECHNICAL_ATTRITION_OUTCOMES.includes(a.outcome)
   );
-  if (attrition.length) {
-    console.log(`technical discovery attrition: ${attrition.length} record(s)`);
+  const withdrawnAttrition = allAttrition.filter((a) => isDiscoverySuperseded(log, a.id));
+  const attrition = allAttrition.filter((a) => !isDiscoverySuperseded(log, a.id));
+  if (allAttrition.length) {
+    console.log(`technical discovery attrition: ${attrition.length} active record(s)`);
     const byOutcome = {};
     for (const a of attrition) byOutcome[a.outcome] = (byOutcome[a.outcome] ?? 0) + 1;
     for (const [outcome, n] of Object.entries(byOutcome)) console.log(`  ${outcome}: ${n}`);
+    const tally = Object.values(byOutcome).reduce((t, n) => t + n, 0);
+    if (tally !== attrition.length) {
+      console.log(`  UNRECONCILED  the per-outcome lines sum to ${tally}, not ${attrition.length}`);
+    }
+    if (withdrawnAttrition.length) {
+      console.log(
+        `  superseded    ${withdrawnAttrition.length} further record(s), corrected and not counted ` +
+          `above (${withdrawnAttrition.map((a) => a.id).join(', ')})`
+      );
+      console.log(`  total ever    ${allAttrition.length} = ${attrition.length} active + ${withdrawnAttrition.length} superseded`);
+    }
   }
   const backlog = renderBacklog(log);
   if (backlog.length) {
@@ -1714,6 +1774,29 @@ function doCorrectDiscovery() {
   if (inherited.conflict) {
     die(`the chain through ${targetId} answers more than one record (${inherited.answers.join(', ')})`);
   }
+  // Amendment 48. The inherited answer link is resolved FORWARD through supersession.
+  //
+  // Amendment 37 made the answer link a property of the correction chain, inherited rather than
+  // retyped, so a repair could not quietly retarget it. But when the record being ANSWERED is itself
+  // withdrawn and replaced - `d-0684` superseded by the reclassification `d-0686` - inheriting the
+  // link verbatim leaves the judgement answering a record that no longer stands, and the
+  // replacement reads as unjudged. Following the chain forward keeps one stable answer per chain
+  // while pointing it at the record that is actually in force.
+  const resolveForward = (id) => {
+    const seen = new Set();
+    let current = id;
+    for (;;) {
+      if (!current || seen.has(current)) return current;
+      seen.add(current);
+      const next = log.attempts.find(
+        (a) => a.supersedesDiscoveryId === current && !isDiscoverySuperseded(log, a.id) &&
+          [RECORD_TYPES.OBSERVATION, RECORD_TYPES.RECLASSIFICATION].includes(a.recordType)
+      );
+      if (!next) return current;
+      current = next.id;
+    }
+  };
+  const answerTarget = inherited.stable ? resolveForward(inherited.stable) : null;
   const restoresAnswerLink = inherited.stable !== null && !target.answersDiscoveryId;
   const correctsCitation = has('recite-evidence');
   if (target.outcome === outcome && !correctsCitation && !restoresAnswerLink) {
@@ -1757,7 +1840,7 @@ function doCorrectDiscovery() {
     supersedesDiscoveryId: targetId,
     // Inherited from the whole chain, not copied from the immediate target: a three-link chain would
     // otherwise lose the link at the second correction.
-    ...(inherited.stable ? { answersDiscoveryId: inherited.stable } : {}),
+    ...(answerTarget ? { answersDiscoveryId: answerTarget } : {}),
     evidenceFromDiscoveryId: observation.id,
     renderId,
     examinedAt: now(), agency: target.agency, website: target.website, url: target.url,

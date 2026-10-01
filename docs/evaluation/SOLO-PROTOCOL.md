@@ -3897,3 +3897,75 @@ name `solo-protocol-v1.0.24`.
 substantive correction were never in question — only the freeze attestation was. Six cases in
 `evaluation/solo/test/revoked-tags.test.mjs` hold the rule, including one that proves the guard
 fires on the specific name that was revoked rather than passing vacuously.
+
+## Amendment 48 — a re-reading of retained bytes is its own kind of record
+
+*Frozen as `selection-v1.0.45`, `capture-v1.0.20` and `solo-protocol-v1.0.25`, 1 October 2026.*
+
+### What was wrong
+
+Amendment 46 wrote its correction as an **observation**, and an observation means a retrieval: it
+must name the permit that authorised the request, carry the time of that request, and declare that
+navigation occurred. `d-0684` could satisfy none of those honestly, because no request was made. The
+live gates reported four problems at once — `g-0158` orphaned, because its only observation had been
+superseded and the ownership test demanded an *active* one; and `d-0684` claiming no navigation, no
+timestamp and no permit while typed as a retrieval. The corpus draft was withheld.
+
+Status compounded it by reporting **59** technical-attrition records where **57** were active: a
+record corrected by a reclassification is no longer an account of a failed retrieval, and leaving it
+in the headline figure overstated attrition by exactly the corrections made to it.
+
+The tempting repair — copying `p-0285` and its navigation time onto a second record — is forbidden.
+It would make two records claim one retrieval and dress a metadata correction as network traffic.
+
+### The rule
+
+A third record type, **`reclassification`**: a re-reading of bytes already retrieved, under a
+corrected classifier.
+
+1. It makes **no request**, so it carries **no permit** and **no `navigatedAt`**, and records
+   `navigationPerformed: false`. Naming the permit its predecessor consumed is refused.
+2. It must **supersede** the record whose classification it corrects, and cite the render carrying
+   the corrected metadata for the **same retained bytes**.
+3. Like an observation it may record `rendered` or `retrieval-blocked`, and concludes nothing about
+   candidates.
+4. **Render ownership** has two further legitimate forms: a reclassification owns the render carrying
+   its corrected metadata, and a render whose observation was superseded along a chain ending in an
+   active reclassification keeps that observation as its **historical owner**. `g-0158` was retrieved
+   under `p-0285` by `d-0676`, and that remains the true account of how those bytes arrived. The
+   chain is followed to its end, not one link: a one-link test orphans the render again at the next
+   correction.
+5. **Active attrition is derived**, with withdrawn records shown separately and the two reconciled,
+   so `total ever = active + superseded` is visible rather than assumed.
+6. An inherited **answer link may be resolved forward** through supersession, and forward only. A
+   judgement may both answer and supersede one plain record — the role distinction drawn in
+   selection-v1.0.27 — so the lineage follows **evidence successors only**, an observation or a
+   reclassification, never a judgement. Walking forward indiscriminately reported that a chain
+   answered its own conclusion, which broke two existing tests and is the subtlest part of this
+   change.
+
+### The repair to the live evidence
+
+Append-only throughout, and no page was requested again. `d-0676` is preserved as the historical
+owner of `g-0158` and of permit `p-0285`. `d-0684` is superseded by **`d-0686`**, a reclassification
+citing the existing `g-0163` — the same file, re-hashed before the record was written, so no third
+render of one retrieval was produced. `d-0685` is superseded through `d-0687` by **`d-0688`**, whose
+answer link resolves forward to `d-0686`. The candidate is unchanged, and the judgement's outcome
+and reasoning were never in question.
+
+Active technical attrition is now **57**, reconciling as 59 ever = 57 active + 2 superseded
+(`d-0301` and `d-0676`).
+
+### What holds it
+
+Twelve cases in `capture/test/reclassification.test.mjs`, built as the live shape: one retrieval,
+one permit, one consumption, with the reclassification carrying neither permit nor navigation time;
+the original render keeping its superseded owner, verified by both packages; the corrected metadata
+accepted and the judgement on it valid; every ledger, the backlog and the stale bindings zero;
+active attrition derived and reconciled; each of the five refusals the record type makes, including
+the forbidden permit copy; two links in one lineage treated as one obligation; and an answer in a
+genuinely different lineage still a conflict.
+
+Two existing tests encoded the superseded rules and were updated rather than worked around: one
+asserted the old message for `rendered`, and one failed because the lineage walk initially followed
+judgements.

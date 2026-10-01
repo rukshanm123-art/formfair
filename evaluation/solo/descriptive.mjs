@@ -168,7 +168,7 @@ const FRAME_FILES = [
  * exhaustion records at all. A manifest that misnames its own protocol is worse than one that
  * omits it: a reader checking which rules a corpus was sealed under would be told the wrong ones.
  */
-export const SOLO_PROTOCOL_TAG = 'solo-protocol-v1.0.24';
+export const SOLO_PROTOCOL_TAG = 'solo-protocol-v1.0.25';
 
 /**
  * Two resolutions, mirrored from the capture package and checked equal by a test.
@@ -428,6 +428,22 @@ export function renderLedgerProblems(log, renderedDir) {
     (log.attempts ?? []).map((a) => a.supersedesDiscoveryId).filter((id) => id !== undefined && id !== null)
   );
   const canon = (u) => { try { const x = new URL(u); x.hash = ''; return x.href; } catch { return String(u); } };
+  // Amendment 48, mirrored. The head of a record's own supersession lineage: the version in force.
+  const headOf = (id) => {
+    const walked = new Set();
+    let current = id;
+    for (;;) {
+      if (!current || walked.has(current)) return current;
+      walked.add(current);
+      // Evidence successors only: a judgement may both answer and supersede one plain record.
+      const next = attempts.find(
+        (a) => a.supersedesDiscoveryId === current &&
+          ['observation', 'reclassification'].includes(a.recordType)
+      );
+      if (!next) return current;
+      current = next.id;
+    }
+  };
 
   // A rendered file name must resolve inside `rendered/`. Both implementations joined the name
   // straight onto the directory, so `../../captures/page.html` escaped confinement entirely.
@@ -503,7 +519,20 @@ export function renderLedgerProblems(log, renderedDir) {
     if (observations.length > 1) {
       problems.push(`${render.id} is claimed by ${observations.length} active observations`);
     }
-    if (observations.length === 0 && !render.adoptedFrom) {
+    // Amendment 48, mirrored. A reclassification owns the render carrying its corrected metadata,
+    // and a render whose observation was superseded somewhere along a chain ending in an active
+    // reclassification keeps that observation as its historical owner: `g-0158` was retrieved under
+    // `p-0285` by `d-0676`, which remains the true account of how those bytes arrived.
+    const reclassifications = attempts.filter(
+      (a) => a.renderId === render.id && a.recordType === 'reclassification' && !superseded.has(a.id)
+    );
+    const historicalOwner = attempts.some((a) => {
+      if (a.renderId !== render.id || a.recordType !== 'observation') return false;
+      const headRecord = attempts.find((x) => x.id === headOf(a.id));
+      return Boolean(headRecord) && headRecord.recordType === 'reclassification';
+    });
+    if (observations.length === 0 && reclassifications.length === 0 && !historicalOwner &&
+        !render.adoptedFrom) {
       problems.push(`${render.id} has no observation record and was not adopted from one`);
     }
     // solo-protocol-v1.0.8: the registry's own permit.
@@ -586,7 +615,7 @@ export function renderLedgerProblems(log, renderedDir) {
       if (canon(render.url) !== canon(a.url)) {
         problems.push(`${a.id} cites render ${render.id} of a different page`);
       }
-      if (a.recordType !== 'observation' && a.recordType !== 'judgement-only') {
+      if (!['observation', 'judgement-only', 'reclassification'].includes(a.recordType)) {
         problems.push(`${a.id} cites render ${a.renderId} but is neither an observation nor a judgement`);
       }
       if (a.recordType === 'judgement-only' && (render.accessBarriers ?? []).length > 0) {
@@ -679,9 +708,11 @@ export function renderLedgerProblems(log, renderedDir) {
         cur = cur.supersedesDiscoveryId ? byId.get(cur.supersedesDiscoveryId) : null;
       }
       const where = a.id ?? '(an unidentified record)';
-      if (links.size > 1) {
+      // Amendment 48, mirrored. Links in ONE supersession lineage are one obligation.
+      const obligations = new Set([...links].map(headOf));
+      if (obligations.size > 1) {
         problems.push(`${where}'s correction chain answers more than one record (${[...links].join(', ')})`);
-      } else if (links.size === 1 && a.answersDiscoveryId !== [...links][0]) {
+      } else if (obligations.size === 1 && a.answersDiscoveryId !== [...obligations][0]) {
         problems.push(
           `${where} is the active end of a chain answering ${[...links][0]} but names ` +
             `${a.answersDiscoveryId ? a.answersDiscoveryId : 'none'}`

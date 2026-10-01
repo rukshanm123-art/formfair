@@ -179,6 +179,40 @@ function checkAttempt(attempt) {
           );
         }
       }
+      // Amendment 48. A re-reading of bytes already held: no request, so no permit and no
+      // navigation time, and it must say which classification it corrects.
+      if (attempt.recordType === RECORD_TYPES.RECLASSIFICATION) {
+        if (!attempt.renderId) {
+          problems.push('a reclassification needs renderId, the render carrying the corrected metadata');
+        }
+        if (!attempt.supersedesDiscoveryId) {
+          problems.push('a reclassification must supersede the record whose classification it corrects');
+        }
+        if (attempt.navigationPerformed !== false) {
+          problems.push(
+            'a reclassification must record navigationPerformed: false; it re-reads bytes already ' +
+              'held and makes no request'
+          );
+        }
+        if (attempt.permitId) {
+          problems.push(
+            'a reclassification must not name a permit; the permit its predecessor consumed ' +
+              'authorised that retrieval, not this re-reading'
+          );
+        }
+        if (attempt.navigatedAt) {
+          problems.push(
+            'a reclassification must not carry navigatedAt; the render it cites holds when those ' +
+              'bytes were fetched'
+          );
+        }
+        if (!['rendered', 'retrieval-blocked'].includes(attempt.outcome)) {
+          problems.push(
+            `a reclassification records ${JSON.stringify(attempt.outcome)}; like an observation it ` +
+              'concludes nothing about candidates'
+          );
+        }
+      }
       if (attempt.recordType === RECORD_TYPES.JUDGEMENT_ONLY) {
         if (!attempt.renderId) problems.push('a judgement needs renderId, the evidence it rests on');
         if (!attempt.evidenceFromDiscoveryId) {
@@ -198,8 +232,12 @@ function checkAttempt(attempt) {
         }
       }
     }
-    if (attempt.outcome === 'rendered' && attempt.recordType !== RECORD_TYPES.OBSERVATION) {
-      problems.push('only an observation may record the outcome `rendered`');
+    // Amendment 48. A reclassification may also record `rendered`: it states what the retained
+    // bytes show under a corrected classifier, which is the same kind of statement an observation
+    // makes about them, minus the retrieval.
+    if (attempt.outcome === 'rendered' &&
+        ![RECORD_TYPES.OBSERVATION, RECORD_TYPES.RECLASSIFICATION].includes(attempt.recordType)) {
+      problems.push('only an observation or a reclassification may record the outcome `rendered`');
     }
     if (attempt.evidence !== undefined) {
       if (!['rendered-dom', 'plain-retrieval'].includes(attempt.evidence)) {
@@ -451,9 +489,32 @@ export function appendAttempt(log, attempt) {
           `(${inherited.answers.join(', ')}); a chain of corrections resolves one obligation`
       );
     }
-    if (inherited.stable && attempt.answersDiscoveryId !== inherited.stable) {
+    // Amendment 48. The link may be resolved FORWARD through supersession, and only forward.
+    //
+    // selection-v1.0.35 fixed the link so a repair could not quietly retarget it, which is right.
+    // What it did not cover is the ANSWERED record being withdrawn and replaced: `d-0684` was
+    // superseded by the reclassification `d-0686`, and inheriting the link verbatim left the
+    // judgement answering a record that no longer stands while its replacement read as unjudged.
+    // Any OTHER target is still refused, so this permits following a supersession and nothing else.
+    const forwardFrom = (id) => {
+      const chain = new Set();
+      let current = id;
+      for (;;) {
+        chain.add(current);
+        // Evidence successors only, for the reason given at `answerChain`.
+        const next = log.attempts.find(
+          (a) => a.supersedesDiscoveryId === current &&
+            [RECORD_TYPES.OBSERVATION, RECORD_TYPES.RECLASSIFICATION].includes(a.recordType)
+        );
+        if (!next) return chain;
+        current = next.id;
+      }
+    };
+    if (inherited.stable && attempt.answersDiscoveryId !== inherited.stable &&
+        !forwardFrom(inherited.stable).has(attempt.answersDiscoveryId)) {
       throw new Error(
-        `this correction must keep answering ${inherited.stable}, which its chain established` +
+        `this correction must keep answering ${inherited.stable}, which its chain established, or a ` +
+          'record that supersedes it' +
           (attempt.answersDiscoveryId ? `, not ${attempt.answersDiscoveryId}` : '; it names none') +
           '. A correction that drops the link silently reopens the obligation it discharged.'
       );
@@ -3048,7 +3109,46 @@ export function checkRenderLedger(log, renderedDir) {
           `(${observations.map((a) => a.id).join(', ')}); a render is observed once`
       );
     }
-    if (observations.length === 0 && !render.adoptedFrom) {
+    // Amendment 48. Two further ways a render is legitimately owned.
+    //
+    // A RECLASSIFICATION owns the render carrying its corrected metadata, which is not a second
+    // retrieval but the same bytes re-read.
+    //
+    // And a render whose observation was SUPERSEDED BY a reclassification of itself keeps that
+    // observation as its historical owner: `g-0158` was retrieved under `p-0285` by `d-0676`, and
+    // that remains the true account of how those bytes arrived. Requiring an ACTIVE observation
+    // made the correction orphan the very render it corrected.
+    const reclassifications = attempts.filter(
+      (a) => a.renderId === render.id && a.recordType === RECORD_TYPES.RECLASSIFICATION &&
+        !isDiscoverySuperseded(log, a.id)
+    );
+    // Followed along the supersession CHAIN, not one link. `g-0158`'s observation `d-0676` was
+    // superseded by `d-0684`, which was itself superseded by the reclassification `d-0686` when the
+    // record type was repaired. A one-link test would orphan the render again on every later
+    // correction, which is the same brittleness that produced this defect.
+    const supersededBy = (id) => attempts.filter((r) => r.supersedesDiscoveryId === id);
+    const chainReachesActiveReclassification = (startId) => {
+      const seen = new Set();
+      const queue = [startId];
+      while (queue.length) {
+        const id = queue.shift();
+        if (seen.has(id)) continue;
+        seen.add(id);
+        for (const next of supersededBy(id)) {
+          if (next.recordType === RECORD_TYPES.RECLASSIFICATION && !isDiscoverySuperseded(log, next.id)) {
+            return true;
+          }
+          queue.push(next.id);
+        }
+      }
+      return false;
+    };
+    const historicalOwner = attempts.some(
+      (a) => a.renderId === render.id && a.recordType === RECORD_TYPES.OBSERVATION &&
+        chainReachesActiveReclassification(a.id)
+    );
+    if (observations.length === 0 && reclassifications.length === 0 && !historicalOwner &&
+        !render.adoptedFrom) {
       problems.push(`${render.id} has no observation record and was not adopted from one`);
     }
 
@@ -3180,7 +3280,9 @@ export function checkRenderLedger(log, renderedDir) {
             'rest on evidence of the page it judges'
         );
       }
-      if (a.recordType !== RECORD_TYPES.OBSERVATION && a.recordType !== RECORD_TYPES.JUDGEMENT_ONLY) {
+      // Amendment 48: a reclassification is the third legitimate kind of record resting on a render.
+      if (![RECORD_TYPES.OBSERVATION, RECORD_TYPES.JUDGEMENT_ONLY, RECORD_TYPES.RECLASSIFICATION]
+            .includes(a.recordType)) {
         problems.push(
           `${a.id} cites render ${a.renderId} but is neither an observation nor a judgement; a ` +
             'record resting on rendered evidence must say which it is'
@@ -3649,11 +3751,38 @@ export function answerChain(log, attempt) {
       ? log.attempts.find((a) => a.id === current.supersedesDiscoveryId)
       : null;
   }
+  // Amendment 48. Answers in ONE supersession lineage are one obligation, not several.
+  //
+  // When the answered record is itself withdrawn and replaced, a later correction resolves its link
+  // forward: `d-0685` and `d-0687` answer `d-0684`, and `d-0688` answers `d-0686`, which supersedes
+  // it. Counting the two names as a conflict reported that a chain resolving a single obligation
+  // resolved two. The obligation is identified by the HEAD of its own lineage, so the links collapse
+  // to one; genuinely unrelated answers still conflict.
+  // Followed through EVIDENCE successors only - an observation or a reclassification - never a
+  // judgement. A judgement may both answer and supersede the same plain record, which is the role
+  // distinction selection-v1.0.27 drew, so walking forward indiscriminately lands on the answering
+  // record itself and reports that a chain answers its own conclusion.
+  const headOf = (id) => {
+    const walked = new Set();
+    let current = id;
+    for (;;) {
+      if (!current || walked.has(current)) return current;
+      walked.add(current);
+      const next = log.attempts.find(
+        (a) => a.supersedesDiscoveryId === current &&
+          [RECORD_TYPES.OBSERVATION, RECORD_TYPES.RECLASSIFICATION].includes(a.recordType)
+      );
+      if (!next) return current;
+      current = next.id;
+    }
+  };
+  const obligations = new Set([...answers].map(headOf));
   return {
     chain,
     answers: [...answers],
-    stable: answers.size === 1 ? [...answers][0] : null,
-    conflict: answers.size > 1,
+    // The link a further correction must inherit is the one in force: the head of the lineage.
+    stable: obligations.size === 1 ? [...obligations][0] : null,
+    conflict: obligations.size > 1,
   };
 }
 

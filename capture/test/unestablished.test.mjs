@@ -1129,11 +1129,14 @@ describe('observation and judgement are separate records', () => {
     })), /an observation records "candidates-found"/);
   });
 
-  test('only an observation may record `rendered`', () => {
+  test('only an observation or a reclassification may record `rendered`', () => {
+    // Amendment 48 added the second kind: a reclassification states what retained bytes show under
+    // a corrected classifier, which is the same kind of statement, minus the retrieval. A judgement
+    // still may not, because `rendered` concludes nothing about candidates.
     const log = emptyLog();
     assert.throws(() => appendAttempt(log, base({
       outcome: 'rendered', navigatedAt: '2026-09-26T19:00:00Z',
-    })), /only an observation may record the outcome `rendered`/);
+    })), /only an observation or a reclassification may record the outcome `rendered`/);
   });
 
   test('a judgement must not claim a permit, and must say it navigated nothing', () => {
