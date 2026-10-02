@@ -168,7 +168,7 @@ const FRAME_FILES = [
  * exhaustion records at all. A manifest that misnames its own protocol is worse than one that
  * omits it: a reader checking which rules a corpus was sealed under would be told the wrong ones.
  */
-export const SOLO_PROTOCOL_TAG = 'solo-protocol-v1.0.28';
+export const SOLO_PROTOCOL_TAG = 'solo-protocol-v1.0.29';
 
 /**
  * Two resolutions, mirrored from the capture package and checked equal by a test.
@@ -351,7 +351,20 @@ export function terminalDecisionProblems(log) {
     if (src.status !== 'retrieved') problems.push(`${a.id} cites ${src.id}, which is a ${src.status} attempt`);
     if (src.agency !== a.agency) problems.push(`${a.id} cites ${src.id}, whose agency differs`);
     if (src.category !== a.category) problems.push(`${a.id} cites ${src.id}, whose category differs`);
-    if (canon(src.url) !== canon(a.url)) problems.push(`${a.id} cites ${src.id}, whose URL differs`);
+    // solo-protocol-v1.0.29 (Amendment 53). A differing URL is permitted only when the retrieval's
+    // OWN recorded redirect chain runs from its requested URL to the URL being decided, every hop
+    // was allowed, and the URL it finally reached is the one being decided. Derived here
+    // independently of the capture package, which this file may not import, and fail-closed: any
+    // reason the equivalence cannot be established is a problem, so a sealer that cannot see the
+    // chain refuses the citation rather than assuming it.
+    if (canon(src.url) !== canon(a.url)) {
+      for (const p of redirectEquivalenceProblems({
+        log, source: src, decisionUrl: a.url, agency: a.agency, category: a.category,
+        candidateSetVersion: a.candidateSetVersion ?? src.candidateSetVersion,
+      })) {
+        problems.push(`${a.id} cites ${src.id}, whose URL differs: ${p}`);
+      }
+    }
     if (a.htmlSha256 !== undefined && src.htmlSha256 !== a.htmlSha256) {
       problems.push(`${a.id} cites ${src.id}, whose digest differs`);
     }
@@ -368,6 +381,65 @@ export function terminalDecisionProblems(log) {
     if (a.supersedesAttemptId === a.evidenceFromAttemptId) {
       problems.push(`${a.id} supersedes the very retrieval it cites as evidence (${src.id})`);
     }
+  }
+  return problems;
+}
+
+/**
+ * The sealer's own redirect-equivalence derivation. See Amendment 53.
+ *
+ * Independent of the capture package by design, and stricter where it cannot be sure: it has no
+ * canonicaliser beyond `canon`, so it compares what `canon` gives it and treats anything it cannot
+ * establish as a reason to refuse. A citation standing in for another URL is the one place where
+ * one retrieval settles two decisions, so the seal re-derives the permission rather than trusting
+ * that the write-time check ran.
+ */
+export function redirectEquivalenceProblems(
+  { log, source, decisionUrl, agency, category, candidateSetVersion } = {}
+) {
+  // Its own normaliser: `canon` elsewhere in this file is local to the function that defines it,
+  // and a shared one would be a dependency between checks that are meant to be separable.
+  const canon = (u) => { try { const x = new URL(u); x.hash = ''; return x.href; } catch { return String(u); } };
+  const problems = [];
+  const want = canon(decisionUrl);
+  if (!source) return ['the evidence source does not exist'];
+  if (canon(source.url) === want) return problems;
+
+  if (source.status !== 'retrieved') problems.push(`${source.id} is a ${source.status} attempt`);
+  if (source.agency !== agency) problems.push(`${source.id} is a different agency`);
+  if (source.category !== category) problems.push(`${source.id} is a different category`);
+  if (candidateSetVersion !== undefined && source.candidateSetVersion !== undefined &&
+      source.candidateSetVersion !== candidateSetVersion) {
+    problems.push(`${source.id} belongs to round ${source.candidateSetVersion}, not ${candidateSetVersion}`);
+  }
+
+  const sets = log?.candidateSets ?? {};
+  const set = sets[`${agency}\u0000${category}`];
+  const locked = (set?.locked ?? []).map((u) => canon(u));
+  if (!locked.includes(canon(source.url))) problems.push(`${source.url} is not a locked candidate`);
+  if (!locked.includes(want)) problems.push(`${decisionUrl} is not a locked candidate`);
+
+  const chain = Array.isArray(source.redirectChain) ? source.redirectChain : [];
+  if (chain.length === 0) {
+    problems.push(`${source.id} records no redirect chain`);
+  } else {
+    if (canon(chain[0].from) !== canon(source.url)) {
+      problems.push(`the chain does not start at ${source.url}`);
+    }
+    if (canon(chain[chain.length - 1].to) !== want) {
+      problems.push(`the chain does not end at ${decisionUrl}`);
+    }
+    for (let i = 1; i < chain.length; i++) {
+      if (canon(chain[i].from) !== canon(chain[i - 1].to)) problems.push(`the chain breaks at hop ${i + 1}`);
+    }
+    for (const [i, hop] of chain.entries()) {
+      if (hop.allowed !== true) problems.push(`hop ${i + 1} is not recorded as allowed`);
+    }
+  }
+
+  if (!source.finalUrl) problems.push(`${source.id} records no finalUrl`);
+  else if (canon(source.finalUrl) !== want) {
+    problems.push(`${source.id} finally reached ${source.finalUrl}, not ${decisionUrl}`);
   }
   return problems;
 }

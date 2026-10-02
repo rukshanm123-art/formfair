@@ -732,8 +732,29 @@ export function appendAttempt(log, attempt) {
     if (source.category !== attempt.category) {
       throw new Error(`${source.id} is category ${source.category}, not ${attempt.category}`);
     }
+    // Amendment 53. One retrieval may settle two locked candidates when a RECORDED redirect proves
+    // they are one page - and only then.
+    //
+    // `https://teara.govt.nz/contact-us` and `https://teara.govt.nz/en/contact-us` were both locked,
+    // because the bound is applied to URLs nobody has requested yet and the canonicaliser keeps them
+    // distinct. Requesting the first returned HTTP 301 to the second and served a page whose own
+    // `<link rel="canonical">` names the second, so they are one page - but this guard demanded the
+    // citation's URL equal the retrieval's requested URL, which left the second candidate with no
+    // way to be settled except a second request for a page already held.
+    //
+    // The exception is narrow by construction: it reads only what the retrieval RECORDED, so a
+    // citation cannot assert an equivalence the evidence does not contain.
     if (canonicalise(source.url) !== canonicalise(attempt.url)) {
-      throw new Error(`${source.id} is ${source.url}, not ${attempt.url}`);
+      const problems = redirectEquivalenceProblems(log, {
+        source, decisionUrl: attempt.url, agency: attempt.agency, category: attempt.category,
+        candidateSetVersion: attempt.candidateSetVersion ?? source.candidateSetVersion,
+      });
+      if (problems.length) {
+        throw new Error(
+          `${source.id} is ${source.url}, not ${attempt.url}, and no recorded redirect makes them ` +
+            `one page:\n  ${problems.join('\n  ')}`
+        );
+      }
     }
     // The retrieval must still be active evidence. A supersession CLAIM from a record that has
     // itself been superseded does not keep the evidence withdrawn - otherwise `c-0504`, rejected
@@ -1301,6 +1322,114 @@ export const SUPERSEDED_ATTRITION_REASONS = Object.freeze([
   'all four categories in the frozen priority order were attempted, but technical retrieval ' +
     'barriers prevented complete discovery and no eligible form was located',
 ]);
+
+/**
+ * Amendment 53. Does a recorded redirect make a retrieval's page the same page as a decision's URL?
+ *
+ * Returns the reasons it does NOT, so an empty list is the only thing that permits the citation.
+ * Everything it checks is a field the retrieval already recorded: the chain Chromium actually
+ * followed, each hop's robots verdict as evaluated at the time, and the final URL reached. Nothing
+ * is inferred from the shape of the URLs, because that is exactly the assumption this project
+ * refused when the same two Te Ara URLs were deduplicated on the premise that they looked alike.
+ *
+ * The permission is also bounded to the round's own locked candidates. A retrieval may stand in for
+ * another URL only when BOTH are URLs this set undertook to assess - so the rule can settle a
+ * duplicate the bound admitted, and can never reach a page the set never locked.
+ *
+ * No permit and no navigation timestamp is copied: the citation points at the retrieval, which
+ * keeps its own. Two decisions resting on one retrieval of one page is the intended outcome; two
+ * records claiming one REQUEST of two pages remains impossible.
+ */
+export function redirectEquivalenceProblems(
+  log, { source, decisionUrl, agency, category, candidateSetVersion } = {}
+) {
+  const problems = [];
+  const want = canonicalise(decisionUrl);
+  // Same URL needs no equivalence; the ordinary citation rules cover it.
+  if (canonicalise(source?.url) === want) return problems;
+
+  if (!source) return ['there is no evidence source to check'];
+  if (source.status !== 'retrieved') {
+    problems.push(`${source.id} is a ${source.status} attempt, not an assessment-only retrieval`);
+  }
+  if (source.agency !== agency) problems.push(`${source.id} is ${source.agency}, not ${agency}`);
+  if (source.category !== category) {
+    problems.push(`${source.id} is category ${source.category}, not ${category}`);
+  }
+  // The same ROUND. Evidence from an earlier or superseded round describes a different sample.
+  if (candidateSetVersion !== undefined &&
+      source.candidateSetVersion !== undefined &&
+      source.candidateSetVersion !== candidateSetVersion) {
+    problems.push(
+      `${source.id} belongs to round ${source.candidateSetVersion}, not ${candidateSetVersion}`
+    );
+  }
+
+  // Both ends must be URLs this set undertook to assess.
+  const set = log?.candidateSets?.[setKey(agency, category)];
+  const locked = (set?.locked ?? []).map((u) => canonicalise(u));
+  if (!locked.includes(canonicalise(source.url))) {
+    problems.push(`${source.url} is not a locked candidate of this set`);
+  }
+  if (!locked.includes(want)) problems.push(`${decisionUrl} is not a locked candidate of this set`);
+
+  // The chain, exactly as recorded: continuous, starting where the request started, ending at the
+  // URL being decided, every hop allowed when it was followed.
+  const chain = Array.isArray(source.redirectChain) ? source.redirectChain : [];
+  if (chain.length === 0) {
+    problems.push(`${source.id} records no redirect chain, so nothing links the two URLs`);
+  } else {
+    if (canonicalise(chain[0].from) !== canonicalise(source.url)) {
+      problems.push(`the chain starts at ${chain[0].from}, not at ${source.url}`);
+    }
+    if (canonicalise(chain[chain.length - 1].to) !== want) {
+      problems.push(`the chain ends at ${chain[chain.length - 1].to}, not at ${decisionUrl}`);
+    }
+    for (let i = 1; i < chain.length; i++) {
+      if (canonicalise(chain[i].from) !== canonicalise(chain[i - 1].to)) {
+        problems.push(
+          `the chain breaks at hop ${i + 1}: ${chain[i - 1].to} then ${chain[i].from}`
+        );
+      }
+    }
+    for (const [i, hop] of chain.entries()) {
+      if (hop.allowed !== true) {
+        problems.push(`hop ${i + 1} to ${hop.to} is not recorded as allowed`);
+      }
+    }
+  }
+
+  // And the page actually reached must BE the page being decided. This is the check an invented
+  // `finalUrl` has to pass, so it is made against the recorded value and nothing else.
+  if (!source.finalUrl) {
+    problems.push(`${source.id} records no finalUrl`);
+  } else if (canonicalise(source.finalUrl) !== want) {
+    problems.push(
+      `${source.id} finally reached ${source.finalUrl}, which is not ${decisionUrl}`
+    );
+  }
+  return problems;
+}
+
+/**
+ * Every citation in the log whose URL differs from its evidence, re-checked. Read by the corpus
+ * gate, so a record written before this rule - or one whose set changed underneath it - cannot
+ * sit in a sealed corpus unexamined.
+ */
+export function redirectEquivalenceAudit(log) {
+  const problems = [];
+  for (const a of log.attempts ?? []) {
+    if (!a.evidenceFromAttemptId || isSuperseded(log, a)) continue;
+    const source = (log.attempts ?? []).find((x) => x.id === a.evidenceFromAttemptId);
+    if (!source || canonicalise(source.url) === canonicalise(a.url)) continue;
+    const found = redirectEquivalenceProblems(log, {
+      source, decisionUrl: a.url, agency: a.agency, category: a.category,
+      candidateSetVersion: a.candidateSetVersion ?? source.candidateSetVersion,
+    });
+    for (const p of found) problems.push(`${a.id} cites ${source.id}: ${p}`);
+  }
+  return problems;
+}
 
 /**
  * Which resolution the evidence supports, and the records that support it.
@@ -4489,6 +4618,14 @@ export function corpusBlockers(log, { capturesRoot = null } = {}) {
       add('render-evidence', `rendered evidence does not match the log: ${renderProblems.length} problem(s)`,
         renderProblems);
     }
+  }
+
+  // Amendment 53. Citations that stand in for another URL are re-verified here, not trusted to
+  // the write-time check alone: a set can be reopened and relocked after a decision is recorded,
+  // and an equivalence that rested on both URLs being locked would then be resting on nothing.
+  const equivalence = redirectEquivalenceAudit(log);
+  if (equivalence.length) {
+    add('redirect-equivalence', `${equivalence.length} citation(s) stand in for a URL the recorded redirects do not support`, equivalence);
   }
 
   const stale = staleSetBindings(log);

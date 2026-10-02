@@ -4289,3 +4289,85 @@ The Ministry for Culture and Heritage account-registration set remains approved 
 audit trail, and a null note honestly records that none accompanied the decision rather than one
 retrofitted afterwards. All earlier tags are preserved and unmoved, including the three revoked
 under Amendment 47.
+
+## Amendment 53 — one retrieval may settle two locked candidates, when a recorded redirect proves they are one page
+
+*Frozen as `selection-v1.0.49`, `capture-v1.0.24` and `solo-protocol-v1.0.29`, 2 October 2026.*
+
+No live record changes and no page is requested again. The rule is frozen before it is used.
+
+### What happened
+
+The Ministry for Culture and Heritage enquiry-or-contact round locked both
+`https://teara.govt.nz/contact-us` and `https://teara.govt.nz/en/contact-us`. It had to: the frozen
+canonicaliser keeps them distinct, and the bound is applied to URLs nobody has requested yet. An
+earlier attempt to deduplicate them was **refused**, correctly — the judgements recording them
+stated in terms that their identity had **not** been established, and a premise cannot be
+disclaimed in one sentence and relied on in the next.
+
+Requesting the first established it. `c-0950` recorded HTTP **301** to the second, with the hop
+evaluated against the recorded robots policy (`r-0081`, no matching rule, allowed), a final URL of
+`/en/contact-us`, and a served page carrying `<link rel="canonical" href="https://teara.govt.nz/en/contact-us">`.
+Under this protocol's canonicalisation rule the page's own canonical link governs, so the two locked
+URLs name one page — on evidence this time.
+
+The evidence guard could not express that. It required a citation's URL to equal the retrieval's
+requested URL, so the second candidate could be settled only by requesting a page already in hand.
+A second request would have produced no new evidence and spent politeness to learn nothing.
+
+### The rule
+
+A citation whose URL differs from its retrieval's requested URL is permitted **only** when all of
+the following hold. Each is read from what the retrieval recorded; nothing is inferred from how the
+URLs look, because that inference is the one already rejected above.
+
+1. The evidence source is an **active** `retrieved` attempt of the same **agency**, **category** and
+   **set version**.
+2. **Both** the source's requested URL and the decision URL are **locked candidates of that set**.
+   So the rule can settle a duplicate the bound admitted, and can never reach a page the set never
+   undertook to assess.
+3. The source's recorded redirect chain is **continuous**, **starts** at the source URL and **ends**
+   at the decision URL.
+4. **Every** hop is recorded as `allowed: true`. An absent verdict is not a permission.
+5. The source's `finalUrl` canonicalises **exactly** to the decision URL.
+6. The existing file, digest and byte-length verification is unchanged and still mandatory.
+7. **No permit and no navigation timestamp is copied.** The citation points at the retrieval, which
+   keeps its own. Two decisions resting on one retrieval of one page is the intended outcome; two
+   records claiming one *request* of two pages remains impossible.
+
+### Enforced in three places
+
+At **write time**, in `appendAttempt`, so a citation the redirects do not support cannot be recorded
+at all. At the **corpus gate**, as `redirectEquivalenceAudit` — because a set can be reopened and
+relocked *after* a decision is written, and an equivalence that rested on both URLs being locked
+would then be resting on nothing. And **independently in the sealer**, which may not import the
+capture package and re-derives the permission rather than trusting that the write-time check ran.
+
+`capture/test/redirect-equivalence.test.mjs` (25) is mostly the refusals: an invented `finalUrl`, no
+`finalUrl`, no chain, an empty chain, a chain starting or ending elsewhere, a chain broken between
+hops, a hop refused by robots, a hop with no recorded verdict, evidence from another round,
+category or agency, a decision URL the set never locked, a source URL the set never locked, an
+unrelated target, and a source that is not an assessment-only retrieval. Every fixture is asserted
+to produce the same verdict in both implementations, and the write-time guard is tested through
+`appendAttempt` rather than through the rule alone. The capture suite is **625** tests and the solo
+suite **152**.
+
+### The bound operates on pre-request canonical URLs
+
+This is the limitation the episode exposes, and it is a property of the frozen method rather than an
+error in this round. Canonicalisation depends on a page's own `<link rel="canonical">`, which cannot
+be known until the page is requested; the five-candidate bound is therefore applied to **URLs as
+discovered**. Two discovered URLs that redirect to one page consume **two** of the five slots, so a
+round may assess fewer distinct served pages than its bound suggests. This round locked five URLs
+and reached **four** distinct pages.
+
+Neither URL that fell beyond the bound is promoted to fill the gap. Promoting one would be
+post-outcome selection: the slot became free only because assessment revealed the duplicate, and
+reshaping a locked set in response to assessment evidence is what the locked-set rule exists to
+prevent. The round reports four distinct pages and says why.
+
+### What this does not change
+
+The frozen method, the frozen criteria, the priority order, the canonicalisation rule and the robots
+procedure are untouched. No candidate set is superseded and no record is deleted. All earlier tags
+are preserved and unmoved, including the three revoked under Amendment 47.
