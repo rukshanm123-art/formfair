@@ -18,7 +18,7 @@
     "excluded": 46,
     "failed": 1,
     "captureBlocked": 0,
-    "pendingApprovalAttempts": 5,
+    "pendingApprovalAttempts": 0,
     "pendingApprovalCandidateSets": 0
   },
   "discoveryByMethod": {
