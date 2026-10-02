@@ -19,7 +19,7 @@
     "failed": 1,
     "captureBlocked": 0,
     "pendingApprovalAttempts": 0,
-    "pendingApprovalCandidateSets": 1
+    "pendingApprovalCandidateSets": 0
   },
   "discoveryByMethod": {
     "navigation": 285,
@@ -7084,8 +7084,8 @@
       "locked": 0,
       "droppedBeyondBound": 0,
       "lockedAt": "2026-10-01T17:53:40Z",
-      "approval": "pending",
-      "approvedAt": null,
+      "approval": "approved",
+      "approvedAt": "2026-10-02T11:23:23Z",
       "approvalNote": null,
       "supportedByDiscoveryRecords": [
         "d-0730",
