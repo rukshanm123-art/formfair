@@ -4477,7 +4477,7 @@ The capture suite is **667** tests and the solo suite **152**.
 
 ### The freeze was incomplete, and using it found that out
 
-*Corrected in `selection-v1.0.51`, `capture-v1.0.26` and `solo-protocol-v1.0.31`.*
+*Frozen as `selection-v1.0.51`, `capture-v1.0.26` and `solo-protocol-v1.0.31`, 2 October 2026.*
 
 `selection-v1.0.50`, `capture-v1.0.25` and `solo-protocol-v1.0.30` were tagged with green CI, and
 the first real use failed: `publish` refused with *"d-0962 cites render g-0301 but is neither an
