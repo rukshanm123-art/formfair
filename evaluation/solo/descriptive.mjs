@@ -168,7 +168,7 @@ const FRAME_FILES = [
  * exhaustion records at all. A manifest that misnames its own protocol is worse than one that
  * omits it: a reader checking which rules a corpus was sealed under would be told the wrong ones.
  */
-export const SOLO_PROTOCOL_TAG = 'solo-protocol-v1.0.29';
+export const SOLO_PROTOCOL_TAG = 'solo-protocol-v1.0.30';
 
 /**
  * Two resolutions, mirrored from the capture package and checked equal by a test.
@@ -440,6 +440,104 @@ export function redirectEquivalenceProblems(
   if (!source.finalUrl) problems.push(`${source.id} records no finalUrl`);
   else if (canon(source.finalUrl) !== want) {
     problems.push(`${source.id} finally reached ${source.finalUrl}, not ${decisionUrl}`);
+  }
+  return problems;
+}
+
+/**
+ * The sealer's own derivation of which conclusion a render may carry. Amendment 54.
+ *
+ * `https://www.sia.govt.nz/search/SearchForm?Search=register` returned HTTP 500 - the agency's own
+ * themed error page - so the render happened and the search did not. A conclusion of
+ * `no-candidates` there would assert that the search found no registration form, and an error
+ * page's own navigation would become evidence about forms.
+ *
+ * The rule runs both ways: a page the server SERVED must be judged on its content and may not be
+ * dismissed as inconclusive; a page it did NOT serve must be recorded inconclusive and may not be
+ * read for candidates. The status comes from the render registry, never from the conclusion being
+ * checked, and a status that is missing or not an integer refuses every conclusion rather than
+ * defaulting to served.
+ *
+ * Independent of the capture package, which this file may not import, and scoped per render per
+ * category and round because one render legitimately answers several categories.
+ */
+export function renderConclusionProblems(log) {
+  const problems = [];
+  const attempts = Array.isArray(log?.attempts) ? log.attempts : [];
+  const renders = Array.isArray(log?.renders) ? log.renders : [];
+  const superseded = new Set(
+    attempts.map((a) => a.supersedesDiscoveryId).filter((id) => id !== undefined && id !== null)
+  );
+  const active = (a) => !superseded.has(a.id);
+  const KINDS = ['judgement-only', 'technical-conclusion'];
+  const CONTENT = ['candidates-found', 'no-candidates'];
+  const served = (n) => Number.isInteger(n) && n >= 200 && n <= 299;
+  // `0` is a crashed fetch, not a response; an unusable status refuses every conclusion.
+  const usable = (n) => Number.isInteger(n) && n >= 100 && n <= 599;
+  const canon = (u) => { try { const x = new URL(u); x.hash = ''; return x.href; } catch { return String(u); } };
+
+  for (const a of attempts) {
+    if (!KINDS.includes(a.recordType) || !active(a)) continue;
+    const where = `${a.id} (${a.category} v${a.candidateSetVersion})`;
+    const render = renders.find((r) => r.id === a.renderId);
+    if (!render) {
+      problems.push(`${where} names render ${a.renderId}, which is not in the registry`);
+      continue;
+    }
+    const status = render.httpStatus;
+    if (!served(status)) {
+      if (!usable(status)) {
+        problems.push(
+          `${where} rests on ${render.id}, whose httpStatus ${JSON.stringify(status)} is not a ` +
+            'usable status; no conclusion can be drawn about it'
+        );
+      } else if (a.outcome !== 'retrieval-inconclusive') {
+        problems.push(
+          `${where} reads ${render.id} as ${a.outcome}, but the server did not serve it ` +
+            `(HTTP ${status}); nothing on it bears on candidates`
+        );
+      }
+    } else if (!CONTENT.includes(a.outcome)) {
+      problems.push(
+        `${where} records ${a.outcome} for ${render.id}, which WAS served (HTTP ${status}) and ` +
+          'must be judged on its content'
+      );
+    }
+
+    // A technical conclusion is about one retrieval of one page in one round.
+    if (a.recordType === 'technical-conclusion') {
+      if (a.permitId) problems.push(`${where} is a technical conclusion naming a permit`);
+      if (a.navigatedAt) problems.push(`${where} is a technical conclusion carrying a navigation time`);
+      if (a.navigationPerformed !== false) {
+        problems.push(`${where} does not record navigationPerformed: false`);
+      }
+      if (a.supersedesDiscoveryId) {
+        problems.push(`${where} supersedes ${a.supersedesDiscoveryId}; the render still happened`);
+      }
+      const obs = attempts.find((x) => x.id === a.evidenceFromDiscoveryId);
+      if (!obs) problems.push(`${where} cites ${a.evidenceFromDiscoveryId}, which does not exist`);
+      else {
+        if (!active(obs)) problems.push(`${where} cites ${obs.id}, which has been superseded`);
+        if (obs.outcome !== 'rendered') problems.push(`${where} cites ${obs.id}, which is not a render`);
+        if (obs.renderId !== a.renderId) {
+          problems.push(`${where} cites ${obs.id}, which registered ${obs.renderId}`);
+        }
+        if (obs.agency !== a.agency || obs.category !== a.category ||
+            obs.candidateSetVersion !== a.candidateSetVersion || canon(obs.url) !== canon(a.url)) {
+          problems.push(`${where} cites ${obs.id}, which is a different agency, category, round or page`);
+        }
+      }
+    }
+
+    // One active conclusion per render per category and round.
+    const rival = attempts.find(
+      (x) => x.id !== a.id && KINDS.includes(x.recordType) && active(x) &&
+        x.renderId === a.renderId && x.category === a.category &&
+        x.candidateSetVersion === a.candidateSetVersion
+    );
+    if (rival && rival.id < a.id) {
+      problems.push(`${where} is a second active conclusion for ${a.renderId}, after ${rival.id}`);
+    }
   }
   return problems;
 }
@@ -1466,6 +1564,12 @@ export function sealCorpus({
         // Amendment 39. Evidence retrieved and never read must not reach a seal.
         for (const problem of unjudgedRenderProblems(log)) {
           problems.push(`unjudgedRender: ${problem}`);
+        }
+
+        // Amendment 54. A conclusion that does not match its render's HTTP status must not reach a
+        // seal: an error page read for candidates, or a served page waved away as a failure.
+        for (const problem of renderConclusionProblems(log)) {
+          problems.push(`renderConclusion: ${problem}`);
         }
 
         // Amendment 41. A candidate settled by evidence alone must not reach a seal.

@@ -25,7 +25,7 @@ import {
   DISCOVERY_KINDS, remainingBudget, MAX_CANDIDATES_PER_CATEGORY, MAX_CANDIDATES_PER_AGENCY,
   canonicalise, setKey, MAX_QUALIFIED_AGENCIES, CATEGORY_ORDER, lockCandidates, isSuperseded,
   DISCOVERY_METHODS, DISCOVERY_OUTCOMES, nextWork, isExhausted, TECHNICAL_ATTRITION_OUTCOMES,
-  JUDGEMENT_OUTCOMES, RECORD_TYPES,
+  JUDGEMENT_OUTCOMES, RECORD_TYPES, TECHNICAL_CONCLUSION_OUTCOME, isServedStatus, isUsableStatus,
   TERMINAL_STATUSES, isTerminalDecision, isEvidenceOnly, terminalDecisionsFor,
 } from './selection.mjs';
 
@@ -279,6 +279,45 @@ function checkAttempt(attempt) {
           problems.push(
             `a reclassification records ${JSON.stringify(attempt.outcome)}; like an observation it ` +
               'concludes nothing about candidates'
+          );
+        }
+      }
+      // Amendment 54. A technical conclusion: the render happened, the server did not serve the
+      // page, and nothing on it bears on candidates. Which conclusion a render may carry is
+      // decided by the status the RENDER recorded - see `renderStatusProblems` below, which
+      // enforces it in both directions and reads the status from the registry, never from here.
+      if (attempt.recordType === RECORD_TYPES.TECHNICAL_CONCLUSION) {
+        if (!attempt.renderId) {
+          problems.push('a technical conclusion needs renderId, the render it concludes about');
+        }
+        if (!attempt.evidenceFromDiscoveryId) {
+          problems.push('a technical conclusion needs evidenceFromDiscoveryId, the observation it cites');
+        }
+        if (attempt.permitId) {
+          problems.push(
+            'a technical conclusion makes no request, so it must not name a permit'
+          );
+        }
+        if (attempt.navigatedAt) {
+          problems.push(
+            'a technical conclusion makes no request, so it must not carry a navigation timestamp'
+          );
+        }
+        if (attempt.navigationPerformed !== false) {
+          problems.push('a technical conclusion must record navigationPerformed: false');
+        }
+        if (attempt.outcome !== TECHNICAL_CONCLUSION_OUTCOME) {
+          problems.push(
+            `a technical conclusion records ${TECHNICAL_CONCLUSION_OUTCOME}, not ` +
+              JSON.stringify(attempt.outcome)
+          );
+        }
+        // It concludes about a render; it does not withdraw the observation that made it. The
+        // render DID happen, and that record stays active.
+        if (attempt.supersedesDiscoveryId) {
+          problems.push(
+            'a technical conclusion does not supersede the observation it cites: the render ' +
+              'happened, and this is a separate conclusion about what the server served'
           );
         }
       }
@@ -691,6 +730,15 @@ export function appendAttempt(log, attempt) {
     if (attempt.evidence !== 'rendered-dom') {
       throw new Error('only a rendered-dom record may name the plain-retrieval record it answers');
     }
+  }
+
+  // Amendment 54. Which conclusion this render may carry, decided by the status the RENDER
+  // recorded. Checked after the lineage rules above, so that the more specific complaint about an
+  // answered record's agency, round or page is the one an operator sees first: this rule is about
+  // which CONCLUSION is permissible once the lineage itself is sound.
+  const conclusionProblems = renderConclusionProblems(log, attempt);
+  if (conclusionProblems.length) {
+    throw new Error(`invalid capture attempt:\n  ${conclusionProblems.join('\n  ')}`);
   }
 
   // selection-v1.0.31. Only a CANDIDATE assessment is blocked by a prior candidate assessment. This
@@ -1322,6 +1370,127 @@ export const SUPERSEDED_ATTRITION_REASONS = Object.freeze([
   'all four categories in the frozen priority order were attempted, but technical retrieval ' +
     'barriers prevented complete discovery and no eligible form was located',
 ]);
+
+/**
+ * Amendment 54. Which conclusion a render may carry, decided by the status the RENDER recorded.
+ *
+ * `https://www.sia.govt.nz/search/SearchForm?Search=register` returned HTTP 500 - the agency's own
+ * themed error page, byte-identical for both terms, while the home page returned 200. The render
+ * happened; the SEARCH did not. Judging that page `no-candidates` would assert the search found no
+ * registration form, which is the overclaim this study already recorded as a deviation.
+ *
+ * The rule runs in BOTH directions, and that is the point. A served page must be judged on its
+ * content and may not be dismissed as inconclusive - otherwise an inconvenient page could be
+ * waved away as a technical failure. A page the server did not serve must be recorded as
+ * inconclusive and may not be read for candidates - otherwise an error page's own navigation
+ * becomes evidence about forms, which is exactly how a themed 500 could smuggle a site's whole
+ * menu into a candidate set.
+ *
+ * The status is read from the render registry. A conclusion cannot state its own status, because
+ * then the record being checked would supply the fact that decides whether it is allowed.
+ *
+ * Scoped per render PER CATEGORY AND ROUND, not per render: one render of a home page legitimately
+ * answers several categories' rounds, and ten active judgements in this log cite an observation
+ * from a different category for exactly that reason.
+ */
+export function renderConclusionProblems(log, attempt) {
+  const KINDS = [RECORD_TYPES.JUDGEMENT_ONLY, RECORD_TYPES.TECHNICAL_CONCLUSION];
+  if (!KINDS.includes(attempt?.recordType)) return [];
+  const problems = [];
+  const attempts = log?.attempts ?? [];
+  const technical = attempt.recordType === RECORD_TYPES.TECHNICAL_CONCLUSION;
+
+  // The citation identity is enforced on a TECHNICAL CONCLUSION, which is about one retrieval of
+  // one page in one round. It is deliberately NOT imposed on content judgements: `d-0309` answers
+  // `d-0306`, a plain-retrieval record from before renders existed, and `d-0688` cites a record
+  // the Amendment 48 chain superseded. Both are legitimate history, and the render ledger already
+  // validates their lineage. What DOES apply to every conclusion is the status rule below - the
+  // thing this amendment is for - and the one-conclusion-per-scope rule.
+  const obs = attempts.find((a) => a.id === attempt.evidenceFromDiscoveryId);
+  if (technical) {
+    if (!obs) {
+      return [`cites ${JSON.stringify(attempt.evidenceFromDiscoveryId)}, which is not a recorded attempt`];
+    }
+    if (isDiscoverySuperseded(log, obs.id) && obs.id !== attempt.supersedesDiscoveryId) {
+      problems.push(`${obs.id} has been superseded and is no longer the active observation`);
+    }
+    if (obs.outcome !== 'rendered') {
+      problems.push(`${obs.id} records ${JSON.stringify(obs.outcome)}, not a render`);
+    }
+    // The EXACT render: the one that observation registered, not merely a render of the same page.
+    if (!attempt.renderId) problems.push('names no render');
+    else if (obs.renderId !== attempt.renderId) {
+      problems.push(`${obs.id} registered ${obs.renderId}, not ${attempt.renderId}`);
+    }
+    if (obs.agency !== attempt.agency) problems.push(`${obs.id} is ${obs.agency}, not ${attempt.agency}`);
+    if (obs.category !== attempt.category) {
+      problems.push(`${obs.id} is category ${obs.category}, not ${attempt.category}`);
+    }
+    if (obs.candidateSetVersion !== attempt.candidateSetVersion) {
+      problems.push(
+        `${obs.id} is round ${obs.candidateSetVersion}, not ${attempt.candidateSetVersion}`
+      );
+    }
+    if (canonicalise(obs.url) !== canonicalise(attempt.url)) {
+      problems.push(`${obs.id} is ${obs.url}, not ${attempt.url}`);
+    }
+  }
+
+  const render = (log?.renders ?? []).find((r) => r.id === attempt.renderId);
+  if (!render) {
+    if (attempt.renderId) problems.push(`${attempt.renderId} is not in the render registry`);
+  } else {
+    const status = render.httpStatus;
+    if (!isUsableStatus(status)) {
+      // Fail closed. "No usable status" must not read as "served": a missing or hand-edited status
+      // is the one input that would otherwise choose the rule that suits it.
+      problems.push(
+        `${render.id} records httpStatus ${JSON.stringify(status)}, which is not a usable status; ` +
+          'no conclusion can be drawn about a render whose status is unknown'
+      );
+    } else if (isServedStatus(status)) {
+      if (!JUDGEMENT_OUTCOMES.includes(attempt.outcome)) {
+        problems.push(
+          `${render.id} was served (HTTP ${status}), so it must be judged on its content ` +
+            `(${JUDGEMENT_OUTCOMES.join(' or ')}), not recorded as ` +
+            JSON.stringify(attempt.outcome)
+        );
+      }
+    } else if (attempt.outcome !== TECHNICAL_CONCLUSION_OUTCOME) {
+      problems.push(
+        `${render.id} was NOT served (HTTP ${status}), so nothing on it bears on candidates; it ` +
+          `must be recorded as ${TECHNICAL_CONCLUSION_OUTCOME}, not ` +
+          JSON.stringify(attempt.outcome)
+      );
+    }
+  }
+
+  // One active conclusion per render per category and round.
+  const rival = attempts.find(
+    (a) => a.id !== attempt.id && KINDS.includes(a.recordType) &&
+      a.renderId === attempt.renderId && a.category === attempt.category &&
+      a.candidateSetVersion === attempt.candidateSetVersion &&
+      a.id !== attempt.supersedesDiscoveryId && !isDiscoverySuperseded(log, a.id)
+  );
+  if (rival) {
+    problems.push(
+      `${rival.id} is already the active conclusion for ${attempt.renderId} in ` +
+        `${attempt.category} v${attempt.candidateSetVersion}`
+    );
+  }
+  return problems;
+}
+
+/** Every active conclusion in the log, re-checked. Read by the corpus gate. */
+export function renderConclusionAudit(log) {
+  const problems = [];
+  const KINDS = [RECORD_TYPES.JUDGEMENT_ONLY, RECORD_TYPES.TECHNICAL_CONCLUSION];
+  for (const a of log.attempts ?? []) {
+    if (!KINDS.includes(a.recordType) || isDiscoverySuperseded(log, a.id)) continue;
+    for (const p of renderConclusionProblems(log, a)) problems.push(`${a.id}: ${p}`);
+  }
+  return problems;
+}
 
 /**
  * Amendment 53. Does a recorded redirect make a retrieval's page the same page as a decision's URL?
@@ -4262,8 +4431,13 @@ export function unjudgedRenderedObservations(log, { agency, category, candidateS
     // not: those judgements answer the original plain-retrieval record - `d-0377` answers `d-0018`
     // - while citing the observation as their evidence. Testing the answer link alone declared all
     // fifty-seven retrospective observations unread, which is the opposite of what the log shows.
+    //
+    // Amendment 54. A TECHNICAL CONCLUSION discharges the obligation too. The obligation is that
+    // every render be accounted for, not that every render yield a verdict about candidates: a
+    // page the server never served has no such verdict to give, and demanding one is what would
+    // force the overclaim.
     const answering = log.attempts.filter(
-      (j) => j.recordType === RECORD_TYPES.JUDGEMENT_ONLY &&
+      (j) => [RECORD_TYPES.JUDGEMENT_ONLY, RECORD_TYPES.TECHNICAL_CONCLUSION].includes(j.recordType) &&
         (j.answersDiscoveryId === o.id || j.evidenceFromDiscoveryId === o.id) &&
         !isDiscoverySuperseded(log, j.id)
     );
@@ -4618,6 +4792,13 @@ export function corpusBlockers(log, { capturesRoot = null } = {}) {
       add('render-evidence', `rendered evidence does not match the log: ${renderProblems.length} problem(s)`,
         renderProblems);
     }
+  }
+
+  // Amendment 54. Every active conclusion re-checked against its render's status, because the
+  // status lives in the registry and a render can be re-registered after a conclusion was written.
+  const conclusions = renderConclusionAudit(log);
+  if (conclusions.length) {
+    add('render-conclusion', `${conclusions.length} conclusion(s) do not match their render's HTTP status`, conclusions);
   }
 
   // Amendment 53. Citations that stand in for another URL are re-verified here, not trusted to

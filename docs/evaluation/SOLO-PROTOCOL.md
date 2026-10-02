@@ -4371,3 +4371,112 @@ prevent. The round reports four distinct pages and says why.
 The frozen method, the frozen criteria, the priority order, the canonicalisation rule and the robots
 procedure are untouched. No candidate set is superseded and no record is deleted. All earlier tags
 are preserved and unmoved, including the three revoked under Amendment 47.
+
+## Amendment 54 — the HTTP status decides which conclusion a render may carry
+
+*Frozen as `selection-v1.0.50`, `capture-v1.0.25` and `solo-protocol-v1.0.30`, 2 October 2026.*
+
+No live record changes and no page is requested again. The rule is frozen before it is used.
+
+### What happened
+
+`https://www.sia.govt.nz/search/SearchForm?Search=register` returned **HTTP 500**. The response was
+the agency's own themed error page — site navigation and all — titled *"Server error | Social
+Investment Agency"*, byte-identical for both of the round's search terms, while the same site's home
+page returned 200. The form was submitted exactly as it renders: `action="/search/SearchForm"`,
+`method="GET"`, its only field named `Search`. So the render happened and the **search** did not.
+
+`render-discovery` recorded the observation as `rendered`, which is right: a page loaded and its DOM
+was captured. But a judgement may only record `candidates-found` or `no-candidates`, and Amendment
+39 requires every rendered observation to carry a conclusion before a round can be locked. Writing
+`no-candidates` would have asserted that the internal search found no registration form — the
+overclaim recorded against this study as deviation `v-0002`, and the reason the ECART note had to be
+narrowed. The round was stopped rather than papered over.
+
+### The rule, in both directions
+
+Which conclusion a render may carry is decided by the HTTP status **the render recorded**:
+
+| the render's final status | permitted | refused |
+| --- | --- | --- |
+| 200–299 | `candidates-found`, `no-candidates` | `retrieval-inconclusive` |
+| outside 200–299 | `retrieval-inconclusive` | both candidate judgements |
+| not a usable status | nothing | everything |
+
+The symmetry is the substance. Without the first row the rule would be an escape hatch: any page
+could be declared a technical failure rather than read. Without the second, a themed error page's
+own menu could become evidence about forms — a 500 on this estate carries the whole site
+navigation, so reading it for candidates would let an error page nominate the pages it links to.
+
+A status that is **missing, null, a string, a float, `NaN`, or outside 100–599** permits *no*
+conclusion. `0` is specifically refused: it is what a crashed or aborted fetch leaves behind, not a
+response, and treating it as "not served" would let a failed request choose the conclusion that
+suited it.
+
+The status is read from the **render registry**, never from the conclusion being written. Otherwise
+the record under test would supply the fact that decides whether it is allowed.
+
+### The record
+
+`technical-conclusion` is the fourth record type, after observation, judgement-only and
+reclassification. It records `retrieval-inconclusive`, cites the **exact** active observation and
+the render that observation registered, matches it on agency, category, round and URL, carries **no
+permit and no navigation timestamp**, declares `navigationPerformed: false`, and passes the same
+file, digest and byte-length verification as any other conclusion.
+
+It **does not supersede** the observation. The render happened; this is a separate conclusion about
+what the server served, not a reclassification of whether rendering occurred. The observation stays
+active.
+
+It is treated as **unresolved technical attrition**: it discharges the unjudged-render obligation —
+the obligation is that every render be *accounted for*, not that every render yield a verdict about
+candidates — while contributing no read-content finding, no candidate, and no recovered barrier.
+`readContentUrls` excludes it, `barrierAccounting` counts it in `retrievalInconclusive` and in
+`unreadUrls`, and the packet says so in its own words: **RENDERED BUT NOT SERVED**, which is neither
+"NOT READ" (the bytes exist and were examined) nor read (nothing in them bears on candidates).
+
+### Scoped per render, per category and round
+
+One render legitimately answers several categories' rounds: eight renders in this log carry a
+judgement in two or three categories each, and **ten** active judgements cite an observation from a
+different category for that reason. So uniqueness is per render *per category and round* — never
+per render — and the citation-identity checks apply to the **technical conclusion only**. Imposing
+them on content judgements would refuse legitimate history: `d-0309` answers `d-0306`, a
+plain-retrieval record from before renders existed, and `d-0688` cites a record the Amendment 48
+chain superseded. The render ledger already validates those lineages.
+
+Checked against the live log before freezing: all **199** active judgements rest on renders with a
+2xx status, so the status rule invalidates nothing already recorded.
+
+### Enforced in three places
+
+At **write time** in `appendAttempt`, so a conclusion the status forbids cannot be recorded. At the
+**corpus gate** as `renderConclusionAudit`, because the status lives in the registry and a render can
+be re-registered after a conclusion was written. And **independently in the sealer**, which may not
+import the capture package and derives the rule again, fail-closed.
+
+`capture/test/render-conclusion.test.mjs` (40) covers both directions across seven non-2xx statuses
+and four 2xx statuses; a non-2xx render falsely judged `no-candidates` and falsely judged
+`candidates-found`; six kinds of unusable status including `0`; a render absent from the registry; a
+citation to a non-existent, superseded, non-render or mismatched observation; a conclusion naming a
+different render than the one its observation registered; a different agency, category, round or
+page; two active conclusions in one scope, and one in another scope permitted; the permit,
+navigation-timestamp and supersession refusals; the observation staying active; the obligation being
+discharged; the attrition accounting; and that the error page contributes no read content and cannot
+become candidate evidence. Every fixture is asserted to produce the same verdict in both
+implementations.
+
+Sixteen existing capture tests and one sealer test failed when the rule went in, every one for the
+same reason: their synthetic render fixtures carried no `httpStatus`, and the rule is fail-closed.
+Thirteen fixtures were given the status every real render records, which is what they should have
+modelled. The write-time check also had to move AFTER the lineage rules in `appendAttempt`, because
+firing first it masked the more specific complaint about an answered record's agency, round or page
+— this rule decides which conclusion is permissible once the lineage is sound, not instead of it.
+
+The capture suite is **665** tests and the solo suite **152**.
+
+### What this does not change
+
+The frozen method, the frozen criteria, the priority order, the canonicalisation rule and the robots
+procedure are untouched. No record is deleted and no candidate set is superseded. All earlier tags
+are preserved and unmoved, including the three revoked under Amendment 47.

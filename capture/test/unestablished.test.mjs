@@ -1212,7 +1212,7 @@ describe('one render answers several categories, and answering is not naming', (
     consumedPermitFor(log, 'https://a.govt.nz/apply');
     const render = recordRender(log, {
       url: 'https://a.govt.nz/apply', navigatedAt: '2026-09-26T19:00:00Z', permitId: 'p-0001',
-      renderFile: 'g1.html', renderedSha256: sha256(html), renderedBytes: Buffer.byteLength(html),
+      renderFile: 'g1.html', renderedSha256: sha256(html), renderedBytes: Buffer.byteLength(html), httpStatus: 200,
       accessBarriers: [],
     });
     // selection-v1.0.26: a render needs the record that observed it, or `adoptedFrom`. A registry
@@ -1315,11 +1315,11 @@ describe('rendered evidence is re-verified, not trusted', () => {
       discoveryKind: 'navigation', outcome: 'no-candidates', category: 'service-application',
       candidateSetVersion: 1, navigatedAt: '2026-09-26T19:00:00Z', approval: 'approved',
       evidence: 'rendered-dom', renderFile: 'g1.html', renderedSha256: sha256(html),
-      renderedBytes: Buffer.byteLength(html),
+      renderedBytes: Buffer.byteLength(html), httpStatus: 200,
     });
     const render = recordRender(log, {
       url: 'https://a.govt.nz/apply', navigatedAt: '2026-09-26T19:00:00Z', permitId: 'p-0001',
-      renderFile: 'g1.html', renderedSha256: sha256(html), renderedBytes: Buffer.byteLength(html),
+      renderFile: 'g1.html', renderedSha256: sha256(html), renderedBytes: Buffer.byteLength(html), httpStatus: 200,
       accessBarriers: [], adoptedFrom: log.attempts.at(-1).id,
     });
     return { dir, renderedDir, log, render, html };
@@ -1566,7 +1566,7 @@ describe('rendered evidence must stay inside rendered/', () => {
     consumedPermitFor(log, 'https://a.govt.nz/apply');
     recordRender(log, {
       url: 'https://a.govt.nz/apply', navigatedAt: '2026-09-26T19:00:00Z', permitId: 'p-0001',
-      renderFile, renderedSha256: sha256(html), renderedBytes: Buffer.byteLength(html),
+      renderFile, renderedSha256: sha256(html), renderedBytes: Buffer.byteLength(html), httpStatus: 200,
       accessBarriers: [], adoptedFrom: 'd-0001',
     });
     return { dir, renderedDir, log };

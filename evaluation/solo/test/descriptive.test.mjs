@@ -599,6 +599,8 @@ describe('the corpus seal requires the exhaustion records', () => {
       permitId: 'p-0001', renderFile: 'g1.html',
       renderedSha256: createHash('sha256').update(html).digest('hex'),
       renderedBytes: Buffer.byteLength(html),
+      // Amendment 54: a render records the status the server returned, as every real one does.
+      httpStatus: 200,
     }];
     // solo-protocol-v1.0.7: a render must have an observation record, or say which record it was
     // adopted from. A registry entry nobody recorded is evidence from nowhere.

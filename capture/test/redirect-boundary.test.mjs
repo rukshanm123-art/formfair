@@ -592,7 +592,7 @@ describe('rendered bytes nothing accounts for', () => {
     log.renders = [{
       id: 'g-0001', url: 'https://a.govt.nz/apply', navigatedAt: '2026-09-27T09:00:10Z',
       permitId: 'p-0001', renderFile: 'g1.html', renderedSha256: sha256(html),
-      renderedBytes: Buffer.byteLength(html), adoptedFrom: 'd-0001', accessBarriers: [],
+      renderedBytes: Buffer.byteLength(html), httpStatus: 200, adoptedFrom: 'd-0001', accessBarriers: [],
     }];
     assert.deepEqual(checkRenderLedger(log, renderedDir), []);
   });
@@ -869,7 +869,7 @@ describe('the rendered discovery path has the same headed fallback as capture', 
     log.renders = [{
       id: 'g-0001', url: 'https://a.govt.nz/feedback', navigatedAt: navigatedOne,
       permitId: 'p-0001', renderFile: 'g1.html', renderedSha256: sha256(html),
-      renderedBytes: Buffer.byteLength(html), accessBarriers: ['http 403', 'cloudflare interstitial'],
+      renderedBytes: Buffer.byteLength(html), httpStatus: 200, accessBarriers: ['http 403', 'cloudflare interstitial'],
       browserMode: 'headless',
     }];
     appendAttempt(log, {
@@ -878,7 +878,7 @@ describe('the rendered discovery path has the same headed fallback as capture', 
       url: 'https://a.govt.nz/feedback', status: 'discovery', discoveryKind: 'navigation',
       outcome: 'retrieval-blocked', category: 'enquiry-or-contact', candidateSetVersion: 1,
       navigatedAt: navigatedOne, approval: 'approved', evidence: 'rendered-dom',
-      renderFile: 'g1.html', renderedSha256: sha256(html), renderedBytes: Buffer.byteLength(html),
+      renderFile: 'g1.html', renderedSha256: sha256(html), renderedBytes: Buffer.byteLength(html), httpStatus: 200,
       accessBarriers: ['http 403', 'cloudflare interstitial'],
       attemptedModes: [{ browserMode: 'headless', accessBarriers: ['http 403'] }],
     });
@@ -946,7 +946,7 @@ describe('a rendered judgement may answer the plain record it upgrades', () => {
     log.renders = [{
       id: 'g-0001', url: 'https://a.govt.nz/apply', navigatedAt: iso(t - 80 * 60_000 + 10_000),
       permitId: 'p-0001', renderFile: 'g1.html', renderedSha256: sha256(html),
-      renderedBytes: Buffer.byteLength(html), accessBarriers: [], browserMode: 'headless',
+      renderedBytes: Buffer.byteLength(html), httpStatus: 200, accessBarriers: [], browserMode: 'headless',
     }];
     appendAttempt(log, {
       recordType: 'observation', permitId: 'p-0001', renderId: 'g-0001',
@@ -954,7 +954,7 @@ describe('a rendered judgement may answer the plain record it upgrades', () => {
       url: 'https://a.govt.nz/apply', status: 'discovery', discoveryKind: 'navigation',
       outcome: 'rendered', category: 'service-application', candidateSetVersion: 1,
       navigatedAt: iso(t - 80 * 60_000 + 10_000), approval: 'approved', evidence: 'rendered-dom',
-      renderFile: 'g1.html', renderedSha256: sha256(html), renderedBytes: Buffer.byteLength(html),
+      renderFile: 'g1.html', renderedSha256: sha256(html), renderedBytes: Buffer.byteLength(html), httpStatus: 200,
     });
     const observation = log.attempts.at(-1);
     log.candidateSets['A\u0000service-application'] = {
@@ -971,7 +971,7 @@ describe('a rendered judgement may answer the plain record it upgrades', () => {
       url: 'https://a.govt.nz/apply', status: 'discovery', discoveryKind: 'navigation',
       outcome: 'no-candidates', category: 'service-application', candidateSetVersion: 1,
       navigationPerformed: false, checkedAt: iso(t), evidence: 'rendered-dom',
-      renderFile: 'g1.html', renderedSha256: sha256(html), renderedBytes: Buffer.byteLength(html),
+      renderFile: 'g1.html', renderedSha256: sha256(html), renderedBytes: Buffer.byteLength(html), httpStatus: 200,
       approval: 'approved',
     }));
     assert.deepEqual(renderBacklog(log), [], 'and it answers the obligation');
@@ -1035,7 +1035,7 @@ describe('the answer link belongs to the correction chain', () => {
     log.renders = [{
       id: 'g-0001', url: 'https://a.govt.nz/apply', navigatedAt: iso(t - 80 * 60_000 + 10_000),
       permitId: 'p-0001', renderFile: 'g1.html', renderedSha256: sha256(html),
-      renderedBytes: Buffer.byteLength(html), accessBarriers: [], browserMode: 'headless',
+      renderedBytes: Buffer.byteLength(html), httpStatus: 200, accessBarriers: [], browserMode: 'headless',
     }];
     appendAttempt(log, {
       recordType: 'observation', permitId: 'p-0001', renderId: 'g-0001',
@@ -1043,7 +1043,7 @@ describe('the answer link belongs to the correction chain', () => {
       url: 'https://a.govt.nz/apply', status: 'discovery', discoveryKind: 'navigation',
       outcome: 'rendered', category: 'service-application', candidateSetVersion: 1,
       navigatedAt: iso(t - 80 * 60_000 + 10_000), approval: 'approved', evidence: 'rendered-dom',
-      renderFile: 'g1.html', renderedSha256: sha256(html), renderedBytes: Buffer.byteLength(html),
+      renderFile: 'g1.html', renderedSha256: sha256(html), renderedBytes: Buffer.byteLength(html), httpStatus: 200,
     });
     const observation = log.attempts.at(-1);
     log.candidateSets['A\u0000service-application'] = {
@@ -1057,7 +1057,7 @@ describe('the answer link belongs to the correction chain', () => {
       status: 'discovery', discoveryKind: 'navigation', outcome: 'no-candidates',
       category: 'service-application', candidateSetVersion: 1, navigationPerformed: false,
       checkedAt: iso(t), evidence: 'rendered-dom', renderFile: 'g1.html',
-      renderedSha256: sha256(html), renderedBytes: Buffer.byteLength(html), approval: 'approved',
+      renderedSha256: sha256(html), renderedBytes: Buffer.byteLength(html), httpStatus: 200, approval: 'approved',
       ...over,
     });
     return { dir, log, obligation, observation, judgement };

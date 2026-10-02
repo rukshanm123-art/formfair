@@ -94,10 +94,17 @@ export function buildPacket(log, { agency, category }) {
       // Amendment 50. A barrier the headed fallback cleared is an event, not lost coverage, and
       // listing it as NOT READ beside a successful read of the same URL misreports the round.
       const recoveredBarrier = r.outcome === 'retrieval-blocked' && !unresolvedIds.has(r.id);
+      // Amendment 54. A technical conclusion is said in its own words: the page WAS rendered and
+      // the server did not serve it, which is a different fact from a request that was barred.
+      // Calling it NOT READ would understate it - the bytes exist and were examined - and calling
+      // it read would overstate it, because nothing in them bears on candidates.
+      const serverFailure = r.recordType === 'technical-conclusion';
       anomalies.push(
-        recoveredBarrier
-          ? `barrier recovered (${r.outcome}, then read headed): ${r.discoveryKind} ${r.url}`
-          : `NOT READ (${r.outcome}): ${r.discoveryKind} ${r.url}${r.note ? ` - ${r.note}` : ''}`
+        serverFailure
+          ? `RENDERED BUT NOT SERVED (${r.outcome}): ${r.discoveryKind} ${r.url}${r.note ? ` - ${r.note}` : ''}`
+          : recoveredBarrier
+            ? `barrier recovered (${r.outcome}, then read headed): ${r.discoveryKind} ${r.url}`
+            : `NOT READ (${r.outcome}): ${r.discoveryKind} ${r.url}${r.note ? ` - ${r.note}` : ''}`
       );
     }
     if (r.outcome === 'disallowed') anomalies.push(`${r.method ?? r.discoveryKind} disallowed: ${r.url}${r.note ? ` - ${r.note}` : ''}`);

@@ -106,6 +106,11 @@ const USAGE = `usage:
                           [--reject --reason "<why>"]
                           (--url is refused once a URL has more than one attempt)
   cli-capture.mjs status  --out <dir>
+  cli-capture.mjs conclude-inconclusive --out <dir> --render <g-NNNN> --category <c>
+                          --set-version <n> --note "<why nothing can be read from it>"
+                          (for a render whose server did NOT serve the page: records
+                           retrieval-inconclusive. Refused if the render's own recorded
+                           HTTP status is 200-299, which must be judged on content instead.)
   cli-capture.mjs init    --out <dir>
                           (starts a scan: writes an empty log into a directory that holds
                            none. Every other command REFUSES a missing log rather than
@@ -1708,6 +1713,62 @@ function doAdoptRender() {
  * for account registration and `candidates-found` for service application, and tying the judgement
  * to the observation record made that impossible to express.
  */
+/**
+ * Records that a render cannot be read for candidates, because the server did not serve the page.
+ *
+ * Amendment 54. The outcome is not chosen here: it is fixed at `retrieval-inconclusive`, and
+ * `appendAttempt` refuses the record unless the RENDER's own recorded status is outside 200-299.
+ * So this command cannot dismiss a page the server actually served, and `classify-render` cannot
+ * read one it did not. The status is the registry's, not this command's.
+ */
+function doConcludeInconclusive() {
+  const dir = require_('out');
+  const logPath = logPathFor(dir);
+  const log = readLog(logPath);
+  const renderId = require_('render');
+  const category = require_('category');
+  const setVersion = Number(require_('set-version'));
+  if (!CATEGORIES.includes(category)) die(`--category must be one of ${CATEGORIES.join(', ')}`);
+  if (!Number.isInteger(setVersion) || setVersion < 1) die('--set-version must be a positive integer');
+
+  // The same file, digest and length verification every conclusion rests on.
+  const problems = assertRenderEvidenceUsable(log, { renderId, capturesRoot: resolve(dir) });
+  if (problems.length) die(`the render evidence cannot be relied on:\n  ${problems.join('\n  ')}`);
+  const render = findRender(log, renderId);
+  const observation = log.attempts.find(
+    (a) => a.renderId === renderId && a.recordType === 'observation'
+  );
+  if (!observation) die(`no observation introduced render ${renderId}`);
+
+  appendAttempt(log, {
+    recordType: 'technical-conclusion',
+    renderId,
+    evidenceFromDiscoveryId: observation.id,
+    examinedAt: now(), agency: observation.agency, website: observation.website, url: render.url,
+    status: 'discovery', discoveryKind: observation.discoveryKind,
+    outcome: 'retrieval-inconclusive',
+    category, candidateSetVersion: setVersion,
+    navigationPerformed: false,
+    checkedAt: now(),
+    evidence: 'rendered-dom',
+    renderFile: render.renderFile,
+    renderedSha256: render.renderedSha256,
+    renderedBytes: render.renderedBytes,
+    note: require_('note'),
+    approval: APPROVAL.APPROVED,
+  });
+  writeLog(logPath, log);
+  writeDerived({ log, dir, frameSha256: flag('frame-sha256'), drawOrderSha256: flag('draw-order-sha256'), synthetic: has('synthetic') });
+  const record = log.attempts.at(-1);
+  console.log(
+    `recorded ${record.id}: ${category} retrieval-inconclusive from ${renderId} (${observation.id}), ` +
+      `HTTP ${render.httpStatus}`
+  );
+  console.log('The render stays active: it happened. This concludes only that the server did not');
+  console.log('serve the page, so nothing on it bears on candidates. Counted as unresolved');
+  console.log('technical attrition. No request was made.');
+}
+
 function doClassifyRender() {
   const dir = require_('out');
   const logPath = logPathFor(dir);
@@ -2079,7 +2140,7 @@ function doInit() {
   console.log('nothing is captured yet; `next` names the first agency in the frozen draw order');
 }
 
-const commands = { init: doInit, packet: doPacket, candidates: doCandidates, lock: doLock, 'approve-set': doApproveSet,
+const commands = { init: doInit, packet: doPacket, 'conclude-inconclusive': doConcludeInconclusive, candidates: doCandidates, lock: doLock, 'approve-set': doApproveSet,
   'supersede-set': doSupersedeSet, publish: doPublish, next: doNext, capture: doCapture, exclude: doExclude, discovery: doDiscovery, budget: doBudget, approve: doApprove, status: doStatus, build: doBuild, exhaust: doExhaust, 'preflight-discovery': doPreflightDiscovery, 'reopen-set': doReopenSet, 'close-permit': doClosePermit,
   deviation: doDeviation, 'recheck-robots': doRecheckRobots, promote: doPromote,
   'not-selected': doNotSelected, 'correct-barriers': doCorrectBarriers, 're-resolve': doReResolve,

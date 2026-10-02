@@ -98,7 +98,43 @@ export const RECORD_TYPES = Object.freeze({
    * corrected metadata for the SAME retained bytes.
    */
   RECLASSIFICATION: 'reclassification',
+  /**
+   * A TECHNICAL conclusion about a render the server failed to serve. Amendment 54.
+   *
+   * `https://www.sia.govt.nz/search/SearchForm?Search=register` returned HTTP 500 - the agency's
+   * own themed error page, byte-identical for both search terms, while its home page returned 200.
+   * The render succeeded: a page loaded and its DOM was captured. What did not happen is the
+   * SEARCH, so nothing about the page bears on whether the agency publishes a registration form.
+   *
+   * A judgement may only record `candidates-found` or `no-candidates`, and Amendment 39 requires
+   * every rendered observation to carry one. `no-candidates` there would assert that the search
+   * found nothing - the overclaim already recorded against this study as deviation `v-0001`'s
+   * sibling `v-0002`, and the reason the ECART note had to be narrowed.
+   *
+   * So the fourth kind is named. It records `retrieval-inconclusive`, discharges the
+   * unjudged-render obligation, and counts as unresolved technical attrition: it contributes no
+   * read-content finding, no candidate and no recovered barrier. Which conclusion a render may
+   * carry is decided by the HTTP status the RENDER recorded, in both directions.
+   */
+  TECHNICAL_CONCLUSION: 'technical-conclusion',
 });
+
+/** The one outcome a technical conclusion may record. */
+export const TECHNICAL_CONCLUSION_OUTCOME = 'retrieval-inconclusive';
+
+/** Did the server actually serve the page? Read from the render, never from a conclusion. */
+export function isServedStatus(httpStatus) {
+  return Number.isInteger(httpStatus) && httpStatus >= 200 && httpStatus <= 299;
+}
+
+/**
+ * Is this a status a server actually sent? `0` is what a crashed or aborted fetch leaves behind,
+ * not a response, and reading it as "not served" would let a failed request pick the conclusion
+ * that suits it. Anything outside the HTTP range refuses every conclusion instead.
+ */
+export function isUsableStatus(httpStatus) {
+  return Number.isInteger(httpStatus) && httpStatus >= 100 && httpStatus <= 599;
+}
 
 /**
  * The outcomes that record attrition in the discovery method rather than a property of the
