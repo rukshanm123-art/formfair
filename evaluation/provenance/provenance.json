@@ -12,7 +12,7 @@
     "postLoadSettleMs": 2000
   },
   "counts": {
-    "discoveryPages": 879,
+    "discoveryPages": 890,
     "candidatesAssessed": 81,
     "captured": 9,
     "excluded": 46,
@@ -22,21 +22,21 @@
     "pendingApprovalCandidateSets": 1
   },
   "discoveryByMethod": {
-    "navigation": 327,
-    "internal-search": 332,
-    "sitemap": 136,
-    "robots": 84
+    "navigation": 329,
+    "internal-search": 338,
+    "sitemap": 138,
+    "robots": 85
   },
   "discoveryByOutcome": {
     "unrecorded": 15,
     "unavailable": 58,
-    "no-candidates": 330,
+    "no-candidates": 332,
     "disallowed": 52,
-    "candidates-found": 80,
+    "candidates-found": 83,
     "retrieval-blocked": 139,
-    "retrieval-inconclusive": 1,
+    "retrieval-inconclusive": 5,
     "robots-unestablished": 10,
-    "rendered": 194
+    "rendered": 196
   },
   "exhaustedAgencies": [
     {
@@ -66,17 +66,18 @@
     "disagreements": []
   },
   "technicalAttrition": {
-    "records": 150,
-    "active": 148,
+    "records": 154,
+    "active": 152,
     "superseded": 2,
     "byOutcome": {
       "retrieval-blocked": 139,
-      "retrieval-inconclusive": 1,
+      "retrieval-inconclusive": 5,
       "robots-unestablished": 10
     },
     "activeByOutcome": {
       "retrieval-blocked": 138,
-      "robots-unestablished": 10
+      "robots-unestablished": 10,
+      "retrieval-inconclusive": 4
     },
     "byOrigin": {
       "New Zealand Security Intelligence Service https://www.nzsis.govt.nz": 5,
@@ -97,7 +98,9 @@
       "Ministry for Culture and Heritage https://vietnamwar.govt.nz": 14,
       "Ministry for Culture and Heritage https://nzhistory.govt.nz": 14,
       "Ministry for Culture and Heritage https://teara.govt.nz": 14,
-      "Ministry for Culture and Heritage https://tetai.nz": 9
+      "Ministry for Culture and Heritage https://tetai.nz": 9,
+      "Social Investment Agency https://www.sia.govt.nz": 3,
+      "Social Investment Agency https://thehub.sia.govt.nz": 1
     }
   },
   "barriers": {
@@ -164,8 +167,8 @@
       "d-0893"
     ],
     "robotsUnestablished": 10,
-    "retrievalInconclusive": 0,
-    "unreadUrls": 54
+    "retrievalInconclusive": 4,
+    "unreadUrls": 58
   },
   "deviations": [
     {
@@ -8437,6 +8440,50 @@
       "browser": "Chromium 153.0.8010.12",
       "browserMode": "headless",
       "settleMs": 2000
+    },
+    {
+      "id": "g-0302",
+      "url": "https://thehub.sia.govt.nz/search/?query=register",
+      "finalUrl": "https://thehub.sia.govt.nz/search?query=register",
+      "navigatedAt": "2026-10-02T22:17:47Z",
+      "permitId": "p-0460",
+      "httpStatus": 200,
+      "loadState": "load",
+      "renderFile": "g1790979467592.html",
+      "renderedSha256": "118ae34089cd16837d2dbbcae0c80f14f323976432882fc0fb4ad7f36e5f268c",
+      "renderedBytes": 96098,
+      "domNodes": 918,
+      "linkCount": 31,
+      "formCount": 2,
+      "controlCount": 191,
+      "buttonCount": 14,
+      "accessBarriers": [],
+      "submissionProtection": [],
+      "browser": "Chromium 153.0.8010.12",
+      "browserMode": "headless",
+      "settleMs": 2000
+    },
+    {
+      "id": "g-0303",
+      "url": "https://thehub.sia.govt.nz/search/?query=sign+up",
+      "finalUrl": "https://thehub.sia.govt.nz/search?query=sign+up",
+      "navigatedAt": "2026-10-02T22:17:59Z",
+      "permitId": "p-0461",
+      "httpStatus": 200,
+      "loadState": "load",
+      "renderFile": "g1790979479384.html",
+      "renderedSha256": "ee3b9205e7c296e352167bd13892648c074ea8df22bac9e74abcc9bd37913481",
+      "renderedBytes": 95449,
+      "domNodes": 915,
+      "linkCount": 32,
+      "formCount": 2,
+      "controlCount": 191,
+      "buttonCount": 14,
+      "accessBarriers": [],
+      "submissionProtection": [],
+      "browser": "Chromium 153.0.8010.12",
+      "browserMode": "headless",
+      "settleMs": 2000
     }
   ],
   "renderBacklog": {
@@ -8444,8 +8491,8 @@
     "urls": 0
   },
   "permits": {
-    "issued": 459,
-    "consumed": 452,
+    "issued": 464,
+    "consumed": 457,
     "recordedLate": 9,
     "lateRecords": [
       {
@@ -8525,7 +8572,7 @@
     "closedRecordingFailed": 3,
     "closedDuplicateRequest": 3,
     "open": 0,
-    "networkRequestsAuthorised": 458,
+    "networkRequestsAuthorised": 463,
     "closures": [
       {
         "closureId": "x-0001",
@@ -8639,7 +8686,7 @@
     "Ministry for Culture and Heritage / account-registration v1": 57,
     "Ministry for Culture and Heritage / service-application v1": 74,
     "Ministry for Culture and Heritage / enquiry-or-contact v1": 72,
-    "Social Investment Agency / account-registration v1": 4
+    "Social Investment Agency / account-registration v1": 15
   },
   "candidateSets": [
     {
@@ -9648,15 +9695,36 @@
       "agency": "Social Investment Agency",
       "category": "account-registration",
       "version": 1,
-      "discovered": 0,
-      "locked": 0,
+      "discovered": 1,
+      "locked": 1,
       "droppedBeyondBound": 0,
-      "lockedAt": null,
+      "lockedAt": "2026-10-02T22:20:06Z",
       "approval": "pending",
       "approvedAt": null,
       "approvalNote": null,
-      "supportedByDiscoveryRecords": [],
-      "discoveryMethods": []
+      "supportedByDiscoveryRecords": [
+        "d-0957",
+        "d-0958",
+        "d-0959",
+        "d-0960",
+        "d-0961",
+        "d-0962",
+        "d-0963",
+        "d-0964",
+        "d-0965",
+        "d-0966",
+        "d-0967",
+        "d-0968",
+        "d-0969",
+        "d-0970",
+        "d-0971"
+      ],
+      "discoveryMethods": [
+        "internal-search",
+        "navigation",
+        "robots",
+        "sitemap"
+      ]
     }
   ],
   "supersededCandidateSets": [

@@ -296,3 +296,60 @@ describe('the corpus gate re-checks what write time allowed', () => {
     assert.ok(corpusBlockers(log).some((b) => b.kind === 'render-conclusion'));
   });
 });
+
+describe('the record-type lists cannot drift from the record types', () => {
+  test('every record type may rest on a render, in both implementations', async () => {
+    // How this was found: Amendment 54 added `technical-conclusion` and the render ledger's
+    // allowlist of three types was not extended, so the ledger refused every technical conclusion
+    // and the provenance publish failed on the first real use. That is the FIFTH hand-maintained
+    // list in this project to drift from what it enumerates, after the status totals, the
+    // `retrieved` state, `eligible-not-selected` and the CI test-file lists. The capture side is
+    // now derived from RECORD_TYPES; the sealer names its own list once, and this asserts the two
+    // agree, because the sealer may not import the capture package.
+    const { RENDER_BEARING_RECORD_TYPES } = await import('../../evaluation/solo/descriptive.mjs');
+    assert.deepEqual(
+      [...RENDER_BEARING_RECORD_TYPES].sort(),
+      Object.values(RECORD_TYPES).sort(),
+      'the sealer and the capture package disagree about which records may rest on a render'
+    );
+  });
+
+  test('a technical conclusion passes the render ledger', async () => {
+    // The exact failure, as a test: the ledger must accept the type the amendment introduced.
+    const { checkRenderLedger } = await import('../run.mjs');
+    const { mkdtempSync, writeFileSync, mkdirSync, rmSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const { createHash } = await import('node:crypto');
+    const dir = mkdtempSync(join(tmpdir(), 'formfair-ledger-'));
+    try {
+      const html = '<!doctype html><html><body>Server error</body></html>';
+      mkdirSync(join(dir, 'rendered'), { recursive: true });
+      writeFileSync(join(dir, 'rendered', 'g1.html'), html, 'utf8');
+      const digest = createHash('sha256').update(html).digest('hex');
+      const log = {
+        ...emptyLog(),
+        discoveryPermits: [{
+          id: 'p-0458', url: URL_, agency: AGENCY, category: CAT, candidateSetVersion: 1,
+          issuedAt: '2026-10-02T20:48:30Z', consumedAt: '2026-10-02T20:49:00Z',
+          robotsCheckId: 'r-0083',
+        }],
+        robotsChecks: [{
+          id: 'r-0083', origin: 'https://www.sia.govt.nz', url: 'https://www.sia.govt.nz/robots.txt',
+          fetchedAt: '2026-10-02T20:48:00Z', httpStatus: 200, disposition: 'rules',
+          sha256: 'd'.repeat(64), bytes: 59, body: 'User-agent: *\n',
+        }],
+        renders: [{
+          ...render({ renderFile: 'g1.html', renderedSha256: digest, renderedBytes: html.length }),
+        }],
+        attempts: [
+          observation(),
+          conclusion({ renderFile: 'g1.html', renderedSha256: digest, renderedBytes: html.length }),
+        ],
+      };
+      assert.deepEqual(checkRenderLedger(log, join(dir, 'rendered')), []);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

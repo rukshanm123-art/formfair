@@ -4473,7 +4473,26 @@ modelled. The write-time check also had to move AFTER the lineage rules in `appe
 firing first it masked the more specific complaint about an answered record's agency, round or page
 — this rule decides which conclusion is permissible once the lineage is sound, not instead of it.
 
-The capture suite is **665** tests and the solo suite **152**.
+The capture suite is **667** tests and the solo suite **152**.
+
+### The freeze was incomplete, and using it found that out
+
+*Corrected in `selection-v1.0.51`, `capture-v1.0.26` and `solo-protocol-v1.0.31`.*
+
+`selection-v1.0.50`, `capture-v1.0.25` and `solo-protocol-v1.0.30` were tagged with green CI, and
+the first real use failed: `publish` refused with *"d-0962 cites render g-0301 but is neither an
+observation nor a judgement"*. The render ledger carried its own allowlist of three record types,
+and Amendment 54 added a fourth without extending it, so the ledger rejected the very record the
+amendment exists to permit. No test caught it because every fixture tested the rule, not the ledger.
+
+That is the **fifth** hand-maintained list in this project to drift from what it enumerates, after
+the status totals, the `retrieved` state, `eligible-not-selected` and the CI test-file lists. The
+capture allowlist is now derived from `RECORD_TYPES`; the sealer, which may not import it, names
+`RENDER_BEARING_RECORD_TYPES` once; and two tests hold the repair — one asserting the two
+implementations list the same types, one driving a technical conclusion through the render ledger.
+
+The lesson is narrower than "test more": a rule frozen before use was still frozen incompletely,
+because the tests exercised the new rule and not the gates the new record has to pass through.
 
 ### What this does not change
 

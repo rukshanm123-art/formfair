@@ -3688,11 +3688,17 @@ export function checkRenderLedger(log, renderedDir) {
         );
       }
       // Amendment 48: a reclassification is the third legitimate kind of record resting on a render.
-      if (![RECORD_TYPES.OBSERVATION, RECORD_TYPES.JUDGEMENT_ONLY, RECORD_TYPES.RECLASSIFICATION]
+      // Amendment 54 added the fourth type and this list did not follow it, so the render ledger
+      // refused every technical conclusion and the provenance publish failed. Derived from
+      // RECORD_TYPES now rather than retyped - the fifth hand-maintained list in this project to
+      // drift from what it enumerates.
+      if (!Object.values(RECORD_TYPES)
             .includes(a.recordType)) {
         problems.push(
-          `${a.id} cites render ${a.renderId} but is neither an observation nor a judgement; a ` +
-            'record resting on rendered evidence must say which it is'
+          `${a.id} cites render ${a.renderId} with recordType ` +
+            `${JSON.stringify(a.recordType)}, which is not one of ` +
+            `${Object.values(RECORD_TYPES).join(', ')}; a record resting on rendered evidence ` +
+            'must say which kind it is'
         );
       }
       // A judgement may not rest on a challenge document.

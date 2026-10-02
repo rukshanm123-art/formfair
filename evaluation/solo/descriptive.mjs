@@ -542,6 +542,11 @@ export function renderConclusionProblems(log) {
   return problems;
 }
 
+/** The record types that may rest on a render. Mirrors the capture package's RECORD_TYPES. */
+export const RENDER_BEARING_RECORD_TYPES = Object.freeze([
+  'observation', 'judgement-only', 'reclassification', 'technical-conclusion',
+]);
+
 export function unjudgedRenderProblems(log) {
   const problems = [];
   const attempts = Array.isArray(log.attempts) ? log.attempts : [];
@@ -785,7 +790,11 @@ export function renderLedgerProblems(log, renderedDir) {
       if (canon(render.url) !== canon(a.url)) {
         problems.push(`${a.id} cites render ${render.id} of a different page`);
       }
-      if (!['observation', 'judgement-only', 'reclassification'].includes(a.recordType)) {
+      // solo-protocol-v1.0.31. Amendment 54's fourth type, `technical-conclusion`. Named in one
+      // place in this file so the sealer's list cannot drift from the capture package's the way
+      // this one did: the capture allowlist was not extended with the type, so the render ledger
+      // refused every technical conclusion and the provenance publish failed.
+      if (!RENDER_BEARING_RECORD_TYPES.includes(a.recordType)) {
         problems.push(`${a.id} cites render ${a.renderId} but is neither an observation nor a judgement`);
       }
       if (a.recordType === 'judgement-only' && (render.accessBarriers ?? []).length > 0) {
