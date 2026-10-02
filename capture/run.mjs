@@ -74,11 +74,80 @@ export function emptyLog() {
   };
 }
 
+/**
+ * The artefacts a capture directory holds besides the log. `init` refuses to write a log beside
+ * any of them, because that state means a log was lost or the path is wrong.
+ */
+export const CAPTURE_ARTEFACTS = Object.freeze([
+  'captures', 'rendered', 'quarantine', 'selection-ledger.csv', 'provenance.json', 'corpus.json',
+]);
+
+/**
+ * Reads the log, or refuses. It never invents one.
+ *
+ * Amendment 52. This returned `emptyLog()` for a path that did not exist, so a mistyped `--out`
+ * did not fail - it answered, about a scan that had not happened. The command that exposed it was
+ * `npm --prefix capture run approve-set -- --out evaluation/data/capture`, which reads correctly
+ * from the repository root and is wrong: `npm run` executes with the PACKAGE directory as its cwd,
+ * so the path resolved to `capture/evaluation/data/capture`. The same slip on a read-only command
+ * reported Te Puni Kokiri, agency 1 of the frozen draw order, finished five agencies earlier, as
+ * current work.
+ *
+ * Nothing was written that time, but only because the command happened to be read-only. A write
+ * would have begun a second log in the wrong place, and a discovery command would have fetched
+ * robots.txt and issued permits against a log that believes no politeness has been spent yet.
+ *
+ * So the default is removed rather than guarded at each call site, and starting a scan is an
+ * explicit act: `init`. The message carries the RESOLVED path, because the whole difficulty is
+ * that the operator cannot see the resolution in the command they typed.
+ */
 export function readLog(path) {
-  if (!existsSync(path)) return emptyLog();
-  const log = JSON.parse(readFileSync(path, 'utf8'));
+  const resolved = resolve(path);
+  if (!existsSync(resolved)) {
+    throw new Error(
+      `no capture log at ${resolved}\n` +
+        '  Nothing was read, written or requested.\n' +
+        '  To start a new scan here:   init --out <dir>\n' +
+        '  For an existing scan, check --out: a relative path resolves against the current\n' +
+        '  directory, and `npm --prefix capture run` makes that the capture/ directory. Prefer\n' +
+        '  running from the repository root with an absolute path:\n' +
+        '    node capture/cli-capture.mjs <command> --out "$PWD/evaluation/data/capture"'
+    );
+  }
+  const log = JSON.parse(readFileSync(resolved, 'utf8'));
   if (log.schema !== LOG_SCHEMA) throw new Error(`capture log schema must be ${LOG_SCHEMA}`);
   return log;
+}
+
+/**
+ * Starts a scan: writes an empty log, once, into a directory that holds no scan already.
+ *
+ * Deliberately a command of its own rather than a flag. A general `--init` could accompany any
+ * other operation and create the very log that operation was supposed to find, which is the
+ * failure this amendment exists to close, reintroduced one layer up.
+ */
+export function initLog(dir) {
+  const root = resolve(dir);
+  const path = join(root, 'capture-log.json');
+  if (existsSync(path)) {
+    throw new Error(
+      `a capture log already exists at ${path}\n` +
+        '  init never overwrites one. A scan in progress is the evidence; starting again would ' +
+        'discard it.'
+    );
+  }
+  const orphaned = CAPTURE_ARTEFACTS.filter((name) => existsSync(join(root, name)));
+  if (orphaned.length) {
+    throw new Error(
+      `${root} already holds capture artefacts (${orphaned.join(', ')}) but no capture-log.json\n` +
+        '  A log written here would disclaim the evidence sitting beside it. Either this is the ' +
+        'wrong\n  --out, or a log was lost and belongs in a recovery, not a fresh scan.'
+    );
+  }
+  // `writeLog` creates the directory and writes through a temporary file, so a reader never sees
+  // a partial log.
+  writeLog(path, emptyLog());
+  return path;
 }
 
 /** Atomic write: a crash mid-write must not leave a half-parsed authoritative record. */

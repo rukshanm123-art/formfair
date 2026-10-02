@@ -15,7 +15,7 @@ export const SOLO_CORPUS_TAG = 'corpus-v1.0.0';
  * sealing rules produced it - and those rules changed materially at solo-protocol-v1.0.2, when the
  * seal began verifying exhaustion records against the capture log instead of trusting their shape.
  */
-export const SOLO_SEALER_TAG = 'solo-protocol-v1.0.27';
+export const SOLO_SEALER_TAG = 'solo-protocol-v1.0.28';
 
 /**
  * Identity of the checkout doing the sealing. A real seal requires it clean and tagged, on the

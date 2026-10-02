@@ -40,6 +40,7 @@ import {
   findRenderForUrl, assertRenderEvidenceUsable, assertPermitUsable, adoptRender,
   reResolveCandidateSet, staleSetBindings,
   barrierAccounting, readContentUrls,
+  initLog,
 } from './run.mjs';
 import { fetchRobotsPolicy, evaluatePolicy, DISPOSITION } from './robots-policy.mjs';
 import {
@@ -105,6 +106,10 @@ const USAGE = `usage:
                           [--reject --reason "<why>"]
                           (--url is refused once a URL has more than one attempt)
   cli-capture.mjs status  --out <dir>
+  cli-capture.mjs init    --out <dir>
+                          (starts a scan: writes an empty log into a directory that holds
+                           none. Every other command REFUSES a missing log rather than
+                           starting one, so a mistyped --out fails instead of answering.)
   cli-capture.mjs build   --out <dir> --frame-sha256 <hex> --draw-order-sha256 <hex>
 
 Politeness policy (not overridable): one capture at a time, >=${POLICY.minDelayBetweenNavigationsMs / 1000}s between
@@ -2060,7 +2065,21 @@ function doClosePermit() {
   }
 }
 
-const commands = { packet: doPacket, candidates: doCandidates, lock: doLock, 'approve-set': doApproveSet,
+/**
+ * Starts a scan in an empty directory. The only command that may run without a log.
+ *
+ * Amendment 52. Everything else refuses a missing log rather than inventing one, so there has to
+ * be one explicit way to make the first one - and exactly one, named, so it cannot happen by
+ * accident as a side effect of something else.
+ */
+function doInit() {
+  const dir = require_('out');
+  const path = initLog(dir);
+  console.log(`initialised an empty capture log at ${path}`);
+  console.log('nothing is captured yet; `next` names the first agency in the frozen draw order');
+}
+
+const commands = { init: doInit, packet: doPacket, candidates: doCandidates, lock: doLock, 'approve-set': doApproveSet,
   'supersede-set': doSupersedeSet, publish: doPublish, next: doNext, capture: doCapture, exclude: doExclude, discovery: doDiscovery, budget: doBudget, approve: doApprove, status: doStatus, build: doBuild, exhaust: doExhaust, 'preflight-discovery': doPreflightDiscovery, 'reopen-set': doReopenSet, 'close-permit': doClosePermit,
   deviation: doDeviation, 'recheck-robots': doRecheckRobots, promote: doPromote,
   'not-selected': doNotSelected, 'correct-barriers': doCorrectBarriers, 're-resolve': doReResolve,

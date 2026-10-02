@@ -173,6 +173,12 @@ const lockSet = async (dir, agency, category, urls) => {
 const inTemp = async (fn) => {
   const dir = mkdtempSync(join(tmpdir(), 'formfair-cli-'));
   try {
+    // capture-v1.0.23 (Amendment 52). A scan is started explicitly. These tests used to rely on
+    // the first command creating the log, which is the behaviour that let a mistyped `--out`
+    // answer about a scan that had not happened - so the end-to-end path now begins the way the
+    // operator's does, with `init`.
+    const started = await run(['init', '--out', dir]);
+    assert.equal(started.status, 0, started.stderr);
     return await fn(dir);
   } finally {
     rmSync(dir, { recursive: true, force: true });

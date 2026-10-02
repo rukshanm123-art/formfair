@@ -4182,3 +4182,104 @@ declaring a page eligible.
 prompted them, against the name fields of captures already approved — which must keep them — and
 against the near misses: a deceased person's name on an order form is collected, the same name on a
 record search is not.
+
+## Amendment 52 — a missing capture log is refused, never invented
+
+*Frozen as `selection-v1.0.48`, `capture-v1.0.23` and `solo-protocol-v1.0.28`, 2 October 2026.*
+
+No live record changes and no page is requested again. The capture log's SHA-256 is
+`152d0d177ee1deb610a28339ef7b69b1d2d22fe6c680f8e123ea182624887744` before and after this
+amendment.
+
+### What was wrong
+
+`readLog` returned `emptyLog()` for a path that did not exist. A mistyped `--out` therefore did not
+fail — it answered, about a scan that had not happened.
+
+It was found by running an approval exactly as written:
+
+```
+npm --prefix capture run approve-set -- --out evaluation/data/capture ...
+```
+
+which reads correctly from the repository root and is wrong. `npm run` executes with the **package**
+directory as its cwd, so the path resolved to `capture/evaluation/data/capture`. The approval
+reported `no candidate set for Ministry for Culture and Heritage / account-registration`. The same
+slip on a read-only command reported:
+
+```
+agency:   Te Puni Kōkiri
+category: account-registration
+next:     record discovered candidates, then lock the set
+```
+
+That is agency 1 of the frozen draw order, completed five agencies earlier, presented as current
+work — with a clean exit status.
+
+### Why this is not a usability complaint
+
+Nothing was written that time, but only because the command happened to be read-only. The same
+mistake on a write command would have begun a **second log** in the wrong place. On a discovery
+command it would have fetched `robots.txt` and issued permits against a log that believes no
+politeness has yet been spent — so the pacing floor, the one-retry rule and the 24-hour robots
+freshness window would all have been computed from an empty history while the real history sat in
+another directory. An audit trail whose completeness is the whole claim cannot have a second copy
+that nobody knows about.
+
+This is the same defect family as the drifted lists of Amendments 41, 45, 49 and 50: a default that
+makes a wrong input look like a valid state.
+
+### The rule
+
+1. `readLog` refuses a missing log. It never returns `emptyLog()` implicitly, and the default is
+   removed rather than guarded at each of its thirty call sites.
+2. `init --out <dir>` is the one way to start a scan. It is a **command**, not a flag: a general
+   `--init` could accompany any other operation and create the very log that operation was supposed
+   to find, which is this defect reintroduced one layer up.
+3. `init` refuses a directory that already holds a log, and refuses one that holds capture
+   artefacts (`captures/`, `rendered/`, `quarantine/`, the ledger, the provenance) beside no log —
+   that state means a log was lost or the path is wrong, and a fresh log written there would
+   disclaim the evidence next to it. It writes through a temporary file and renames, so no reader
+   sees a partial log.
+4. Every other command — `status`, `next`, `packet`, `budget`, discovery and capture alike —
+   refuses before creating any directory, fetching `robots.txt`, issuing a permit or making any
+   request. The refusal is first because `readLog` is first; a structural test holds that ordering.
+5. The error prints the **resolved** path, because the difficulty is precisely that the operator
+   cannot see the resolution in the command they typed, and it names `init`.
+
+### Tests
+
+`capture/test/fail-closed-log.test.mjs` (15) reproduces the original mistake rather than an
+abstraction of it: it runs the CLI from the `capture/` directory — which is where
+`npm --prefix capture run` puts the cwd — with the repository-root-relative path that looked right,
+and asserts a non-zero exit, the resolved path in the message, no mention of agency 1, and that no
+shadow directory is created. Read-only commands must fail rather than describe an empty scan.
+Write and network commands must leave the temporary directory completely empty, which is how the
+test establishes that no permit was issued and no `robots.txt` fetched. Explicit `init` is then
+followed by normal operation. One test is structural, in the spirit of Amendment 49: it parses
+`cli-capture.mjs` and asserts that no `do*` function creates a directory, writes a file, launches a
+browser or fetches anything before it has reached `readLog`. That test passed before the fix — the
+ordering was already right — and it is there so it stays right.
+
+Fourteen of the fifteen failed before the change and pass after it. Seven existing end-to-end tests
+also failed, because they relied on the first command creating the log: `inTemp` now begins with
+`init`, so the end-to-end path starts the way the operator's does. The capture suite is **597**
+tests and the solo suite **152**.
+
+### The operating convention
+
+Prefer running from the repository root with an absolute output path, which cannot be re-resolved
+by whatever launches the command:
+
+```
+node capture/cli-capture.mjs status --out "$PWD/evaluation/data/capture"
+```
+
+### What this does not change
+
+The frozen method, the frozen criteria, the priority order and the robots procedure are untouched.
+The Ministry for Culture and Heritage account-registration set remains approved as recorded, with
+`approvalNote: null` — the approval timestamp, the locked set, the packet and this protocol are the
+audit trail, and a null note honestly records that none accompanied the decision rather than one
+retrofitted afterwards. All earlier tags are preserved and unmoved, including the three revoked
+under Amendment 47.
