@@ -12,7 +12,7 @@
     "postLoadSettleMs": 2000
   },
   "counts": {
-    "discoveryPages": 873,
+    "discoveryPages": 875,
     "candidatesAssessed": 72,
     "captured": 8,
     "excluded": 44,
@@ -23,7 +23,7 @@
   },
   "discoveryByMethod": {
     "navigation": 325,
-    "internal-search": 328,
+    "internal-search": 330,
     "sitemap": 136,
     "robots": 84
   },
@@ -32,7 +32,7 @@
     "unavailable": 58,
     "no-candidates": 330,
     "disallowed": 52,
-    "candidates-found": 78,
+    "candidates-found": 80,
     "retrieval-blocked": 139,
     "retrieval-inconclusive": 1,
     "robots-unestablished": 10,
@@ -8513,7 +8513,7 @@
     "New Zealand Defence Force / enquiry-or-contact v1": 64,
     "Health New Zealand / account-registration v1": 67,
     "Ministry for Culture and Heritage / account-registration v1": 57,
-    "Ministry for Culture and Heritage / service-application v1": 72,
+    "Ministry for Culture and Heritage / service-application v1": 74,
     "Ministry for Culture and Heritage / enquiry-or-contact v1": 72
   },
   "candidateSets": [
@@ -9344,7 +9344,7 @@
       "droppedBeyondBound": 1,
       "lockedAt": "2026-10-02T19:04:06Z",
       "approval": "approved",
-      "approvedAt": "2026-10-02T19:27:32Z",
+      "approvedAt": "2026-10-02T20:12:21Z",
       "approvalNote": null,
       "supportedByDiscoveryRecords": [
         "d-0787",
@@ -9401,8 +9401,8 @@
         "d-0838",
         "d-0839",
         "d-0840",
-        "d-0841",
-        "d-0842",
+        "d-0946",
+        "d-0947",
         "d-0843",
         "d-0844",
         "d-0845",
@@ -9431,10 +9431,10 @@
       "agency": "Ministry for Culture and Heritage",
       "category": "enquiry-or-contact",
       "version": 1,
-      "discovered": 5,
+      "discovered": 7,
       "locked": 5,
-      "droppedBeyondBound": 0,
-      "lockedAt": "2026-10-02T20:03:42Z",
+      "droppedBeyondBound": 2,
+      "lockedAt": "2026-10-02T20:11:19Z",
       "approval": "pending",
       "approvedAt": null,
       "approvalNote": null,
