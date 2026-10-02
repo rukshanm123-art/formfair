@@ -13,9 +13,9 @@
   },
   "counts": {
     "discoveryPages": 801,
-    "candidatesAssessed": 67,
+    "candidatesAssessed": 72,
     "captured": 8,
-    "excluded": 39,
+    "excluded": 44,
     "failed": 1,
     "captureBlocked": 0,
     "pendingApprovalAttempts": 5,
