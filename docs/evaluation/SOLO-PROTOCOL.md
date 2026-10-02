@@ -4249,7 +4249,7 @@ makes a wrong input look like a valid state.
 
 ### Tests
 
-`capture/test/fail-closed-log.test.mjs` (15) reproduces the original mistake rather than an
+`capture/test/fail-closed-log.test.mjs` (18) reproduces the original mistake rather than an
 abstraction of it: it runs the CLI from the `capture/` directory — which is where
 `npm --prefix capture run` puts the cwd — with the repository-root-relative path that looked right,
 and asserts a non-zero exit, the resolved path in the message, no mention of agency 1, and that no
@@ -4261,10 +4261,16 @@ followed by normal operation. One test is structural, in the spirit of Amendment
 browser or fetches anything before it has reached `readLog`. That test passed before the fix — the
 ordering was already right — and it is there so it stays right.
 
-Fourteen of the fifteen failed before the change and pass after it. Seven existing end-to-end tests
-also failed, because they relied on the first command creating the log: `inTemp` now begins with
-`init`, so the end-to-end path starts the way the operator's does. The capture suite is **597**
-tests and the solo suite **152**.
+Fourteen of the first fifteen failed before the change and pass after it. Seven existing end-to-end
+tests also failed, because they relied on the first command creating the log: `inTemp` now begins
+with `init`, so the end-to-end path starts the way the operator's does.
+
+`discovery`, `render-discovery` and `recheck-robots` are covered by name as well, since those are
+the paths that would otherwise spend politeness against a log holding no record of what has already
+been spent. They were added immediately after `selection-v1.0.48`, `capture-v1.0.23` and
+`solo-protocol-v1.0.28` were pushed and CI passed: those tags are accurate for the commit they
+point at, where the suite was 597, and the figures here describe the current head — 600 in the
+capture suite and 152 in the solo suite. No tag is moved to accommodate the difference.
 
 ### The operating convention
 

@@ -99,6 +99,16 @@ describe('write and network commands do nothing at all', () => {
       '--page-id', 'a-c', '--category', 'enquiry-or-contact', '--evidence', 'x'],
     ['preflight-discovery', '--agency', 'A', '--website', 'https://a.govt.nz/',
       '--url', 'https://a.govt.nz/', '--category', 'enquiry-or-contact', '--set-version', '1'],
+    // Named explicitly because these are the paths that would otherwise spend politeness
+    // against a log with no record of what has already been spent.
+    ['discovery', '--agency', 'A', '--website', 'https://a.govt.nz/', '--url', 'https://a.govt.nz/',
+      '--permit-id', 'p-0001', '--method', 'navigation', '--outcome', 'no-candidates',
+      '--category', 'enquiry-or-contact', '--set-version', '1',
+      '--navigated-at', '2026-10-02T00:00:00Z'],
+    ['render-discovery', '--agency', 'A', '--website', 'https://a.govt.nz/',
+      '--url', 'https://a.govt.nz/', '--permit-id', 'p-0001', '--method', 'navigation',
+      '--category', 'enquiry-or-contact', '--set-version', '1'],
+    ['recheck-robots', '--origin', 'https://a.govt.nz'],
     ['candidates', '--agency', 'A', '--category', 'enquiry-or-contact', '--none'],
     ['approve-set', '--agency', 'A', '--category', 'enquiry-or-contact'],
     ['exhaust'],
