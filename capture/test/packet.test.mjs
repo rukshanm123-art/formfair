@@ -88,6 +88,13 @@ describe('the approval packet', () => {
     // selection-v1.0.21: the claim now states its own basis. It may only say the category yields
     // nothing when every inspection was actually READ; where an origin could not be read, the
     // same sentence would be a prevalence finding no inspection supports.
-    assert.match(text, /none - every inspection was read, and this category yields no eligible form/);
+    //
+    // capture-v1.0.22 (Amendment 50): the basis is now the count of CONTENT URLs read, not of
+    // "inspections". An inspection is any discovery record, including the robots-policy record
+    // that fetches no content - so "every inspection was read" counted a record that reads
+    // nothing towards the coverage the sentence claims.
+    assert.match(text, /none - all 1 content URL\(s\) across 1 origin\(s\) were read, and this/);
+    assert.match(text, /category yields no eligible form/);
+    assert.doesNotMatch(text, /every inspection was read/);
   });
 });

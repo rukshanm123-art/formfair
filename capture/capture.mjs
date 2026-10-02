@@ -251,12 +251,49 @@ export async function detectBlocking(page, httpStatus) {
       )
     );
 
+    // Amendment 51. The structural facts about every visible name-like field, classified OUTSIDE
+    // the page by `classifyNameField`. The page reports; it does not judge.
+    const NAME_IN_PAGE =
+      /(^|[^a-z])(name|first[_\s-]?names?|given[_\s-]?names?|sur[_\s-]?name|last[_\s-]?name|family[_\s-]?name|fore[_\s-]?names?|full[_\s-]?name|middle[_\s-]?names?|preferred[_\s-]?name|maiden[_\s-]?name)([^a-z]|$)/i;
+    const labelFor = (i) => {
+      const byFor = i.id ? document.querySelector(`label[for="${i.id}"]`) : null;
+      const el = byFor ?? i.closest('label');
+      return (el?.innerText ?? el?.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 80);
+    };
+    const nameFieldFacts = textInputs
+      .map((i) => {
+        const label = labelFor(i);
+        const aria = (i.getAttribute('aria-label') ?? '').trim();
+        if (!NAME_IN_PAGE.test(`${i.name} ${i.id} ${label} ${aria}`)) return null;
+        const form = i.closest('form');
+        const submits = form
+          ? [...form.querySelectorAll('input[type="submit"], input[type="button"], button')]
+              .filter(visible)
+              .map((b) => (b.tagName === 'INPUT' ? (b.value ?? '') : (b.innerText ?? b.textContent ?? ''))
+                .replace(/\s+/g, ' ').trim())
+          : [];
+        return {
+          name: i.name || i.id || '(unnamed)',
+          id: i.id || null,
+          label: label || null,
+          ariaLabel: aria || null,
+          formAction: form?.getAttribute('action') ?? null,
+          formRole: form?.getAttribute('role') ?? null,
+          formId: form?.id ?? null,
+          formClass: form?.getAttribute('class') ?? null,
+          submitLabels: submits.slice(0, 6),
+        };
+      })
+      .filter(Boolean)
+      .slice(0, 20);
+
     return {
       challenge,
       passwords,
       saysSignIn,
       asksForAName,
       registrationAffordances,
+      nameFieldFacts,
       contentInputs: contentInputs.length,
       textareas: textareas.length,
       readableOutsideCredentials:
@@ -300,9 +337,82 @@ export async function detectBlocking(page, httpStatus) {
 
   // Recorded structurally, so the decision not to call this a sign-in wall is auditable rather
   // than implicit in a barrier's absence.
+  // Amendment 51. Reported, never decisive. A page whose only name fields are search keys is NOT
+  // barred and NOT excluded here - the researcher asserts criterion 3 at the approval gate, and
+  // this is the structural evidence that assertion has to be consistent with.
+  const nameFields = (found.nameFieldFacts ?? []).map(classifyNameField);
   return {
     accessBarriers, submissionProtection, authenticationSignals,
     registrationAffordances: found.registrationAffordances ?? [],
+    nameFields,
+    collectedNameFields: nameFields.filter((f) => f.role === 'collection').length,
+    searchKeyNameFields: nameFields.filter((f) => f.role === 'query').length,
+  };
+}
+
+/**
+ * Amendment 51. A personal-name field that is a SEARCH KEY does not satisfy criterion 3.
+ *
+ * Criterion 3 asks whether the page "asks for the name of a natural person". Two Ministry for
+ * Culture and Heritage pages - `28maoribattalion.org.nz` (`d-0736`) and `vietnamwar.govt.nz`
+ * (`d-0741`) - carry record-search forms whose controls are `field_surname_value` labelled
+ * "Surname" and `field_forename_value` labelled "Forename(s)". Read literally those pages ask for
+ * a person's name. They are nonetheless not what criterion 3 describes: the name is a QUERY
+ * against existing records, not something the form COLLECTS, and the frozen annotation definition
+ * excludes search boxes. Admitting them would have put a finding aid into a corpus of name-entry
+ * forms and measured the length limit of a search key as though it constrained someone's name.
+ *
+ * The distinction is collection as part of the form's transaction versus querying existing
+ * records. It is NOT first-party versus third-party identity: a service form asking for a child's,
+ * a dependent's or a representative's name collects the name of a natural person and does satisfy
+ * criterion 3. Whose name it is does not matter; what the form does with it does.
+ *
+ * Pure, and separate from `detectBlocking`'s barrier logic, which this deliberately does not
+ * touch: barrier classification decides whether a page could be READ, and a mistake there bars a
+ * page from assessment altogether. This only reports, in the same way Amendment 46 reports
+ * registration affordances - the researcher still asserts criterion 3 at the approval gate, and
+ * no field here admits or excludes a page on its own.
+ */
+export const NAME_FIELD_HINT =
+  /(^|[^a-z])(name|first[_\s-]?names?|given[_\s-]?names?|sur[_\s-]?name|last[_\s-]?name|family[_\s-]?name|fore[_\s-]?names?|full[_\s-]?name|middle[_\s-]?names?|preferred[_\s-]?name|maiden[_\s-]?name)([^a-z]|$)/i;
+
+/** A submit control that runs a query rather than lodging the form's transaction. */
+export const QUERY_SUBMIT_LABEL = /^\s*(search|find|look\s?up|browse|filter|refine|go)\b/i;
+
+/** A form whose own identity says it queries records. `archway` is Archives NZ's finding aid. */
+export const QUERY_FORM_SIGNAL =
+  /(^|[^a-z])(search|find|results?|query|keywords?|browse|look-?up|catalogue?|archway|finding-?aid|recordsearch)([^a-z]|$)/i;
+
+/**
+ * Is this name field COLLECTED by the form, or used to QUERY records?
+ *
+ * Takes the structural facts the page yielded - never live DOM - so it is unit-testable against
+ * the exact layouts that prompted it. Returns the basis as well as the role, because a reader
+ * auditing a criterion-3 assertion needs to see WHY a field was read as a search key.
+ */
+export function classifyNameField(facts = {}) {
+  const own = `${facts.name ?? ''} ${facts.id ?? ''} ${facts.label ?? ''} ${facts.ariaLabel ?? ''}`;
+  const submits = (facts.submitLabels ?? []).filter((l) => String(l ?? '').trim() !== '');
+  const bases = [];
+  // The field names itself a search key.
+  if (QUERY_FORM_SIGNAL.test(own)) bases.push('field named as a search key');
+  // The containing form names itself a query.
+  if (QUERY_FORM_SIGNAL.test(facts.formAction ?? '')) bases.push('form action queries records');
+  if ((facts.formRole ?? '') === 'search') bases.push('form carries role="search"');
+  if (QUERY_FORM_SIGNAL.test(`${facts.formId ?? ''} ${facts.formClass ?? ''}`)) {
+    bases.push('form identified as a search');
+  }
+  // EVERY submit control runs a query. One "Search" button beside an "Apply" button leaves the
+  // form a collection form with a search facility in it, so this requires unanimity and at least
+  // one control: a form with no submit control at all establishes nothing either way.
+  if (submits.length > 0 && submits.every((l) => QUERY_SUBMIT_LABEL.test(l))) {
+    bases.push(`submit control(s) labelled ${submits.map((l) => JSON.stringify(l)).join(', ')}`);
+  }
+  return {
+    name: facts.name ?? null,
+    label: facts.label ?? null,
+    role: bases.length > 0 ? 'query' : 'collection',
+    basis: bases,
   };
 }
 

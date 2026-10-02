@@ -16,6 +16,7 @@ import {
   setKey, CATEGORY_ORDER, SEARCH_TERMS, MAX_CANDIDATES_PER_CATEGORY,
   TECHNICAL_ATTRITION_OUTCOMES,
 } from './selection.mjs';
+import { barrierAccounting, readContentUrls } from './run.mjs';
 
 const pad = (s, n) => String(s).padEnd(n);
 
@@ -53,6 +54,12 @@ export function buildPacket(log, { agency, category }) {
       })),
   }));
 
+  // Amendment 50. Computed here because the anomaly list and the per-origin breakdown both need it.
+  const scope = { agency, category, candidateSetVersion: set.version };
+  // Which barrier records remain UNRESOLVED. Needed by the anomaly list and the per-origin
+  // breakdown alike, so it is computed once, before either.
+  const unresolvedIds = new Set(barrierAccounting(log, scope).unresolvedRecords);
+
   // Anything a reviewer should look at twice, most decision-relevant first.
   const anomalies = [];
   // Built from active records: a withdrawn finding is not something to attend to.
@@ -84,8 +91,13 @@ export function buildPacket(log, { agency, category }) {
     // decision-relevant thing in a packet whose candidate list is empty, because it decides
     // whether the emptiness says anything about the agency at all.
     if (TECHNICAL_ATTRITION_OUTCOMES.includes(r.outcome)) {
+      // Amendment 50. A barrier the headed fallback cleared is an event, not lost coverage, and
+      // listing it as NOT READ beside a successful read of the same URL misreports the round.
+      const recoveredBarrier = r.outcome === 'retrieval-blocked' && !unresolvedIds.has(r.id);
       anomalies.push(
-        `NOT READ (${r.outcome}): ${r.discoveryKind} ${r.url}${r.note ? ` - ${r.note}` : ''}`
+        recoveredBarrier
+          ? `barrier recovered (${r.outcome}, then read headed): ${r.discoveryKind} ${r.url}`
+          : `NOT READ (${r.outcome}): ${r.discoveryKind} ${r.url}${r.note ? ` - ${r.note}` : ''}`
       );
     }
     if (r.outcome === 'disallowed') anomalies.push(`${r.method ?? r.discoveryKind} disallowed: ${r.url}${r.note ? ` - ${r.note}` : ''}`);
@@ -117,8 +129,13 @@ export function buildPacket(log, { agency, category }) {
   // answered every request, its robots and sitemap with 404s and its home page with a shell. One
   // label covering "refused us" and "answered but unreadable" is the same collapse that made
   // `no-candidates` wrong in the first place.
+  // Amendment 50. UNRESOLVED only. Counting every barrier attempt here made the per-origin
+  // breakdown contradict the summary line above it: five attempts on one origin, four of them
+  // recovered, read as five unread pages.
   const notRead = active.filter(
-    (r) => TECHNICAL_ATTRITION_OUTCOMES.includes(r.outcome) || r.outcome === 'unavailable'
+    (r) => (r.outcome === 'retrieval-blocked' && unresolvedIds.has(r.id)) ||
+      (r.outcome !== 'retrieval-blocked' &&
+        (TECHNICAL_ATTRITION_OUTCOMES.includes(r.outcome) || r.outcome === 'unavailable'))
   );
   const attritionByOrigin = [...notRead.reduce((acc, r) => {
     const origin = originOf(r.url);
@@ -138,8 +155,14 @@ export function buildPacket(log, { agency, category }) {
     (acc, r) => acc.set(r.outcome, (acc.get(r.outcome) ?? 0) + 1), new Map()
   )].map(([outcome, n]) => ({ outcome, n }));
 
+  // Amendment 50. Barriers that were RECOVERED are not lost coverage, and a zero-candidate result
+  // rests on what was read rather than on what was logged.
+  const barriers = barrierAccounting(log, scope);
+  const read = readContentUrls(log, scope);
+
   return {
     agency, category, version: set.version,
+    barriers, read,
     approval: set.approval, lockedAt: set.lockedAt,
     terms: SEARCH_TERMS[category] ?? [],
     websites: byWebsite,
@@ -173,11 +196,26 @@ export function renderPacket(p) {
   // Per outcome, because "retrieved no agency content" is not true of all of them: a
   // retrieval-inconclusive record DID receive the agency's own document, it just held nothing to
   // judge. What every one of these shares is that no candidate judgement came out of it.
+  //
+  // Amendment 50: it says "made no judgement of its own", not "was not read". A barred attempt the
+  // headed fallback then read produced no judgement at that record and cost no coverage, and this
+  // line sat directly above the barrier figures where the shorter wording invited the reading the
+  // amendment exists to prevent.
   if (p.unreadable?.total) {
     out.push(
-      `of which          ${p.unreadable.total} yielded no candidate judgement: ` +
+      `of which          ${p.unreadable.total} made no judgement of their own: ` +
         p.unreadable.byOutcome.map(({ outcome, n }) => `${outcome} x${n}`).join(', ')
     );
+  }
+  // Amendment 50: recovered and unresolved kept apart, because they mean opposite things.
+  if (p.barriers?.barrierAttempts) {
+    out.push(
+      `barriers          ${p.barriers.barrierAttempts} attempt(s): ${p.barriers.recovered} recovered by the ` +
+        `headed fallback, ${p.barriers.unresolved} unresolved over ${p.barriers.unresolvedUrls} URL(s)`
+    );
+  }
+  if (p.read) {
+    out.push(`read              ${p.read.urls} content URL(s) across ${p.read.origins} origin(s), judged`);
   }
   out.push('');
   for (const w of p.websites) {
@@ -199,13 +237,34 @@ export function renderPacket(p) {
     // which is a finding about the agency. Where the origins could not be read at all, nothing was
     // established about what they publish, and saying otherwise would put a prevalence observation
     // into the record that no inspection supports.
-    const notRead = p.attritionByOrigin ?? [];
-    if (notRead.length === 0) {
-      out.push('  none - every inspection was read, and this category yields no eligible form');
+    // Amendment 50. Three different empty results, stated as three different things. The previous
+    // version had two, and chose between them on raw attrition counts - so a round whose every
+    // page was read after a recovered barrier was described as establishing nothing, which was the
+    // opposite of the truth.
+    const b = p.barriers ?? { unresolved: 0, unresolvedUrls: 0, recovered: 0, robotsUnestablished: 0 };
+    const r = p.read ?? { urls: 0, origins: 0 };
+    const unread = b.unresolved + b.robotsUnestablished + (b.retrievalInconclusive ?? 0);
+    if (unread === 0) {
+      out.push(`  none - all ${r.urls} content URL(s) across ${r.origins} origin(s) were read, and this`);
+      out.push('  category yields no eligible form');
+      if (b.recovered) {
+        out.push(`  (${b.recovered} barrier attempt(s) were recovered by the headed fallback and cost no coverage)`);
+      }
+    } else if (r.urls > 0) {
+      out.push(`  none among the ${r.urls} content URL(s) successfully read across ${r.origins} origin(s).`);
+      if (b.recovered) {
+        out.push(`  ${b.recovered} barrier attempt(s) were recovered by the headed fallback and cost no coverage.`);
+      }
+      out.push(`  NOT read: ${unread} record(s) over ${b.unresolvedUrls || b.unreadUrls} URL(s) -`);
+      for (const { origin, outcomes } of p.attritionByOrigin ?? []) {
+        out.push(`    ${origin} - ${outcomes.map(({ outcome, n }) => `${outcome} x${n}`).join(', ')}`);
+      }
+      out.push('  So this result supports no candidate among the pages successfully examined. It does');
+      out.push('  NOT establish that the agency publishes no such form.');
     } else {
       out.push('  none recorded - and NOT because the category was searched and found empty.');
-      out.push('  What each origin actually did:');
-      for (const { origin, outcomes } of notRead) {
+      out.push('  Not one content URL was read. What each origin actually did:');
+      for (const { origin, outcomes } of p.attritionByOrigin ?? []) {
         out.push(`    ${origin} - ${outcomes.map(({ outcome, n }) => `${outcome} x${n}`).join(', ')}`);
       }
       out.push('  This is technical attrition in the discovery method. Nothing here establishes');

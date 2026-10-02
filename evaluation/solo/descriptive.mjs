@@ -168,7 +168,7 @@ const FRAME_FILES = [
  * exhaustion records at all. A manifest that misnames its own protocol is worse than one that
  * omits it: a reader checking which rules a corpus was sealed under would be told the wrong ones.
  */
-export const SOLO_PROTOCOL_TAG = 'solo-protocol-v1.0.25';
+export const SOLO_PROTOCOL_TAG = 'solo-protocol-v1.0.27';
 
 /**
  * Two resolutions, mirrored from the capture package and checked equal by a test.
@@ -874,6 +874,55 @@ export const TECHNICAL_ATTRITION_OUTCOMES = Object.freeze([
   'retrieval-blocked',
   'retrieval-inconclusive',
 ]);
+
+/**
+ * Which attrition records actually cost coverage - the sealer's own derivation.
+ *
+ * solo-protocol-v1.0.27 (Amendment 50). A barred attempt the headed fallback then READ cost the
+ * agency nothing, so it cannot be what makes a search incomplete. Counting every attrition record
+ * made the whole Ministry for Culture and Heritage estate look unsearched: its origins bar
+ * headless Chromium, the frozen fallback read five of six anyway, and the resolution still said
+ * `technical-discovery-attrition` - a false claim about the sample.
+ *
+ * Independent of the capture package by design (this file may not import it) and deliberately
+ * STRICTER: recovery needs an explicit `followsDiscoveryId` link to an unbarred `rendered` record
+ * for the same agency, category, round and URL, and that record must itself carry a judgement. An
+ * unjudged render proves retrieval, not reading; an unrelated later render of the same URL proves
+ * nothing about THIS barrier. Where the link cannot be established the barrier stays unresolved,
+ * so a sealer that cannot see a recovery reports the weaker resolution rather than assuming the
+ * stronger one. `robots-unestablished` is never recoverable: no permission was established, so
+ * nothing was read under one.
+ */
+export function unresolvedAttrition(attempts, { bound = null, superseded = null } = {}) {
+  const sup = superseded ?? new Set(
+    attempts.map((a) => a.supersedesDiscoveryId).filter((id) => id !== undefined && id !== null)
+  );
+  const active = (a) => !sup.has(a.id);
+  const inScope = (a) =>
+    (bound === null || bound.has(a.id)) && a.status === 'discovery' && active(a);
+
+  const recoveredBarrier = (barred) => {
+    const follower = attempts.find(
+      (a) => a.followsDiscoveryId === barred.id && active(a) && a.outcome === 'rendered' &&
+        a.agency === barred.agency && a.category === barred.category &&
+        a.candidateSetVersion === barred.candidateSetVersion && a.url === barred.url
+    );
+    if (!follower) return false;
+    return attempts.some(
+      (j) => j.recordType === 'judgement-only' && active(j) &&
+        (j.answersDiscoveryId === follower.id || j.evidenceFromDiscoveryId === follower.id) &&
+        j.category === follower.category &&
+        j.candidateSetVersion === follower.candidateSetVersion
+    );
+  };
+
+  const attrition = attempts.filter(
+    (a) => inScope(a) && TECHNICAL_ATTRITION_OUTCOMES.includes(a.outcome)
+  );
+  const recovered = attrition.filter((a) => a.outcome === 'retrieval-blocked' && recoveredBarrier(a));
+  const unresolved = attrition.filter((a) => !recovered.includes(a));
+  return { attrition, recovered, unresolved };
+}
 export const MAX_QUALIFIED_AGENCIES = 40;
 export const EXHAUSTION_CATEGORIES = Object.freeze([
   'account-registration',
@@ -1255,10 +1304,9 @@ export function sealCorpus({
           const superseded = new Set(
             attempts.map((a) => a.supersedesDiscoveryId).filter((id) => id !== undefined && id !== null)
           );
-          const attritionInLog = attempts.filter(
-            (a) => bound.has(a.id) && a.status === 'discovery' && !superseded.has(a.id) &&
-              TECHNICAL_ATTRITION_OUTCOMES.includes(a.outcome)
-          );
+          // solo-protocol-v1.0.27 (Amendment 50). Only attrition that actually cost coverage
+          // bears on the resolution; see `unresolvedAttrition`.
+          const attritionInLog = unresolvedAttrition(attempts, { bound, superseded }).unresolved;
           // With nothing bound, `bounded-discovery-complete` would be vacuously derivable - the stronger
           // claim, on no evidence. The absence of attrition only means something where there is
           // evidence in which attrition could have shown up.
@@ -1277,7 +1325,7 @@ export function sealCorpus({
               `${where} is sealed as ${record.resolution}, but the capture log's bound discovery ` +
                 `records support ${derived}` +
                 (attritionInLog.length
-                  ? ` (${attritionInLog.length} record(s) could not be read: ` +
+                  ? ` (${attritionInLog.length} record(s) were never read successfully: ` +
                     `${attritionInLog.slice(0, 4).map((a) => `${a.id} ${a.outcome}`).join(', ')})`
                   : '')
             );

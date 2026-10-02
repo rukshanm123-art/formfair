@@ -4015,3 +4015,170 @@ The suite is now **543** tests — the 540 that existed plus three in the guard.
 `selection-v1.0.43`–`45`, `capture-v1.0.18`–`20` and `solo-protocol-v1.0.23`–`25` are all preserved
 and unmoved, including the three revoked under Amendment 47. Nothing is deleted or recreated; this is
 a forward-only correction, like every other in this sequence.
+
+## Amendment 50 — a barrier the headed fallback cleared cost no coverage
+
+*Frozen as `selection-v1.0.47`, `capture-v1.0.22` and `solo-protocol-v1.0.27`, 2 October 2026.*
+
+No live record changes, no record is deleted, and no page is requested again. Every figure below is
+re-derived from retained records.
+
+### What was wrong
+
+The Ministry for Culture and Heritage account-registration round reported **24 technical-attrition
+records** over a category whose pages had in fact been read. Every origin in that estate bars
+headless Chromium; the frozen headed fallback then read sixteen of those pages successfully. The
+packet, the status totals, the published provenance, the agency resolution and the independent
+sealer's resolution validation all counted the barred attempt and reported that coverage had been
+lost.
+
+The round's true accounting is:
+
+| figure | count |
+| --- | --- |
+| barrier attempts recorded | 24 |
+| recovered by the headed fallback | 16 |
+| unresolved blocked records | 8 |
+| distinct URLs those 8 represent | 7 |
+| content URLs read and judged | 16, across 5 of 6 origins |
+
+Study-wide: **80** active `retrieval-blocked` records comprise **40** recovered attempts and **40**
+unresolved records, the unresolved 40 representing **30** distinct scoped URLs; with **10**
+`robots-unestablished` records, **90** active technical-attrition records in all.
+
+The distortion was not confined to a headline. Treating a recovered barrier as lost coverage makes
+`agencyResolution` return `technical-discovery-attrition` for an agency whose every page was read —
+and that resolution asserts the agency's discovery was **incomplete**. It is a claim about the
+sample, and it was false. Had the Ministry for Culture and Heritage been exhausted under the earlier
+reading, five fully-read origins would have been published as an incomplete search.
+
+### Why a count of records was the wrong unit
+
+A barrier attempt is an event in the harness. Lost coverage is a property of the sample. The two
+differ in both directions: the harness retries, so eight unresolved records can represent seven
+URLs; and the fallback succeeds, so sixteen barrier records can represent nothing lost at all. An
+attrition figure is only interpretable if it says which it is counting.
+
+### The rule
+
+1. A barrier is **recovered** only when an explicit `followsDiscoveryId` chain ends in an unbarred
+   `rendered` observation for the **same agency, category, round and canonical URL**, and that
+   observation **itself carries a judgement**. An unjudged render establishes retrieval, not
+   reading. An unrelated later render of the same URL recovers nothing: no record claims it
+   followed from the barrier, and accepting it would let the harness excuse its own gaps.
+2. A withdrawn recovery reopens the barrier; a withdrawn barrier is not attrition at all.
+3. `robots-unestablished` and `retrieval-inconclusive` are never recoverable. No permission was
+   established, so nothing was read under one.
+4. Four figures are reported **separately**, never collapsed: barrier attempts recorded; attempts
+   recovered by the headed fallback; unresolved blocked records **and** the distinct URLs they
+   represent; `robots-unestablished` records.
+5. Only **unresolved** attrition downgrades an agency's resolution.
+6. The count beside a packet's `read` line is **content URLs**. A robots-policy record fetches no
+   content, so it is not one — this is the correction that makes the Ministry for Culture and
+   Heritage round 16 content URLs rather than 17 records.
+
+### Where it is implemented
+
+`barrierAccounting` in `capture/run.mjs` is the single derivation for the capture package, read by
+the packet, the status totals, the published provenance and `agencyResolution`. The sealer carries
+its own, `unresolvedAttrition` in `evaluation/solo/descriptive.mjs`, because `evaluation/` may not
+import `capture/`. The sealer's is deliberately **stricter**: it matches URLs exactly where capture
+canonicalises, so a difference it cannot resolve leaves the barrier unresolved and it reports the
+weaker resolution rather than assuming the stronger one. All 50 follow-up links in the live log
+carry byte-identical URLs, so the two do not diverge in practice; the asymmetry is recorded, with a
+test, against the possibility that they ever do.
+
+Adversarial tests in both packages — `capture/test/barrier-accounting.test.mjs` (22) and
+`evaluation/solo/test/barrier-recovery.test.mjs` (14) — assert the near misses rather than the happy
+path, assert that the two implementations agree on which barriers are unresolved over every fixture,
+and assert that the two published blocks reconcile: `technicalAttrition.records` is a census of
+records (92 ever, 90 active, 2 withdrawn) and `barriers` is the coverage reading (80 blocked
+attempts = 40 recovered + 40 unresolved over 30 URLs). The published provenance previously carried
+only the census, under a name a reader would quote as a coverage figure.
+
+The capture suite is now **582** tests and the solo suite **152**.
+
+### A fourth drifted list, found while freezing this
+
+`evaluation/package.json` still named its test files individually, which is the defect Amendment 49
+repaired in the capture package and whose guard checked that package alone. `test:solo` named three
+files while five were on disk. The two omitted were the Amendment 50 suite above and
+`revoked-tags.test.mjs` — the guard Amendment 47 added so that a revoked tag could never be
+re-published, which had therefore **never run in CI**. Both evaluation scripts are now globs, and
+`evaluation/solo/test/ci-covers-every-test.test.mjs` guards both of its test directories. Amendment
+49's reasoning was right; only its scope was too narrow.
+
+### A second omission in the same freeze
+
+`solo-protocol-v1.0.26` was created, pushed and declared in Amendment 49, but the commit it points
+at never bumped `SOLO_PROTOCOL_TAG` or `SOLO_SEALER_TAG`: both still read `solo-protocol-v1.0.25`.
+For the whole of that freeze the sealer identified itself as a version behind the tag containing it.
+Every freeze before it had bumped the constants in the same commit as the change; Amendment 49
+touched only a test script and a guard, and the step was missed. Nothing failed, which is why it
+went unnoticed — the sealer's identity is what a reader uses to tell which implementation produced a
+seal, and no test compared it with anything.
+
+The constants now read `solo-protocol-v1.0.27`, and no commit will ever have reported `v1.0.26`.
+`evaluation/solo/test/frozen-tag.test.mjs` closes it: the analyser and the sealer must report the
+same tag, that tag must be the latest version this document declares frozen, and it must not be a
+revoked one. It is checked against this document rather than against git, so it holds in a shallow
+CI clone with no tags fetched. Reintroducing the omission fails it with the version it expected.
+
+### What this does not change
+
+The frozen method, the frozen criteria, the priority order and the robots procedure are untouched.
+No candidate selection and no agency qualification changes: the single exhausted agency, the Family
+Violence and Sexual Violence Executive Board, has no attrition records of any kind, so its published
+resolution stands unaltered. All earlier tags are preserved and unmoved, including the three revoked
+under Amendment 47.
+
+## Amendment 51 — a personal-name field that is a search key does not satisfy criterion 3
+
+*Frozen as `selection-v1.0.47`, `capture-v1.0.22` and `solo-protocol-v1.0.27`, 2 October 2026.*
+
+### What prompted it
+
+Two Ministry for Culture and Heritage pages carry record-search forms whose controls are
+`field_surname_value` labelled "Surname" and `field_forename_value` labelled "Forename(s)":
+`28maoribattalion.org.nz` (record `d-0736`) and `vietnamwar.govt.nz` (record `d-0741`). Read
+literally, criterion 3 — *asks for the name of a natural person* — is satisfied.
+
+### The interpretation
+
+It is not. These are **finding aids**: the name is a query against existing records, not something
+the form collects, and the frozen annotation definition already excludes search boxes. Admitting
+them would place a finding aid in a corpus of name-entry forms and measure the length limit of a
+search key as though it constrained somebody's name. Both pages are also outside all four form
+categories, so neither was a candidate on any other ground either.
+
+Two boundaries follow, and they are independent:
+
+1. **Collection versus querying.** The question is what the form does with the name: collects it as
+   part of its own transaction, or uses it to query records that already exist. Only the first
+   satisfies criterion 3.
+2. **Not first-party versus third-party identity.** The rule is **not** limited to the submitter's
+   own name. A service form asking for a child's, a dependent's, a representative's or any other
+   natural person's name collects the name of a natural person and does satisfy criterion 3. Whose
+   name it is does not matter; what the form does with it does.
+
+### How it is applied
+
+`classifyNameField` in `capture/capture.mjs` is pure and takes only the structural facts the page
+yielded — field name, id, label, aria-label, the containing form's action, role, id and class, and
+the labels of its visible submit controls. A name field reads as a **query** when it names itself a
+search key, when the containing form's action or identity does, when the form carries
+`role="search"`, or when **every** visible submit control in it is labelled as a query. Unanimity is
+required for that last signal: a "Search" button beside "Apply" is a facility within a collection
+form, not its purpose, and treating one such control as decisive would reclassify ordinary
+application forms.
+
+The classification is **reported, never decisive**. It bars nothing, excludes nothing, and does not
+touch barrier detection — a mistake there would keep a page out of assessment altogether. The
+researcher still asserts criterion 3 at the approval gate; this is the structural evidence that
+assertion must be consistent with, exactly as Amendment 46 reports registration affordances without
+declaring a page eligible.
+
+`capture/test/criterion-three.test.mjs` (17 tests) fixes both boundaries against the two pages that
+prompted them, against the name fields of captures already approved — which must keep them — and
+against the near misses: a deceased person's name on an order form is collected, the same name on a
+record search is not.

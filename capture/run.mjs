@@ -1238,9 +1238,9 @@ export const SUPERSEDED_ATTRITION_REASONS = Object.freeze([
  *
  * Reads the discovery records BOUND to the agency's four locked sets, excluding superseded ones: a
  * withdrawn finding is not evidence, and a record that no set claims is not part of the round the
- * exhaustion rests on. One bound active record with an attrition outcome is enough - an agency
- * whose discovery was blocked anywhere was not searched in full, and the honest resolution is the
- * weaker of the two.
+ * exhaustion rests on. One bound active record of UNRESOLVED attrition is enough - an agency with
+ * a page nobody read was not searched in full, and the honest resolution is the weaker of the
+ * two. A barrier the headed fallback then cleared is not such a record: see Amendment 50 below.
  */
 export function agencyResolution(log, agency) {
   const bound = new Set();
@@ -1252,17 +1252,33 @@ export function agencyResolution(log, agency) {
     (a) => bound.has(a.id) && a.status === 'discovery' && !isDiscoverySuperseded(log, a.id)
   );
   const attrition = records.filter((a) => TECHNICAL_ATTRITION_OUTCOMES.includes(a.outcome));
-  const resolution = attrition.length > 0
+
+  // Amendment 50. Only UNRESOLVED attrition downgrades the resolution.
+  //
+  // This read every attrition record, so a barrier the headed fallback cleared counted against the
+  // agency: an agency whose every page was read - after a WAF barred the headless attempt and the
+  // frozen fallback then read it - was labelled `technical-discovery-attrition`, which says its
+  // search was incomplete. That is a claim about the SAMPLE, and it was false. The whole Ministry
+  // for Culture and Heritage estate bars headless Chromium, so every one of its origins would have
+  // produced that verdict while five of six were in fact read in full.
+  const unresolvedIds = new Set(barrierAccounting(log, { agency }).unresolvedRecords);
+  const unresolved = attrition.filter(
+    (a) => a.outcome !== 'retrieval-blocked' || unresolvedIds.has(a.id)
+  );
+  const recovered = attrition.filter((a) => !unresolved.includes(a));
+  const resolution = unresolved.length > 0
     ? AGENCY_RESOLUTIONS.TECHNICAL_ATTRITION
     : AGENCY_RESOLUTIONS.BOUNDED_DISCOVERY_COMPLETE;
   const byOutcome = {};
-  for (const a of attrition) byOutcome[a.outcome] = (byOutcome[a.outcome] ?? 0) + 1;
+  for (const a of unresolved) byOutcome[a.outcome] = (byOutcome[a.outcome] ?? 0) + 1;
   return {
     resolution,
     reason: RESOLUTION_REASONS[resolution],
     boundRecords: records.length,
-    attritionRecordIds: attrition.map((a) => a.id).sort(),
+    // The ids that DECIDE the resolution, and separately the barriers that cost nothing.
+    attritionRecordIds: unresolved.map((a) => a.id).sort(),
     attritionByOutcome: byOutcome,
+    recoveredBarrierIds: recovered.map((a) => a.id).sort(),
   };
 }
 
@@ -1810,10 +1826,30 @@ export function publishProvenance(log, { to, capturesRoot = null }) {
     // agencies. An origin that could not be read is not an agency that publishes no forms, and a
     // prevalence denominator that merges the two would overstate how much of the frame was
     // actually searched.
+    //
+    // Amendment 50. The block now says what it counts. `records` was the only figure here, and it
+    // silently merged three different things: records withdrawn by a later correction, barriers the
+    // headed fallback cleared, and attempts that genuinely went unread. A reader quoting it - as
+    // 92, when 90 are active and only 40 of those cost coverage - would overstate the gap by more
+    // than twice. The coverage reading itself is in `barriers` below; this is the record census.
     technicalAttrition: {
       records: discovery.filter((a) => TECHNICAL_ATTRITION_OUTCOMES.includes(a.outcome)).length,
+      active: discovery.filter(
+        (a) => TECHNICAL_ATTRITION_OUTCOMES.includes(a.outcome) && !isDiscoverySuperseded(log, a.id)
+      ).length,
+      superseded: discovery.filter(
+        (a) => TECHNICAL_ATTRITION_OUTCOMES.includes(a.outcome) && isDiscoverySuperseded(log, a.id)
+      ).length,
+      // A census of records, including withdrawn ones. `activeByOutcome` is the one that
+      // reconciles with `barriers`.
       byOutcome: discovery.reduce((acc, a) => {
         if (!TECHNICAL_ATTRITION_OUTCOMES.includes(a.outcome)) return acc;
+        acc[a.outcome] = (acc[a.outcome] ?? 0) + 1;
+        return acc;
+      }, {}),
+      activeByOutcome: discovery.reduce((acc, a) => {
+        if (!TECHNICAL_ATTRITION_OUTCOMES.includes(a.outcome)) return acc;
+        if (isDiscoverySuperseded(log, a.id)) return acc;
         acc[a.outcome] = (acc[a.outcome] ?? 0) + 1;
         return acc;
       }, {}),
@@ -1826,6 +1862,10 @@ export function publishProvenance(log, { to, capturesRoot = null }) {
         return acc;
       }, {}),
     },
+    // Amendment 50. Published alongside the raw outcome counts, because a count of blocked attempts
+    // is not a coverage figure: half of this log's were recovered by the headed fallback. A reader
+    // of the audit gets the four figures apart rather than having to infer them.
+    barriers: barrierAccounting(log),
     // Deviations from the frozen protocol, published with the evidence they name so a reader does
     // not have to take the prose account on trust.
     deviations: (log.deviations ?? []).map((d) => ({ ...d })),
@@ -4071,6 +4111,97 @@ export function unjudgedRenderedObservations(log, { agency, category, candidateS
     }
   }
   return problems;
+}
+
+/**
+ * Barrier accounting: how many blocked attempts were RECOVERED, and what remains unread.
+ *
+ * Amendment 50. Every reader of the log counted raw `retrieval-blocked` outcomes, so a headless
+ * attempt barred by a WAF and then read successfully in headed Chromium was counted as an unread
+ * page. The Ministry for Culture and Heritage packet made the error visible by stating the opposite
+ * of the truth about a zero-candidate round - "nothing here establishes whether this agency
+ * publishes such a form" - when sixteen content URLs across five of six origins had in fact been
+ * read in full and found to publish none. Study-wide the distortion is exactly half: 80 active
+ * blocked attempts are 40 recovered events and 40 unresolved records over 30 scoped URLs.
+ *
+ * Recovery is deliberately STRICT. A barrier is recovered only by an explicit `followsDiscoveryId`
+ * chain from the barred attempt to an unbarred `rendered` observation of the same agency, category,
+ * round and canonical URL, which itself carries the judgement the protocol requires of it. An
+ * unrelated later render of the same URL does not clear it: that would let a navigation in another
+ * round, or a render nobody read, retire a barrier it has nothing to do with.
+ */
+export function barrierAccounting(log, { agency, category, candidateSetVersion } = {}) {
+  const inScope = (a) =>
+    (agency === undefined || a.agency === agency) &&
+    (category === undefined || a.category === category) &&
+    (candidateSetVersion === undefined || a.candidateSetVersion === candidateSetVersion);
+  const active = (a) => !isDiscoverySuperseded(log, a.id);
+  const scopedKey = (a) =>
+    `${a.agency}\u0000${a.category}\u0000${a.candidateSetVersion}\u0000${canonicalise(a.url)}`;
+
+  const attempts = log.attempts.filter(
+    (a) => a.status === 'discovery' && a.outcome === 'retrieval-blocked' && inScope(a) && active(a)
+  );
+
+  const recoveredBy = (barred) => {
+    const follower = log.attempts.find(
+      (a) => a.followsDiscoveryId === barred.id && active(a) && a.outcome === 'rendered' &&
+        a.agency === barred.agency && a.category === barred.category &&
+        a.candidateSetVersion === barred.candidateSetVersion &&
+        canonicalise(a.url) === canonicalise(barred.url)
+    );
+    if (!follower) return null;
+    // The successful read must itself have been READ: an unjudged render recovers nothing.
+    const judged = log.attempts.some(
+      (j) => j.recordType === RECORD_TYPES.JUDGEMENT_ONLY && active(j) &&
+        (j.answersDiscoveryId === follower.id || j.evidenceFromDiscoveryId === follower.id) &&
+        j.category === follower.category && j.candidateSetVersion === follower.candidateSetVersion
+    );
+    return judged ? follower : null;
+  };
+
+  const recovered = [];
+  const unresolved = [];
+  for (const a of attempts) (recoveredBy(a) ? recovered : unresolved).push(a);
+
+  const robotsUnestablished = log.attempts.filter(
+    (a) => a.status === 'discovery' && a.outcome === 'robots-unestablished' && inScope(a) && active(a)
+  );
+  const inconclusive = log.attempts.filter(
+    (a) => a.status === 'discovery' && a.outcome === 'retrieval-inconclusive' && inScope(a) && active(a)
+  );
+
+  return {
+    barrierAttempts: attempts.length,
+    recovered: recovered.length,
+    unresolved: unresolved.length,
+    unresolvedUrls: new Set(unresolved.map(scopedKey)).size,
+    unresolvedRecords: unresolved.map((a) => a.id),
+    robotsUnestablished: robotsUnestablished.length,
+    retrievalInconclusive: inconclusive.length,
+    // What a reader should treat as coverage lost, as opposed to events logged.
+    unreadUrls: new Set([...unresolved, ...robotsUnestablished, ...inconclusive].map(scopedKey)).size,
+  };
+}
+
+/**
+ * The content URLs a round actually read and concluded on, which is what a zero-candidate result
+ * rests on. Amendment 50. The robots record is excluded: it is a policy observation, not a page.
+ */
+export function readContentUrls(log, { agency, category, candidateSetVersion } = {}) {
+  const active = (a) => !isDiscoverySuperseded(log, a.id);
+  const judged = log.attempts.filter(
+    (a) => a.status === 'discovery' && active(a) && a.discoveryKind !== 'robots' &&
+      ['candidates-found', 'no-candidates'].includes(a.outcome) &&
+      (agency === undefined || a.agency === agency) &&
+      (category === undefined || a.category === category) &&
+      (candidateSetVersion === undefined || a.candidateSetVersion === candidateSetVersion)
+  );
+  return {
+    records: judged.length,
+    urls: new Set(judged.map((a) => canonicalise(a.url))).size,
+    origins: new Set(judged.map((a) => { try { return new URL(a.url).origin; } catch { return a.url; } })).size,
+  };
 }
 
 export function renderBacklog(log) {

@@ -39,6 +39,7 @@ import {
   renderBacklog, renderBacklogByUrl, renderPrerequisite, recordRender, findRender, RENDERED_DIR,
   findRenderForUrl, assertRenderEvidenceUsable, assertPermitUsable, adoptRender,
   reResolveCandidateSet, staleSetBindings,
+  barrierAccounting, readContentUrls,
 } from './run.mjs';
 import { fetchRobotsPolicy, evaluatePolicy, DISPOSITION } from './robots-policy.mjs';
 import {
@@ -847,6 +848,28 @@ function doStatus() {
     const tally = Object.values(byOutcome).reduce((t, n) => t + n, 0);
     if (tally !== attrition.length) {
       console.log(`  UNRECONCILED  the per-outcome lines sum to ${tally}, not ${attrition.length}`);
+    }
+    // Amendment 50. A record count is not a coverage figure. Half of the blocked attempts in this
+    // log were recovered by the headed fallback and cost nothing, so the four figures are kept
+    // apart: attempts logged, attempts recovered, records still unresolved, and the distinct
+    // scoped URLs those represent.
+    const b = barrierAccounting(log);
+    if (b.barrierAttempts) {
+      console.log('  of the blocked attempts:');
+      console.log(`    recovered by the headed fallback  ${b.recovered}  (read successfully, no coverage lost)`);
+      console.log(`    unresolved                        ${b.unresolved}  over ${b.unresolvedUrls} distinct scoped URL(s)`);
+      if (b.recovered + b.unresolved !== b.barrierAttempts) {
+        console.log(`    UNRECONCILED  ${b.recovered} + ${b.unresolved} != ${b.barrierAttempts}`);
+      }
+      // The breakdown is in URLs throughout, and the components sum to the total. The first
+      // version of this line mixed units - it reported the record count beside the URL count,
+      // and both happened to be 40, so the figure a reader would quote was ambiguous between a
+      // fact about the harness and a fact about the sample.
+      console.log(
+        `  coverage actually lost: ${b.unreadUrls} distinct scoped URL(s) = ` +
+          `${b.unresolvedUrls} barred (from ${b.unresolved} unresolved record(s)) + ` +
+          `${b.robotsUnestablished} robots-unestablished + ${b.retrievalInconclusive} inconclusive`
+      );
     }
     if (withdrawnAttrition.length) {
       console.log(

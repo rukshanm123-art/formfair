@@ -21,7 +21,7 @@ import { chromium } from 'playwright';
 import { detectBlocking, VIEWPORT, LOCALE } from '../capture.mjs';
 import {
   emptyLog, appendAttempt, isDiscoverySuperseded, unjudgedRenderedObservations,
-  assertRenderEvidenceUsable,
+  assertRenderEvidenceUsable, ELIGIBILITY_CRITERIA,
 } from '../run.mjs';
 import { TECHNICAL_ATTRITION_OUTCOMES } from '../selection.mjs';
 import { unjudgedRenderProblems } from '../../evaluation/solo/descriptive.mjs';
@@ -131,8 +131,21 @@ describe('what must NOT clear the barrier', () => {
     const html = `<body><a href="/register">Register</a><span>Sign In</span>${LOGIN_FORM}</body>`;
     const r = await classify(html);
     assert.ok(!r.accessBarriers.includes('sign-in wall'));
-    assert.deepEqual(Object.keys(r).sort(),
-      ['accessBarriers', 'authenticationSignals', 'registrationAffordances', 'submissionProtection']);
+    assert.deepEqual(Object.keys(r).sort(), [
+      'accessBarriers', 'authenticationSignals', 'collectedNameFields', 'nameFields',
+      'registrationAffordances', 'searchKeyNameFields', 'submissionProtection',
+    ]);
+    // Amendment 51 added three reported fields, and pinning the key set was only ever a proxy for
+    // the claim this test makes. So the claim is now made directly: the detector reports evidence
+    // and never a verdict. No key names an eligibility criterion, and none answers one.
+    for (const criterion of ELIGIBILITY_CRITERIA) {
+      assert.equal(criterion in r, false, `the detector must not answer ${criterion}`);
+    }
+    assert.equal(r.eligible, undefined);
+    // This page has a Register link and a login form, and no name field anywhere.
+    assert.deepEqual(r.nameFields, []);
+    assert.equal(r.collectedNameFields, 0);
+    assert.equal(r.searchKeyNameFields, 0);
   });
 
   test('an HTTP 403 remains a barrier whatever the page offers', async () => {

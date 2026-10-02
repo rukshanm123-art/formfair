@@ -9,10 +9,10 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { readFileSync, writeFileSync, mkdtempSync, rmSync, existsSync, copyFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdtempSync, rmSync, existsSync, copyFileSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
+import { dirname, join, basename } from 'node:path';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, '..');
@@ -41,6 +41,9 @@ const withTempDir = (fn) => {
   }
 };
 
+/** A glob's literal segments are matched literally. */
+const escapeRegExp = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
 describe('every package.json script points at a file that exists', () => {
   const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
 
@@ -49,6 +52,19 @@ describe('every package.json script points at a file that exists', () => {
       // "node --test" and the like have no entry file; only check the ones that name one.
       for (const token of command.split(/\s+/)) {
         if (!token.endsWith('.mjs') && !token.endsWith('.js')) continue;
+        // Amendment 50. A test script is a GLOB, because Amendment 49 established that a list of
+        // files drifts from the directory it enumerates. A glob names no single file, so what is
+        // checked is the directory it reads and that it actually matches something: a glob over a
+        // missing or empty directory silently runs nothing, which is the failure this whole
+        // family of checks exists to catch.
+        if (token.includes('*')) {
+          const dir = join(root, dirname(token));
+          assert.ok(existsSync(dir), `script "${name}" globs ${token}, but ${dirname(token)} does not exist`);
+          const pattern = new RegExp(`^${basename(token).split('*').map(escapeRegExp).join('.*')}$`);
+          const matched = readdirSync(dir).filter((f) => pattern.test(f));
+          assert.ok(matched.length > 0, `script "${name}" globs ${token}, which matches no file`);
+          continue;
+        }
         assert.ok(
           existsSync(join(root, token)),
           `script "${name}" runs ${token}, which does not exist`
@@ -62,6 +78,7 @@ describe('every package.json script points at a file that exists', () => {
       for (const token of command.split(/\s+/)) {
         if (!token.includes('/') || token.startsWith('--')) continue;
         if (token.endsWith('.mjs') || token.endsWith('.js')) continue;
+        if (token.includes('*')) continue;
         assert.ok(existsSync(join(root, token)), `script "${name}" refers to ${token}, which does not exist`);
       }
     }

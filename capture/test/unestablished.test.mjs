@@ -602,7 +602,10 @@ describe('the packet must not call an unreadable origin an empty one', () => {
       ['https://a.govt.nz/', 'no-candidates'],
       ['https://a.govt.nz/contact', 'no-candidates'],
     ]);
-    assert.match(text, /every inspection was read, and this category yields no eligible form/);
+    // capture-v1.0.22 (Amendment 50). The finding survives, stated over content URLs read rather
+    // than over "inspections", which counted the robots-policy record towards coverage.
+    assert.match(text, /all 2 content URL\(s\) across 1 origin\(s\) were read, and this/);
+    assert.match(text, /category yields no eligible form/);
   });
 
   test('attrition is raised for attention, marked as not read', () => {
@@ -760,7 +763,9 @@ describe('the packet heading counts records, not inspections', () => {
     assert.match(text, /discovery records 4 active/);
     // Three of the four yielded nothing to judge - and the 404 is not one of them, because that
     // resource was read and was simply not there.
-    assert.match(text, /3 yielded no candidate judgement: retrieval-blocked x2, retrieval-inconclusive x1/);
+    // capture-v1.0.22 (Amendment 50): "made no judgement of their own", because a barred attempt
+    // the headed fallback then read is not a page that went unread.
+    assert.match(text, /3 made no judgement of their own: retrieval-blocked x2, retrieval-inconclusive x1/);
   });
 
   test('a fully readable round carries no such line', () => {
@@ -775,7 +780,7 @@ describe('the packet heading counts records, not inspections', () => {
     recordCandidates(log, { agency, category: 'account-registration', urls: [], declaration: 'none' });
     lockCandidateSet(log, { agency, category: 'account-registration' });
     const text = renderPacket(buildPacket(log, { agency, category: 'account-registration' }));
-    assert.doesNotMatch(text, /yielded no candidate judgement/);
+    assert.doesNotMatch(text, /made no judgement of their own/);
   });
 });
 
