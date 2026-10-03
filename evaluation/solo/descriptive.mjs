@@ -168,7 +168,7 @@ const FRAME_FILES = [
  * exhaustion records at all. A manifest that misnames its own protocol is worse than one that
  * omits it: a reader checking which rules a corpus was sealed under would be told the wrong ones.
  */
-export const SOLO_PROTOCOL_TAG = 'solo-protocol-v1.0.32';
+export const SOLO_PROTOCOL_TAG = 'solo-protocol-v1.0.33';
 
 /**
  * Two resolutions, mirrored from the capture package and checked equal by a test.
@@ -559,6 +559,47 @@ export const RENDER_BEARING_RECORD_TYPES = Object.freeze([
  * Independent of the capture package, which this file may not import, and fail-closed: a registry
  * entry that cannot be re-verified is a problem rather than a pass.
  */
+/**
+ * The sealer's own re-derivation of what retained bytes are. Amendment 56.
+ *
+ * `rootElement` and `locCount` were recorded once and trusted thereafter, so changing them in the
+ * log to `urlset` and `999` produced no problem anywhere: a digest proves the bytes are unchanged
+ * and says nothing about whether the log describes them correctly. Derived here independently of
+ * the capture package, which this file may not import.
+ */
+export function parseRetainedBytes(bytes) {
+  const text = Buffer.isBuffer(bytes) ? bytes.toString('utf8') : String(bytes ?? '');
+  const stripped = text
+    .replace(/^\uFEFF/, '')
+    .replace(/<\?[\s\S]*?\?>/g, ' ')
+    .replace(/<!--[\s\S]*?-->/g, ' ')
+    .replace(/<!DOCTYPE[\s\S]*?>/gi, ' ');
+  const rootElement = (/<\s*([A-Za-z][\w:.-]*)/.exec(stripped) ?? [])[1] ?? null;
+  const locs = [...text.matchAll(/<loc>\s*([^<\s]+)\s*<\/loc>/gi)].map((x) => x[1]);
+  return { rootElement, locs, locCount: locs.length };
+}
+
+/** Is a retained resource a valid served sitemap representation? Amendment 56. */
+export function sitemapRepresentationProblems(entry, bytes) {
+  const problems = [];
+  if (!entry) return ['there is no retained resource to check'];
+  if (!(Number.isInteger(entry.httpStatus) && entry.httpStatus >= 200 && entry.httpStatus <= 299)) {
+    problems.push(`HTTP ${entry.httpStatus} is not a served status`);
+  }
+  const type = String(entry.contentType ?? '').toLowerCase().split(';')[0].trim();
+  if (!(type === 'application/xml' || type === 'text/xml' || type.endsWith('+xml'))) {
+    problems.push(`content type ${JSON.stringify(entry.contentType ?? null)} is not XML`);
+  }
+  const { rootElement, locs } = parseRetainedBytes(bytes);
+  if (!['sitemapindex', 'urlset'].includes(String(rootElement ?? '').toLowerCase())) {
+    problems.push(`the document opens with <${rootElement ?? '?'}>, not sitemapindex or urlset`);
+  }
+  for (const l of locs.slice(0, 50)) {
+    if (!/^https?:\/\//i.test(l)) problems.push(`a loc entry is not an absolute http(s) URL: ${l}`);
+  }
+  return problems;
+}
+
 export function fetchLedgerProblems(log, fetchedDir) {
   const problems = [];
   const fetches = Array.isArray(log?.fetches) ? log.fetches : [];
@@ -592,6 +633,17 @@ export function fetchLedgerProblems(log, fetchedDir) {
         if (bytes.length !== f.fetchedBytes) {
           problems.push(`${where} is ${bytes.length} bytes on disk, not the recorded ${f.fetchedBytes}`);
         }
+        // Amendment 56. The description of the bytes, re-derived from the bytes.
+        const parsed = parseRetainedBytes(bytes);
+        if (f.rootElement !== undefined && f.rootElement !== parsed.rootElement) {
+          problems.push(
+            `${where} records rootElement ${JSON.stringify(f.rootElement)}, but the file opens ` +
+              `with ${JSON.stringify(parsed.rootElement)}`
+          );
+        }
+        if (f.locCount !== undefined && f.locCount !== parsed.locCount) {
+          problems.push(`${where} records ${f.locCount} loc entries, but the file declares ${parsed.locCount}`);
+        }
       }
     }
     // The permit that authorised the request, as the render registry requires of a render: the
@@ -606,10 +658,32 @@ export function fetchLedgerProblems(log, fetchedDir) {
     if (!attempts.some((a) => a.fetchId === f.id)) problems.push(`${where} has no record citing it`);
   }
 
+  // Amendment 56. Retained bytes no registry entry names.
+  if (fetchedDir && existsSync(resolve(fetchedDir))) {
+    const named = new Set(fetches.map((f) => f.fetchFile));
+    for (const file of readdirSync(resolve(fetchedDir))) {
+      if (!named.has(file)) {
+        problems.push(`${file} is in fetched/ but no retained resource names it`);
+      }
+    }
+  }
+
   for (const a of attempts) {
     if (!a.fetchId) continue;
     const entry = fetches.find((f) => f.id === a.fetchId);
     if (!entry) { problems.push(`${a.id} cites ${a.fetchId}, which is not registered`); continue; }
+    // Amendment 56. A sitemap content judgement needs a valid served sitemap representation.
+    if (['candidates-found', 'no-candidates'].includes(a.outcome) && a.discoveryKind === 'sitemap') {
+      const path = fetchedDir && entry.fetchFile && basename(entry.fetchFile) === entry.fetchFile
+        ? join(resolve(fetchedDir), entry.fetchFile) : null;
+      if (!path || !existsSync(path)) {
+        problems.push(`${a.id} judges sitemap content, but ${entry.id}'s bytes are not readable here`);
+      } else {
+        for (const p of sitemapRepresentationProblems(entry, readFileSync(path))) {
+          problems.push(`${a.id} records ${a.outcome} from ${entry.id}, which is not a sitemap: ${p}`);
+        }
+      }
+    }
     if (canon(entry.url) !== canon(a.url)) {
       problems.push(`${a.id} cites ${entry.id}, which is of ${entry.url}, not ${a.url}`);
     }

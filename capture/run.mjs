@@ -3940,6 +3940,66 @@ export const FETCHED_DIR = 'fetched';
  * ledger checks and the sealer's mirror are the same argument applied to a different kind of
  * evidence.
  */
+/**
+ * Amendment 56. What the retained bytes ACTUALLY are, re-derived from the bytes every time.
+ *
+ * `rootElement` and `locCount` were recorded once and then trusted. Changing them in the log to
+ * `urlset` and `999` produced zero problems in either implementation, because nothing ever read the
+ * document again - so the fields describing the evidence could drift from the evidence while every
+ * gate reported clean. A digest proves the bytes are the bytes; it says nothing about whether the
+ * log describes them correctly.
+ */
+export function parseRetained(bytes) {
+  const text = Buffer.isBuffer(bytes) ? bytes.toString('utf8') : String(bytes ?? '');
+  // The first element name, ignoring the XML declaration, doctype, comments and processing
+  // instructions - whatever the document actually opens with.
+  const stripped = text
+    .replace(/^\uFEFF/, '')
+    .replace(/<\?[\s\S]*?\?>/g, ' ')
+    .replace(/<!--[\s\S]*?-->/g, ' ')
+    .replace(/<!DOCTYPE[\s\S]*?>/gi, ' ');
+  const rootElement = (/<\s*([A-Za-z][\w:.-]*)/.exec(stripped) ?? [])[1] ?? null;
+  const locs = [...text.matchAll(/<loc>\s*([^<\s]+)\s*<\/loc>/gi)].map((x) => x[1]);
+  return { rootElement, locs, locCount: locs.length, text };
+}
+
+/** The root elements a sitemap may legitimately have, per the sitemaps.org schema. */
+export const SITEMAP_ROOT_ELEMENTS = Object.freeze(['sitemapindex', 'urlset']);
+
+/**
+ * Amendment 56. Is this retained resource a sitemap at all?
+ *
+ * A served HTTP 200 `text/html` challenge page - "Just a moment..." - was accepted as support for a
+ * sitemap `no-candidates` judgement by both implementations. The digest matched, the file was on
+ * disk, the permit was accounted for, and the document was not a sitemap. So a judgement that the
+ * sitemap method found nothing rested on a document that never listed anything.
+ *
+ * Returns the reasons it is NOT a valid served sitemap representation, so an empty list is the only
+ * thing that permits a sitemap content judgement.
+ */
+export function sitemapRepresentationProblems(entry, bytes) {
+  const problems = [];
+  if (!entry) return ['there is no retained resource to check'];
+  if (!isServedStatus(entry.httpStatus)) {
+    problems.push(`HTTP ${entry.httpStatus} is not a served status, so this is no representation of a sitemap`);
+  }
+  const type = String(entry.contentType ?? '').toLowerCase().split(';')[0].trim();
+  if (!(type === 'application/xml' || type === 'text/xml' || type.endsWith('+xml'))) {
+    problems.push(`content type ${JSON.stringify(entry.contentType ?? null)} is not XML`);
+  }
+  const { rootElement, locs } = parseRetained(bytes);
+  if (!SITEMAP_ROOT_ELEMENTS.includes(String(rootElement ?? '').toLowerCase())) {
+    problems.push(
+      `the document opens with <${rootElement ?? '?'}>, not one of ${SITEMAP_ROOT_ELEMENTS.join(' or ')}`
+    );
+  }
+  // Every `loc` must be an absolute http(s) URL; a sitemap of nonsense is not a sitemap.
+  for (const l of locs.slice(0, 50)) {
+    if (!/^https?:\/\//i.test(l)) problems.push(`a loc entry is not an absolute http(s) URL: ${l}`);
+  }
+  return problems;
+}
+
 export function recordFetch(log, fetched) {
   (log.fetches ??= []);
   const record = { ...fetched, id: `f-${String(log.fetches.length + 1).padStart(4, '0')}` };
@@ -3978,6 +4038,20 @@ export function assertFetchEvidenceUsable(log, { fetchId, capturesRoot }) {
   }
   if (entry.fetchedBytes !== bytes.length) {
     problems.push(`${entry.id} records ${entry.fetchedBytes} bytes, but ${file} is ${bytes.length}`);
+  }
+  // Amendment 56. The DESCRIPTION of the bytes, re-derived from the bytes. A digest proves the
+  // bytes have not changed; it does not stop the log describing them wrongly.
+  const parsed = parseRetained(bytes);
+  if (entry.rootElement !== undefined && entry.rootElement !== parsed.rootElement) {
+    problems.push(
+      `${entry.id} records rootElement ${JSON.stringify(entry.rootElement)}, but ${file} opens ` +
+        `with ${JSON.stringify(parsed.rootElement)}`
+    );
+  }
+  if (entry.locCount !== undefined && entry.locCount !== parsed.locCount) {
+    problems.push(
+      `${entry.id} records ${entry.locCount} loc entries, but ${file} declares ${parsed.locCount}`
+    );
   }
   return problems;
 }
@@ -4025,11 +4099,42 @@ export function checkFetchLedger(log, fetchedDir) {
       problems.push(`${where} has no record citing it`);
     }
   }
+  // Amendment 56. Bytes in the retained tree that no registry entry names. An extra
+  // `fetched/orphan.bin` produced zero problems in either implementation: retained bytes nothing
+  // accounts for are either evidence from nowhere or traffic nobody recorded, and the rendered
+  // tree has been checked for exactly this since selection-v1.0.26.
+  if (root && existsSync(root)) {
+    const named = new Set(fetches.map((f) => f.fetchFile));
+    for (const file of readdirSync(root)) {
+      if (!named.has(file)) {
+        problems.push(
+          `${file} is in ${FETCHED_DIR}/ but no retained resource names it. Bytes nothing ` +
+            'accounts for are either evidence from nowhere or a request nobody recorded'
+        );
+      }
+    }
+  }
+
   // And the converse: a record citing a fetch that is not registered.
   for (const a of attempts) {
     if (!a.fetchId) continue;
     const entry = findFetch(log, a.fetchId);
     if (!entry) { problems.push(`${a.id} cites ${a.fetchId}, which is not in the fetch registry`); continue; }
+    // Amendment 56. A sitemap CONTENT judgement requires a valid served sitemap representation.
+    // A served HTML challenge page was accepted as support for `no-candidates`, so a judgement
+    // that the method found nothing rested on a document that never listed anything.
+    if (['candidates-found', 'no-candidates'].includes(a.outcome) && a.discoveryKind === 'sitemap') {
+      const path = root ? join(root, entry.fetchFile ?? '') : null;
+      const bytes = path && entry.fetchFile && basename(entry.fetchFile) === entry.fetchFile &&
+        existsSync(path) ? readFileSync(path) : null;
+      if (bytes === null) {
+        problems.push(`${a.id} judges sitemap content, but ${entry.id}'s bytes are not readable here`);
+      } else {
+        for (const p of sitemapRepresentationProblems(entry, bytes)) {
+          problems.push(`${a.id} records ${a.outcome} from ${entry.id}, which is not a sitemap: ${p}`);
+        }
+      }
+    }
     if (canonicalise(entry.url) !== canonicalise(a.url)) {
       problems.push(`${a.id} cites ${entry.id}, which is of ${entry.url}, not ${a.url}`);
     }

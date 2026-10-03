@@ -37,7 +37,8 @@ import {
   quarantineArtefact, recordDeviation, agencyResolutions, agencyResolution, reResolveExhaustion,
   answerChain, sha256,
   renderBacklog, renderBacklogByUrl, renderPrerequisite, recordRender, findRender, RENDERED_DIR,
-  recordFetch, findFetch, assertFetchEvidenceUsable, FETCHED_DIR,
+  recordFetch, findFetch, assertFetchEvidenceUsable, FETCHED_DIR, parseRetained,
+  sitemapRepresentationProblems,
   findRenderForUrl, assertRenderEvidenceUsable, assertPermitUsable, adoptRender,
   reResolveCandidateSet, staleSetBindings,
   barrierAccounting, readContentUrls,
@@ -1782,20 +1783,66 @@ async function doReadResource() {
     navigatedAt: null, permitId,
   });
 
+  // Amendment 56. MANUAL redirects, with every destination decided against the recorded policy
+  // BEFORE it is requested.
+  //
+  // This followed redirects automatically, so a 301 to another path - or another origin - was
+  // fetched before anything consulted robots for it. The permit authorises one URL; a redirect
+  // target is a different request, and the capture path has checked each hop against the RECORDED
+  // policy since selection-v1.0.28 precisely so that a redirect cannot carry the harness somewhere
+  // it was never permitted to go.
+  const allows = recordedPolicyFor(log);
   const at = now();
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 20000);
+  const chain = [];
+  let current = url;
   let res = null;
   let body = null;
-  try {
-    res = await fetch(url, { redirect: 'follow', signal: controller.signal });
-    body = Buffer.from(await res.arrayBuffer());
-  } catch (error) {
+  let refusedAt = null;
+  for (let hop = 0; hop <= 5; hop++) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 20000);
+    try {
+      res = await fetch(current, { redirect: 'manual', signal: controller.signal });
+    } catch (error) {
+      clearTimeout(timer);
+      writeLog(logPath, log);
+      die(`the request for ${current} failed (${error.name ?? error}); the permit is consumed and recorded`);
+    }
     clearTimeout(timer);
-    writeLog(logPath, log);
-    die(`the request failed (${error.name ?? error}); the permit is consumed and recorded`);
+    const location = res.headers.get('location');
+    if (res.status >= 300 && res.status < 400 && location) {
+      let next = null;
+      try { next = new URL(location, current).href; } catch {
+        die(`${current} redirected to ${JSON.stringify(location)}, which is not a usable URL`);
+      }
+      const verdict = allows(next);
+      chain.push({
+        from: current, to: next, httpStatus: res.status, allowed: verdict.allowed === true,
+        robotsCheckId: verdict.robotsCheckId ?? null, disposition: verdict.disposition ?? null,
+        reason: verdict.reason ?? null,
+      });
+      if (verdict.allowed !== true) {
+        // Refused BEFORE the request. Nothing is fetched from the destination.
+        refusedAt = next;
+        body = Buffer.alloc(0);
+        break;
+      }
+      current = next;
+      continue;
+    }
+    body = Buffer.from(await res.arrayBuffer());
+    break;
   }
-  clearTimeout(timer);
+  if (body === null) die(`${url} redirected more than 5 times; the chain was not followed further`);
+  if (refusedAt) {
+    writeLog(logPath, log);
+    const last = chain[chain.length - 1];
+    die(
+      `the redirect to ${refusedAt} is not permitted by the recorded policy (${last.reason}), so it ` +
+        'was NOT requested. The permit is consumed and the refusal is recorded; record the outcome ' +
+        'as disallowed or robots-unestablished as the reason requires.'
+    );
+  }
 
   const digest = sha256(body);
   const file = `${permit.id}-${digest.slice(0, 12)}.bin`;
@@ -1804,23 +1851,36 @@ async function doReadResource() {
   writeFileSync(join(fetchedDir, file), body);
 
   // What the document DECLARES, read from the retained bytes. Counted and printed, never followed.
-  const text = body.toString('utf8');
-  const rootElement = (/<\s*([a-zA-Z][\w:-]*)/.exec(text.replace(/<\?[\s\S]*?\?>/g, '')) ?? [])[1] ?? null;
-  const locs = [...text.matchAll(/<loc>\s*([^<\s]+)\s*<\/loc>/gi)].map((m) => m[1]);
+  // Amendment 56. The SHARED derivation, not a second one: the ledger re-derives these fields from
+  // the bytes and compares, so a private parser here would be a drift waiting to happen.
+  const { rootElement, locs } = parseRetained(body);
 
-  const entry = recordFetch(log, {
-    url, finalUrl: res.url ?? url, fetchedAt: at, permitId: permit.id,
-    httpStatus: res.status,
-    contentType: res.headers.get('content-type') ?? null,
-    fetchedBytes: body.length, fetchedSha256: digest, fetchFile: file,
-    rootElement, locCount: locs.length,
-  });
-  writeLog(logPath, log);
+  // Amendment 56. If recording fails AFTER the request, the bytes are quarantined rather than
+  // left in the retained tree, where the ledger would read them as evidence nothing accounts for.
+  let entry = null;
+  try {
+    entry = recordFetch(log, {
+      url, finalUrl: current, fetchedAt: at, permitId: permit.id,
+      httpStatus: res.status,
+      contentType: res.headers.get('content-type') ?? null,
+      fetchedBytes: body.length, fetchedSha256: digest, fetchFile: file,
+      rootElement, locCount: locs.length,
+      ...(chain.length ? { redirectChain: chain } : {}),
+    });
+    writeLog(logPath, log);
+  } catch (error) {
+    const moved = quarantineArtefact(fetchedDir, file, { reason: `not recorded: ${error.message}` });
+    if (moved) console.error(`quarantined ${file} -> ${moved}`);
+    die(`the request happened but could not be recorded: ${error.message}`);
+  }
   console.log(`retained ${entry.id}: HTTP ${entry.httpStatus} ${entry.contentType ?? '(no content-type)'}`);
   console.log(`bytes ${entry.fetchedBytes}  sha256 ${digest.slice(0, 16)}  file ${FETCHED_DIR}/${file}`);
   console.log(`root element: ${rootElement ?? '(none)'}   loc entries: ${locs.length}`);
   for (const l of locs.slice(0, 20)) console.log(`  loc ${l}`);
   if (locs.length > 20) console.log(`  ... and ${locs.length - 20} more`);
+  for (const h of chain) {
+    console.log(`redirect ${h.httpStatus} ${h.from} -> ${h.to}  allowed=${h.allowed} (${h.reason})`);
+  }
   console.log('Child sitemaps are NOT fetched: the inspected resource is this document.');
   console.log(`Nothing is concluded yet. Record the outcome with: discovery --fetch-id ${entry.id}`);
 }

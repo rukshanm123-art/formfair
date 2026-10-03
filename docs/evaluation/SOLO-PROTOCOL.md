@@ -4582,3 +4582,71 @@ The frozen method, the frozen criteria, the priority order, the canonicalisation
 procedure are untouched. No record is deleted; the four Health records keep their wording and are
 corrected by disclosure. All earlier tags are preserved and unmoved, including the three revoked
 under Amendment 47.
+
+## Amendment 56 — four gates that reported clean
+
+*Frozen as `selection-v1.0.53`, `capture-v1.0.28` and `solo-protocol-v1.0.33`, 3 October 2026.*
+
+No live record changes and no evidence is re-requested. `f-0001` and `f-0002` are valid served XML
+sitemap indexes, did not redirect, match their files on disk, and have accounted permits.
+
+### What passed
+
+Amendment 55 retained a plainly-read resource's bytes and verified the file, digest and byte
+length. Four attacks passed **both** implementations anyway, each producing zero problems:
+
+| attack | why it passed |
+| --- | --- |
+| an extra `fetched/orphan.bin` | nothing read the retained tree, only the registry |
+| `rootElement` → `urlset`, `locCount` → `999` | those fields were recorded once and never re-derived |
+| a served HTTP 200 `text/html` challenge page supporting a sitemap `no-candidates` | nothing asked whether the document was a sitemap |
+| `read-resource` following redirects automatically | the destination was fetched before its policy was consulted |
+
+The first three share one shape: a digest proves the **bytes are unchanged** and says nothing about
+whether the log **describes them correctly**, or whether anything else is sitting beside them. The
+fourth is a politeness failure, not a bookkeeping one.
+
+### The rules
+
+1. **Manual redirects, every destination decided before it is requested.** `read-resource` uses
+   `redirect: 'manual'` and decides each hop against the **recorded** policy — never a fresh lookup
+   mid-request, which would be traffic no permit covers. A refused hop stops the chain *before* the
+   destination is fetched, and the refusal is recorded. The chain is bounded at five hops. This is
+   the decision the capture path has used since `selection-v1.0.28`; the plain-read path simply
+   never had it.
+2. **Retained bytes are re-parsed at every trust point.** `rootElement` and `locCount` are
+   re-derived from the file and compared, in `assertFetchEvidenceUsable`, in the ledger, and in the
+   sealer. The derivation is **shared** with the recording path rather than duplicated, because a
+   private parser in the writer is a drift waiting to happen. Every `loc` must be an absolute
+   http(s) URL.
+3. **A sitemap content judgement requires a valid served sitemap representation.** For a
+   `candidates-found` or `no-candidates` record of the sitemap method: a 2xx status, an XML content
+   type (`application/xml`, `text/xml`, or `+xml`), a root element of `sitemapindex` or `urlset`,
+   and well-formed `loc` entries. An XML content type alone is not enough, nor is a sitemap root
+   alone. A record that concludes nothing about content — a technical conclusion under Amendment 54
+   — may still rest on whatever was served, which is what the HTTP 500 search renders do.
+4. **Unregistered bytes are detected, and unrecorded bytes are quarantined.** A file in `fetched/`
+   that no registry entry names is a problem in both implementations and blocks the corpus. When
+   recording fails *after* a request, the bytes are moved to `quarantine/` rather than left in the
+   retained tree, where the ledger would read them as evidence nothing accounts for.
+
+### Tests
+
+`capture/test/fetch-integrity.test.mjs` (21) reproduces each attack as reported and drives it
+through both implementations and the corpus gate: the orphan file, the drifted `rootElement` and
+`locCount` separately and together, the digest still matching while the description is wrong, the
+HTML challenge page under both candidate outcomes, an RSS document with an XML content type, a
+sitemap root served as `text/html`, four non-2xx statuses, a `javascript:` `loc` entry, both
+legitimate sitemap roots, and a non-sitemap document resting under a record that judges nothing.
+The two derivations are asserted to agree on four documents including the empty one. The redirect
+guard is structural: manual mode, the recorded-policy decision, the refusal ordered *before* the
+destination's body is read, the bounded chain, and the quarantine path.
+
+The capture suite is **708** tests and the solo suite **152**.
+
+### What this does not change
+
+The frozen method, the frozen criteria, the priority order, the canonicalisation rule and the robots
+procedure are untouched. No record is deleted, no candidate set is superseded, and the Social
+Investment Agency set stays pending with its one login candidate unchanged. All earlier tags are
+preserved and unmoved, including the three revoked under Amendment 47.
