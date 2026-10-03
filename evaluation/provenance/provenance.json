@@ -12,7 +12,7 @@
     "postLoadSettleMs": 2000
   },
   "counts": {
-    "discoveryPages": 890,
+    "discoveryPages": 892,
     "candidatesAssessed": 81,
     "captured": 9,
     "excluded": 46,
@@ -24,13 +24,13 @@
   "discoveryByMethod": {
     "navigation": 329,
     "internal-search": 338,
-    "sitemap": 138,
+    "sitemap": 140,
     "robots": 85
   },
   "discoveryByOutcome": {
     "unrecorded": 15,
     "unavailable": 58,
-    "no-candidates": 332,
+    "no-candidates": 334,
     "disallowed": 52,
     "candidates-found": 83,
     "retrieval-blocked": 139,
@@ -67,8 +67,8 @@
   },
   "technicalAttrition": {
     "records": 154,
-    "active": 152,
-    "superseded": 2,
+    "active": 150,
+    "superseded": 4,
     "byOutcome": {
       "retrieval-blocked": 139,
       "retrieval-inconclusive": 5,
@@ -77,7 +77,7 @@
     "activeByOutcome": {
       "retrieval-blocked": 138,
       "robots-unestablished": 10,
-      "retrieval-inconclusive": 4
+      "retrieval-inconclusive": 2
     },
     "byOrigin": {
       "New Zealand Security Intelligence Service https://www.nzsis.govt.nz": 5,
@@ -103,6 +103,34 @@
       "Social Investment Agency https://thehub.sia.govt.nz": 1
     }
   },
+  "fetches": [
+    {
+      "id": "f-0001",
+      "url": "https://www.sia.govt.nz/sitemap.xml",
+      "fetchedAt": "2026-10-03T07:21:28Z",
+      "httpStatus": 200,
+      "contentType": "application/xml; charset=\"utf-8\"",
+      "fetchedBytes": 535,
+      "fetchedSha256": "bff138d9449b95f5fc186a745d22b6281ca1b7270a0ea6455ffa9a56892a0282",
+      "fetchFile": "p-0465-bff138d9449b.bin",
+      "permitId": "p-0465",
+      "locCount": 2,
+      "rootElement": "sitemapindex"
+    },
+    {
+      "id": "f-0002",
+      "url": "https://thehub.sia.govt.nz/sitemap.xml",
+      "fetchedAt": "2026-10-03T07:21:44Z",
+      "httpStatus": 200,
+      "contentType": "application/xml; charset=\"utf-8\"",
+      "fetchedBytes": 1054,
+      "fetchedSha256": "90ada2436179babaac9660570112a090acf4be029f9506546f9dc26ace458e4c",
+      "fetchFile": "p-0466-90ada2436179.bin",
+      "permitId": "p-0466",
+      "locCount": 5,
+      "rootElement": "sitemapindex"
+    }
+  ],
   "barriers": {
     "barrierAttempts": 138,
     "recovered": 82,
@@ -167,8 +195,8 @@
       "d-0893"
     ],
     "robotsUnestablished": 10,
-    "retrievalInconclusive": 4,
-    "unreadUrls": 58
+    "retrievalInconclusive": 2,
+    "unreadUrls": 56
   },
   "deviations": [
     {
@@ -216,6 +244,20 @@
         "d-0439"
       ],
       "requestsAffected": 0
+    },
+    {
+      "id": "v-0003",
+      "recordedAt": "2026-10-03T07:14:10Z",
+      "kind": "sitemap-content-claim-unsupported",
+      "summary": "Four approved Ministry of Health sitemap records claim what a child sitemap lists, and no child sitemap was ever retrieved",
+      "detail": "d-0276, d-0278, d-0280 and d-0282 each state that the index's \"SiteTree sitemap lists /footer/contact-us/, inspected separately\". The log contains NO retrieval of any child sitemap: zero of its 464 permits were ever issued for a child-sitemap URL, and no record of any kind carries such a URL. The clause asserting what the child sitemap LISTS therefore rests on no recorded retrieval. The log cannot settle which of two things happened, and both are reportable: either a child sitemap was requested without a permit and without a record, which would be unrecorded traffic, or the claim was inferred from the construct and from the page being independently known, then written as though it had been read. The second is the more likely reading, because /footer/contact-us/ on all four origins had just been inspected directly under permits p-0058 to p-0061 as records d-0265 to d-0268, so its existence needed no sitemap to establish, and because the same agency's other index notes, such as d-0245, claim only that the document is an index and make no claim about its children. What survives in each record is the supported part: the resource retrieved was a SilverStripe sitemap index, and /footer/contact-us/ was inspected separately and directly. The clause about what the child sitemap lists is withdrawn. The four records are preserved unedited and this deviation is the disclosure. No page was requested for this record."
+    },
+    {
+      "id": "v-0004",
+      "recordedAt": "2026-10-03T07:22:54Z",
+      "kind": "robots-note-historical-claim-false",
+      "summary": "d-0971 claims the SIA sitemaps were served unlike every previous agency in this study, which is false",
+      "detail": "d-0971, the Social Investment Agency robots record, states that /sitemap.xml was a conventional guess at both origins and that \"unlike every previous agency in this study it was SERVED at both, returning a sitemapindex\". The second clause is false. The log holds 61 served sitemap records, 44 of whose notes describe an index: SilverStripe sitemap indexes were served and recorded no-candidates at the Ministry of Health from d-0159 onwards, and at the New Zealand Defence Force from d-0447, d-0467 through d-0472 and again at d-0528 through d-0536. The claim is withdrawn. What survives is the supported part: both SIA origins publish the same 59-byte policy, byte for byte, recorded as r-0083 and r-0084 and refreshed for this round; the whole policy is User-agent: * with Disallow: /*/allchanges and Disallow: /*/changes, which are SilverStripe page-history views and bear on nothing in this category; nothing restricts /Security/login or either search path; and no Sitemap directive is declared, so /sitemap.xml was indeed a conventional guess at both origins. This deviation is the correction mechanism because d-0971 carries no render, so correct-discovery cannot reach it, and superseding it through discovery would consume a permit and so assert a robots request that must not be made again. That is the same reasoning under which v-0002 narrowed d-0245's overbroad note rather than editing it. The record is preserved unedited. No page was requested for this record."
     }
   ],
   "robotsChecks": [
@@ -8491,8 +8533,8 @@
     "urls": 0
   },
   "permits": {
-    "issued": 464,
-    "consumed": 457,
+    "issued": 466,
+    "consumed": 459,
     "recordedLate": 9,
     "lateRecords": [
       {
@@ -8572,7 +8614,7 @@
     "closedRecordingFailed": 3,
     "closedDuplicateRequest": 3,
     "open": 0,
-    "networkRequestsAuthorised": 463,
+    "networkRequestsAuthorised": 465,
     "closures": [
       {
         "closureId": "x-0001",
@@ -8686,7 +8728,7 @@
     "Ministry for Culture and Heritage / account-registration v1": 57,
     "Ministry for Culture and Heritage / service-application v1": 74,
     "Ministry for Culture and Heritage / enquiry-or-contact v1": 72,
-    "Social Investment Agency / account-registration v1": 15
+    "Social Investment Agency / account-registration v1": 17
   },
   "candidateSets": [
     {
@@ -9698,7 +9740,7 @@
       "discovered": 1,
       "locked": 1,
       "droppedBeyondBound": 0,
-      "lockedAt": "2026-10-02T22:20:06Z",
+      "lockedAt": "2026-10-03T07:22:58Z",
       "approval": "pending",
       "approvedAt": null,
       "approvalNote": null,
@@ -9715,9 +9757,9 @@
         "d-0966",
         "d-0967",
         "d-0968",
-        "d-0969",
-        "d-0970",
-        "d-0971"
+        "d-0971",
+        "d-0972",
+        "d-0973"
       ],
       "discoveryMethods": [
         "internal-search",

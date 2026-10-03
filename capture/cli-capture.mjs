@@ -963,19 +963,28 @@ async function doDiscovery() {
   // navigation, in `preflight-discovery`. Checking at record time could refuse the record but not
   // the request, so it documented a breach instead of preventing one.
   validateUrl(url);
-  const permit = consumeDiscoveryPermit(log, {
-    agency: require_('agency'), category, candidateSetVersion: setVersion, url,
-    navigatedAt: flag('navigated-at'), permitId: require_('permit-id'),
-  });
+  // Amendment 55. When the reading was retained by `read-resource`, THAT consumed the permit and
+  // recorded the time: this record cites the retained evidence and must not consume it a second
+  // time, which would claim a request that did not happen. Without a retained reading the permit
+  // is consumed here, as it always was.
+  const citedFetch = flag('fetch-id') ? findFetch(log, flag('fetch-id')) : null;
+  if (flag('fetch-id') && !citedFetch) {
+    die(`--fetch-id names ${flag('fetch-id')}, which is not in the fetch registry`);
+  }
+  const permit = citedFetch
+    ? (log.discoveryPermits ?? []).find((x) => x.id === citedFetch.permitId)
+    : consumeDiscoveryPermit(log, {
+      agency: require_('agency'), category, candidateSetVersion: setVersion, url,
+      navigatedAt: flag('navigated-at'), permitId: require_('permit-id'),
+    });
+  if (citedFetch && !permit) die(`${citedFetch.id} names permit ${citedFetch.permitId}, which does not exist`);
 
   // Amendment 55. A plainly-read resource's retained bytes, cited structurally. The record copies
   // the digest, length and content type from the registry rather than restating them in prose, so
   // the ledger can re-verify the reading the outcome rests on.
-  const fetchId = flag('fetch-id');
-  const fetched = fetchId ? findFetch(log, fetchId) : null;
-  if (fetchId && !fetched) die(`--fetch-id names ${fetchId}, which is not in the fetch registry`);
+  const fetched = citedFetch;
   if (fetched) {
-    const usable = assertFetchEvidenceUsable(log, { fetchId, capturesRoot: resolve(dir) });
+    const usable = assertFetchEvidenceUsable(log, { fetchId: fetched.id, capturesRoot: resolve(dir) });
     if (usable.length) die(`the retained evidence cannot be relied on:\n  ${usable.join('\n  ')}`);
   }
 
@@ -991,7 +1000,7 @@ async function doDiscovery() {
     outcome, category, candidateSetVersion: setVersion,
     // Discovery browsing happens outside the capture harness, so its navigation time is
     // recorded and checked against the previous one rather than paced by the pacer.
-    navigatedAt: require_('navigated-at'),
+    navigatedAt: fetched ? fetched.fetchedAt : require_('navigated-at'),
     ...(flag('note') ? { note: flag('note') } : {}),
     approval: APPROVAL.APPROVED, // a page inspected to find links is not a judgement to approve
   });
