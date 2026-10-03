@@ -13,13 +13,13 @@
   },
   "counts": {
     "discoveryPages": 892,
-    "candidatesAssessed": 81,
+    "candidatesAssessed": 83,
     "captured": 9,
-    "excluded": 46,
+    "excluded": 47,
     "failed": 1,
     "captureBlocked": 0,
-    "pendingApprovalAttempts": 0,
-    "pendingApprovalCandidateSets": 1
+    "pendingApprovalAttempts": 1,
+    "pendingApprovalCandidateSets": 0
   },
   "discoveryByMethod": {
     "navigation": 329,
@@ -9741,8 +9741,8 @@
       "locked": 1,
       "droppedBeyondBound": 0,
       "lockedAt": "2026-10-03T07:22:58Z",
-      "approval": "pending",
-      "approvedAt": null,
+      "approval": "approved",
+      "approvedAt": "2026-10-03T07:47:54Z",
       "approvalNote": null,
       "supportedByDiscoveryRecords": [
         "d-0957",
