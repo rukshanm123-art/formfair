@@ -168,7 +168,7 @@ const FRAME_FILES = [
  * exhaustion records at all. A manifest that misnames its own protocol is worse than one that
  * omits it: a reader checking which rules a corpus was sealed under would be told the wrong ones.
  */
-export const SOLO_PROTOCOL_TAG = 'solo-protocol-v1.0.33';
+export const SOLO_PROTOCOL_TAG = 'solo-protocol-v1.0.34';
 
 /**
  * Two resolutions, mirrored from the capture package and checked equal by a test.
@@ -596,6 +596,58 @@ export function sitemapRepresentationProblems(entry, bytes) {
   }
   for (const l of locs.slice(0, 50)) {
     if (!/^https?:\/\//i.test(l)) problems.push(`a loc entry is not an absolute http(s) URL: ${l}`);
+  }
+  return problems;
+}
+
+/**
+ * The sealer's own check on policy-reuse records. Amendment 57.
+ *
+ * A robots discovery record could only be created by the discovery recorder, which requires a
+ * permit and so asserts a request; documenting that a round reused a fresh policy therefore
+ * required refetching robots.txt, which happened against an explicit instruction and is recorded as
+ * deviation `v-0005`. The reuse kind removes the need for that request, and the one thing it must
+ * prove is that the policy it names really governed the round: the same origin, still fresh when
+ * the record was written, and established. Derived independently of the capture package.
+ */
+export function policyReuseProblems(log) {
+  const problems = [];
+  const attempts = Array.isArray(log?.attempts) ? log.attempts : [];
+  const checks = Array.isArray(log?.robotsChecks) ? log.robotsChecks : [];
+  const superseded = new Set(
+    attempts.map((a) => a.supersedesDiscoveryId).filter((id) => id !== undefined && id !== null)
+  );
+  const DAY = 24 * 60 * 60 * 1000;
+
+  for (const a of attempts) {
+    if (a.recordType !== 'policy-reuse' || superseded.has(a.id)) continue;
+    const where = `${a.id} (${a.category} v${a.candidateSetVersion}, ${a.url})`;
+    if (a.permitId) problems.push(`${where} names a permit, so it claims a request it must not make`);
+    if (a.navigatedAt) problems.push(`${where} carries a navigation timestamp`);
+    if (a.navigationPerformed !== false) problems.push(`${where} does not record navigationPerformed: false`);
+    if (a.fetchId) problems.push(`${where} retains bytes, which the recorded check already holds`);
+    if (a.discoveryKind !== 'robots') problems.push(`${where} is not a robots-method record`);
+    if (a.outcome !== 'no-candidates') problems.push(`${where} records ${a.outcome}, not no-candidates`);
+    const check = checks.find((c) => c.id === a.robotsCheckId);
+    if (!check) {
+      problems.push(`${where} names robots check ${JSON.stringify(a.robotsCheckId)}, which is not recorded`);
+      continue;
+    }
+    let origin = null;
+    try { origin = new URL(a.url).origin; } catch { problems.push(`${where} has no usable origin`); }
+    if (origin && check.origin !== origin) {
+      problems.push(`${where} rests on ${check.id}, the policy for ${check.origin}`);
+    }
+    const at = Date.parse(a.examinedAt ?? '');
+    const fetched = Date.parse(check.fetchedAt ?? '');
+    if (Number.isNaN(at) || Number.isNaN(fetched)) {
+      problems.push(`${where} cannot be dated against ${check.id}`);
+    } else if (at - fetched >= DAY) {
+      problems.push(`${where} rests on ${check.id}, fetched more than 24 hours earlier`);
+    }
+    if (check.disposition === 'unestablished') {
+      problems.push(`${where} rests on ${check.id}, which established no policy`);
+    }
   }
   return problems;
 }
@@ -1723,6 +1775,11 @@ export function sealCorpus({
         // Amendment 39. Evidence retrieved and never read must not reach a seal.
         for (const problem of unjudgedRenderProblems(log)) {
           problems.push(`unjudgedRender: ${problem}`);
+        }
+
+        // Amendment 57. A policy-reuse record must rest on a policy that governed it.
+        for (const problem of policyReuseProblems(log)) {
+          problems.push(`policyReuse: ${problem}`);
         }
 
         // Amendment 55. Retained plain-read bytes, re-verified at sealing time like rendered ones.

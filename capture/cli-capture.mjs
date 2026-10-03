@@ -108,6 +108,11 @@ const USAGE = `usage:
                           [--reject --reason "<why>"]
                           (--url is refused once a URL has more than one attempt)
   cli-capture.mjs status  --out <dir>
+  cli-capture.mjs record-policy-reuse --out <dir> --agency <name> --website <url>
+                          --url <url> --category <c> --set-version <n> --note "<the policy>"
+                          (records a round's robots position from a policy ALREADY
+                           recorded. Makes NO request, holds no permit and no navigation
+                           time, and is refused if the recorded policy is missing or stale.)
   cli-capture.mjs read-resource --out <dir> --agency <name> --url <url> --permit-id <p-NNNN>
                           --category <c> --set-version <n>
                           (reads a resource plainly under a permit and RETAINS the bytes:
@@ -1885,6 +1890,59 @@ async function doReadResource() {
   console.log(`Nothing is concluded yet. Record the outcome with: discovery --fetch-id ${entry.id}`);
 }
 
+/**
+ * Records a round's robots position from a policy ALREADY recorded. Makes no request.
+ *
+ * Amendment 57. A robots discovery record could only be made by the discovery recorder, which
+ * requires a permit, and a permit asserts a request - so documenting that a round reused a fresh
+ * policy required fetching robots.txt again. That is what happened in the Social Investment Agency
+ * service-application round against an explicit instruction, and is recorded as `v-0005`. This path
+ * exists so the next round can say the same thing without the request.
+ */
+function doRecordPolicyReuse() {
+  const dir = require_('out');
+  const logPath = logPathFor(dir);
+  const log = readLog(logPath);
+  const website = require_('website');
+  const url = require_('url');
+  const category = require_('category');
+  const setVersion = Number(require_('set-version'));
+  if (!CATEGORIES.includes(category)) die(`--category must be one of ${CATEGORIES.join(', ')}`);
+  if (!Number.isInteger(setVersion) || setVersion < 1) die('--set-version must be a positive integer');
+  validateUrl(url);
+
+  // The check is found rather than supplied: naming one by hand is how a stale or foreign policy
+  // would get documented as a round's authority.
+  let origin = null;
+  try { origin = new URL(url).origin; } catch { die(`${url} is not a usable URL`); }
+  const check = findRobotsCheck(log, origin);
+  if (!check) die(`no robots policy is recorded for ${origin}; fetch one before reusing it`);
+  if (!robotsCheckIsFresh(check)) {
+    die(
+      `the recorded policy for ${origin} was fetched at ${check.fetchedAt}, more than 24 hours ` +
+        'ago. A stale policy cannot be reused: recheck it.'
+    );
+  }
+
+  appendAttempt(log, {
+    recordType: 'policy-reuse',
+    robotsCheckId: check.id,
+    examinedAt: now(), checkedAt: now(),
+    agency: require_('agency'), website, url,
+    status: 'discovery', discoveryKind: 'robots', outcome: 'no-candidates',
+    category, candidateSetVersion: setVersion,
+    navigationPerformed: false,
+    note: require_('note'),
+    approval: APPROVAL.APPROVED,
+  });
+  writeLog(logPath, log);
+  writeDerived({ log, dir, frameSha256: flag('frame-sha256'), drawOrderSha256: flag('draw-order-sha256'), synthetic: has('synthetic') });
+  const record = log.attempts.at(-1);
+  console.log(`recorded ${record.id}: ${category} robots policy reused from ${check.id} (${check.disposition})`);
+  console.log(`that policy was fetched at ${check.fetchedAt} and is still within the 24-hour window.`);
+  console.log('No request was made: the recorded check already holds the policy and its bytes.');
+}
+
 function doConcludeInconclusive() {
   const dir = require_('out');
   const logPath = logPathFor(dir);
@@ -2305,7 +2363,7 @@ function doInit() {
 }
 
 const commands = { init: doInit, packet: doPacket, 'conclude-inconclusive': doConcludeInconclusive,
-  'read-resource': doReadResource, candidates: doCandidates, lock: doLock, 'approve-set': doApproveSet,
+  'read-resource': doReadResource, 'record-policy-reuse': doRecordPolicyReuse, candidates: doCandidates, lock: doLock, 'approve-set': doApproveSet,
   'supersede-set': doSupersedeSet, publish: doPublish, next: doNext, capture: doCapture, exclude: doExclude, discovery: doDiscovery, budget: doBudget, approve: doApprove, status: doStatus, build: doBuild, exhaust: doExhaust, 'preflight-discovery': doPreflightDiscovery, 'reopen-set': doReopenSet, 'close-permit': doClosePermit,
   deviation: doDeviation, 'recheck-robots': doRecheckRobots, promote: doPromote,
   'not-selected': doNotSelected, 'correct-barriers': doCorrectBarriers, 're-resolve': doReResolve,

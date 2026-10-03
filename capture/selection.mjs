@@ -117,7 +117,38 @@ export const RECORD_TYPES = Object.freeze({
    * carry is decided by the HTTP status the RENDER recorded, in both directions.
    */
   TECHNICAL_CONCLUSION: 'technical-conclusion',
+  /**
+   * A round's robots-policy record resting on a policy ALREADY recorded. Amendment 57.
+   *
+   * A robots discovery record could only be created by the discovery recorder, which requires a
+   * permit, and a permit asserts a request. So documenting that a round reused a fresh policy
+   * required making a new robots request - which is exactly what happened in the Social Investment
+   * Agency service-application round, against an explicit instruction not to refetch, and is
+   * recorded as deviation `v-0005`. The request changed no permission and no outcome; it should
+   * simply never have been needed.
+   *
+   * This kind makes no request. It names the recorded check whose policy governed the round, holds
+   * no permit and no navigation timestamp, and is refused unless that check is for its own origin
+   * and was still fresh when the record was written.
+   */
+  POLICY_REUSE: 'policy-reuse',
 });
+
+/**
+ * The record types that may rest on a RENDER. A subset of RECORD_TYPES, named once.
+ *
+ * Amendment 55 derived the render ledger's allowlist from `Object.values(RECORD_TYPES)`, which was
+ * correct while all four types rested on a render and wrong as a general rule: Amendment 57's
+ * `policy-reuse` rests on a recorded robots check and on no render at all. The Amendment 56 guard
+ * caught it immediately, by asserting the capture and sealer lists agree - which is what that guard
+ * is for.
+ */
+export const RENDER_BEARING_RECORD_TYPES = Object.freeze([
+  RECORD_TYPES.OBSERVATION,
+  RECORD_TYPES.JUDGEMENT_ONLY,
+  RECORD_TYPES.RECLASSIFICATION,
+  RECORD_TYPES.TECHNICAL_CONCLUSION,
+]);
 
 /** The one outcome a technical conclusion may record. */
 export const TECHNICAL_CONCLUSION_OUTCOME = 'retrieval-inconclusive';

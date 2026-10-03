@@ -306,12 +306,20 @@ describe('the record-type lists cannot drift from the record types', () => {
     // `retrieved` state, `eligible-not-selected` and the CI test-file lists. The capture side is
     // now derived from RECORD_TYPES; the sealer names its own list once, and this asserts the two
     // agree, because the sealer may not import the capture package.
-    const { RENDER_BEARING_RECORD_TYPES } = await import('../../evaluation/solo/descriptive.mjs');
+    const sealer = (await import('../../evaluation/solo/descriptive.mjs')).RENDER_BEARING_RECORD_TYPES;
+    const capture = (await import('../selection.mjs')).RENDER_BEARING_RECORD_TYPES;
     assert.deepEqual(
-      [...RENDER_BEARING_RECORD_TYPES].sort(),
-      Object.values(RECORD_TYPES).sort(),
+      [...sealer].sort(), [...capture].sort(),
       'the sealer and the capture package disagree about which records may rest on a render'
     );
+    // And it is a SUBSET of the record types, not all of them. Amendment 55 derived it from
+    // RECORD_TYPES, which was right for four types and wrong as a rule: Amendment 57's
+    // `policy-reuse` rests on a recorded robots check and on no render. This guard caught that
+    // on the first run after the type was added, which is what it is for.
+    for (const t of capture) assert.ok(Object.values(RECORD_TYPES).includes(t), t);
+    assert.ok(capture.length < Object.values(RECORD_TYPES).length,
+      'at least one record type rests on something other than a render');
+    assert.equal(capture.includes(RECORD_TYPES.POLICY_REUSE), false);
   });
 
   test('a technical conclusion passes the render ledger', async () => {

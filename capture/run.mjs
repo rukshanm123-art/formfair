@@ -25,7 +25,8 @@ import {
   DISCOVERY_KINDS, remainingBudget, MAX_CANDIDATES_PER_CATEGORY, MAX_CANDIDATES_PER_AGENCY,
   canonicalise, setKey, MAX_QUALIFIED_AGENCIES, CATEGORY_ORDER, lockCandidates, isSuperseded,
   DISCOVERY_METHODS, DISCOVERY_OUTCOMES, nextWork, isExhausted, TECHNICAL_ATTRITION_OUTCOMES,
-  JUDGEMENT_OUTCOMES, RECORD_TYPES, TECHNICAL_CONCLUSION_OUTCOME, isServedStatus, isUsableStatus,
+  JUDGEMENT_OUTCOMES, RECORD_TYPES, RENDER_BEARING_RECORD_TYPES,
+  TECHNICAL_CONCLUSION_OUTCOME, isServedStatus, isUsableStatus,
   TERMINAL_STATUSES, isTerminalDecision, isEvidenceOnly, terminalDecisionsFor,
 } from './selection.mjs';
 
@@ -282,6 +283,38 @@ function checkAttempt(attempt) {
           );
         }
       }
+      // Amendment 57. A policy-reuse record: the round's robots position, resting on a policy
+      // already recorded. It makes no request, so it must name none of a request's apparatus.
+      if (attempt.recordType === RECORD_TYPES.POLICY_REUSE) {
+        if (attempt.discoveryKind !== 'robots') {
+          problems.push('a policy-reuse record is a robots-method record');
+        }
+        if (!attempt.robotsCheckId) {
+          problems.push('a policy-reuse record needs robotsCheckId, the recorded policy it rests on');
+        }
+        if (attempt.permitId) {
+          problems.push(
+            'a policy-reuse record makes no request, so it must not name a permit; naming one ' +
+              'would claim the very refetch this record exists to avoid'
+          );
+        }
+        if (attempt.navigatedAt) {
+          problems.push('a policy-reuse record makes no request, so it must not carry a navigation timestamp');
+        }
+        if (attempt.navigationPerformed !== false) {
+          problems.push('a policy-reuse record must record navigationPerformed: false');
+        }
+        if (attempt.fetchId) {
+          problems.push('a policy-reuse record retains nothing: the recorded check already holds the bytes');
+        }
+        if (attempt.outcome !== 'no-candidates') {
+          problems.push(
+            `a policy-reuse record records no-candidates, not ${JSON.stringify(attempt.outcome)}: ` +
+              'a policy yields no discovery lead of its own'
+          );
+        }
+      }
+
       // Amendment 54. A technical conclusion: the render happened, the server did not serve the
       // page, and nothing on it bears on candidates. Which conclusion a render may carry is
       // decided by the status the RENDER recorded - see `renderStatusProblems` below, which
@@ -739,6 +772,12 @@ export function appendAttempt(log, attempt) {
   const conclusionProblems = renderConclusionProblems(log, attempt);
   if (conclusionProblems.length) {
     throw new Error(`invalid capture attempt:\n  ${conclusionProblems.join('\n  ')}`);
+  }
+
+  // Amendment 57. The policy a reuse record names must be the one that governed it.
+  const reuseProblems = policyReuseProblems(log, attempt);
+  if (reuseProblems.length) {
+    throw new Error(`invalid capture attempt:\n  ${reuseProblems.join('\n  ')}`);
   }
 
   // selection-v1.0.31. Only a CANDIDATE assessment is blocked by a prior candidate assessment. This
@@ -3697,11 +3736,11 @@ export function checkRenderLedger(log, renderedDir) {
       }
       // Amendment 48: a reclassification is the third legitimate kind of record resting on a render.
       // Amendment 54 added the fourth type and this list did not follow it, so the render ledger
-      // refused every technical conclusion and the provenance publish failed. Derived from
-      // RECORD_TYPES now rather than retyped - the fifth hand-maintained list in this project to
-      // drift from what it enumerates.
-      if (!Object.values(RECORD_TYPES)
-            .includes(a.recordType)) {
+      // refused every technical conclusion and the provenance publish failed. Named once in
+      // `RENDER_BEARING_RECORD_TYPES` rather than retyped here - and deliberately a SUBSET of
+      // RECORD_TYPES, because Amendment 57's `policy-reuse` rests on a recorded robots check and
+      // on no render at all.
+      if (!RENDER_BEARING_RECORD_TYPES.includes(a.recordType)) {
         problems.push(
           `${a.id} cites render ${a.renderId} with recordType ` +
             `${JSON.stringify(a.recordType)}, which is not one of ` +
@@ -3940,6 +3979,53 @@ export const FETCHED_DIR = 'fetched';
  * ledger checks and the sealer's mirror are the same argument applied to a different kind of
  * evidence.
  */
+/**
+ * Amendment 57. Does this policy-reuse record rest on a policy that actually governed it?
+ *
+ * Returns the reasons it does not, so an empty list is the only thing that permits the record. The
+ * point of the kind is to document reuse WITHOUT a request, so the one thing it must prove is that
+ * the policy it names was really in force: the same origin, and still fresh when the record was
+ * written. A stale or foreign policy documented as a round's authority would be worse than the
+ * refetch it replaces, because it would look like provenance while being none.
+ */
+export function policyReuseProblems(log, attempt) {
+  if (attempt?.recordType !== RECORD_TYPES.POLICY_REUSE) return [];
+  const problems = [];
+  const check = (log?.robotsChecks ?? []).find((c) => c.id === attempt.robotsCheckId);
+  if (!check) {
+    return [`names robots check ${JSON.stringify(attempt.robotsCheckId)}, which is not recorded`];
+  }
+  let origin = null;
+  try { origin = new URL(attempt.url).origin; } catch { problems.push(`${attempt.url} is not a usable URL`); }
+  if (origin && check.origin !== origin) {
+    problems.push(`${check.id} is the policy for ${check.origin}, not ${origin}`);
+  }
+  // Fresh AS OF THE RECORD, not as of now: a record written while the policy was in force stays
+  // true afterwards, and one written after it went stale was never true.
+  const at = Date.parse(attempt.examinedAt ?? '');
+  if (Number.isNaN(at)) problems.push('records no usable examinedAt, so its policy cannot be dated');
+  else if (!robotsCheckIsFresh(check, at)) {
+    problems.push(
+      `${check.id} was fetched at ${check.fetchedAt}, more than 24 hours before this record at ` +
+        `${attempt.examinedAt}; a stale policy did not govern this round`
+    );
+  }
+  if (check.disposition === 'unestablished') {
+    problems.push(`${check.id} is unestablished, so no policy was in force to reuse`);
+  }
+  return problems;
+}
+
+/** Every active policy-reuse record, re-checked. Read by the corpus gate. */
+export function policyReuseAudit(log) {
+  const problems = [];
+  for (const a of log.attempts ?? []) {
+    if (a.recordType !== RECORD_TYPES.POLICY_REUSE || isDiscoverySuperseded(log, a.id)) continue;
+    for (const p of policyReuseProblems(log, a)) problems.push(`${a.id}: ${p}`);
+  }
+  return problems;
+}
+
 /**
  * Amendment 56. What the retained bytes ACTUALLY are, re-derived from the bytes every time.
  *
@@ -5033,6 +5119,13 @@ export function corpusBlockers(log, { capturesRoot = null } = {}) {
       add('render-evidence', `rendered evidence does not match the log: ${renderProblems.length} problem(s)`,
         renderProblems);
     }
+  }
+
+  // Amendment 57. Policy-reuse records re-checked: a stale or foreign policy documented as a
+  // round's authority would look like provenance while being none.
+  const reuse = policyReuseAudit(log);
+  if (reuse.length) {
+    add('policy-reuse', `${reuse.length} policy-reuse record(s) do not rest on a policy that governed them`, reuse);
   }
 
   // Amendment 55. Retained plain-read bytes, verified like rendered ones. Fail-closed on a

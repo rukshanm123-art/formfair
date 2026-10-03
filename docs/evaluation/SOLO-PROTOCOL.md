@@ -4650,3 +4650,82 @@ The frozen method, the frozen criteria, the priority order, the canonicalisation
 procedure are untouched. No record is deleted, no candidate set is superseded, and the Social
 Investment Agency set stays pending with its one login candidate unchanged. All earlier tags are
 preserved and unmoved, including the three revoked under Amendment 47.
+
+## Amendment 57 — documenting that a policy was reused must not require a request
+
+*Frozen as `selection-v1.0.54`, `capture-v1.0.29` and `solo-protocol-v1.0.34`, 3 October 2026.*
+
+No live record changes and no corrective request is made.
+
+### What happened
+
+The Social Investment Agency service-application round was instructed to use the existing fresh
+robots policies **with no refetch**. The policies authorising the round *were* reused: `r-0083` and
+`r-0084`, fetched at `2026-10-02T21:08Z`, were inside the 24-hour window, every permit in the round
+rested on them, and each preflight reported them as reused.
+
+A separate robots request nevertheless occurred, solely to create the round's robots **discovery
+record**: `p-0477` authorised `https://www.sia.govt.nz/robots.txt`, `f-0005` retrieved it at
+`08:04:13Z`, and `d-0987` records that retrieval. The response was 59 bytes with the same digest as
+the cached policy, so no permission and no outcome changed, and the traffic is fully accounted for
+by its permit and retained bytes. It was still a request that should not have been made, and
+`d-0987`'s claim that the procedure reused the policies *"rather than refetching"* is false of the
+record carrying it. That clause is withdrawn. Disclosed as deviation **`v-0005`**, with `v-0006`
+correcting a word `v-0005` lost to shell substitution when it was recorded.
+
+### The cause was structural
+
+A robots discovery record could only be created by the discovery recorder, which **requires a
+permit**, and a permit asserts a request. So documenting reuse required making a request. The
+instruction and the record model were in direct conflict, and the model won without anyone noticing
+until the log was audited.
+
+### The rule
+
+`policy-reuse` is the fifth record type. It records a round's robots position from a policy already
+recorded: it names that check, holds **no permit, no navigation timestamp and no retained bytes**,
+declares `navigationPerformed: false`, and records `no-candidates`, since a policy yields no
+discovery lead of its own.
+
+Its whole safety rests on one thing — that the policy it names really governed the round — because a
+stale or foreign policy documented as a round's authority would be **worse** than the refetch it
+replaces, looking like provenance while being none. So it is refused unless the cited check exists,
+is for the record's **own origin**, is **established** rather than unestablished, and was **fresh
+when the record was written**. Freshness is judged as of the record, not against the clock: a record
+written while a policy was in force stays true afterwards, and judging against now would make honest
+history rot into a gate failure.
+
+The CLI finds the check rather than accepting one by hand, because naming it by hand is how a stale
+or foreign policy would come to be documented as an authority.
+
+Verified at **write time**, at the **corpus gate** — a check can be removed, or a later record can
+rest on a policy that has since gone stale — and **independently in the sealer**.
+
+`capture/test/policy-reuse.test.mjs` (18) covers the record it exists to make and then the refusals:
+a permit, a navigation timestamp, retained bytes, `navigationPerformed: true`, an unrecorded check, a
+check for another origin, a check already stale when the record was written, an unestablished check,
+an undateable record, and the two gate cases. Freshness-as-of-the-record is asserted directly, an
+allow-all policy from a 404 is confirmed reusable, and the one-sidedness of the existing freshness
+window is recorded rather than quietly tightened.
+
+### The Amendment 56 guard earned its place
+
+Adding the fifth type broke one test immediately: *every record type may rest on a render, in both
+implementations*. That assertion was correct while there were four types and wrong as a rule, because
+a `policy-reuse` record rests on a recorded robots check and on **no render at all**. Amendment 55
+had derived the render ledger's allowlist from `Object.values(RECORD_TYPES)`; it is now
+`RENDER_BEARING_RECORD_TYPES`, named once in `capture/selection.mjs`, mirrored in the sealer, and
+asserted to be a strict **subset** of the record types rather than all of them.
+
+So the list that drifted under Amendment 54, and was derived under Amendment 55, is now correctly
+scoped under Amendment 57 — and the guard written for the first failure is what caught the third.
+
+The capture suite is **726** tests and the solo suite **152**.
+
+### What this does not change
+
+The frozen method, the frozen criteria, the priority order, the canonicalisation rule and the robots
+procedure itself are untouched. `d-0987` is preserved unedited and corrected by disclosure. The
+Social Investment Agency service-application set is approved as an empty, declared nil result; the
+corpus stays at 6 of 40. All earlier tags are preserved and unmoved, including the three revoked
+under Amendment 47.
