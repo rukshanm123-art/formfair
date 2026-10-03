@@ -4573,7 +4573,8 @@ that hash to something else, a mismatched length, a digest that is not a digest,
 with no content type, a file name escaping the retained tree, a missing status, a record citing an
 unregistered fetch, a record disagreeing with the registry on digest, content type or URL, a registry
 entry nothing cites, a permit that authorised a different URL, and the gate failing closed with no
-capture root. Every fixture must produce the same verdict in both implementations.
+capture root. Every fixture must produce the same verdict in both implementations. The capture
+suite is **687** tests and the solo suite **152**.
 
 ### What this does not change
 
