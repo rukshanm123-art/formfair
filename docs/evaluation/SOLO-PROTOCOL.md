@@ -4499,3 +4499,85 @@ because the tests exercised the new rule and not the gates the new record has to
 The frozen method, the frozen criteria, the priority order, the canonicalisation rule and the robots
 procedure are untouched. No record is deleted and no candidate set is superseded. All earlier tags
 are preserved and unmoved, including the three revoked under Amendment 47.
+
+## Amendment 55 — a plainly-read resource retains its bytes, and a served sitemap index is read, not lost
+
+*Frozen as `selection-v1.0.52`, `capture-v1.0.27` and `solo-protocol-v1.0.32`, 2 October 2026.*
+
+### Three claims of mine that were false
+
+The Social Investment Agency round recorded its two sitemap indexes as `retrieval-inconclusive`,
+on three statements that do not survive checking:
+
+1. **"The first sitemap in this study that was served rather than refused."** False. The log holds
+   **61** served sitemap records, **44** of whose notes describe an index. SilverStripe sitemap
+   indexes were served and recorded `no-candidates` at the Ministry of Health from `d-0159`
+   onwards, and at the New Zealand Defence Force from `d-0447`.
+2. **"Whether the frozen method follows a sitemap index into its children is not settled."** False.
+   It is settled, and the settlement is recorded: `d-0447` states that *"the child was not
+   requested, following the treatment established for the same construct at `d-0245`"*, and
+   `d-0536` applies it again. The frozen method names the linked sitemap or `/sitemap.xml` as the
+   inspected resource.
+3. **`retrieval-inconclusive` for an HTTP 200 index.** Wrong in kind. Those resources were
+   **successfully read**. References beyond the inspected resource are outside the **bound**, not
+   technical attrition — the same distinction the study already draws between a page it chose not
+   to request and a page it could not read.
+
+### The ruling
+
+A sitemap index served with a success status is **read**. Its record is `no-candidates` when no
+`loc` entry matches the category's terms, and `candidates-found` when one does. **Child sitemaps
+are not requested.** A reference the method declines to follow is a limit of the bound, stated as
+such, and never recorded as attrition.
+
+### What was missing underneath it
+
+The sitemap method retained **nothing**. `discovery` recorded an outcome the operator supplied and
+the bytes were never kept, so every sitemap judgement in this study rested on a reading no reader
+could check, and the log could not distinguish a document that was read from one that was
+*described*.
+
+That is not hypothetical. Four approved Ministry of Health records — `d-0276`, `d-0278`, `d-0280`
+and `d-0282` — each state that the index's *"SiteTree sitemap lists `/footer/contact-us/`, inspected
+separately"*. The log contains **no retrieval of any child sitemap**: zero of its 464 permits were
+ever issued for one, and no record carries such a URL. The log cannot settle whether a child sitemap
+was fetched without a permit and without a record, which would be unrecorded traffic, or whether the
+claim was inferred and written as though read. The second is the likelier reading — `/footer/contact-us/`
+had just been inspected directly on all four origins under permits `p-0058`–`p-0061` as records
+`d-0265`–`d-0268`, so its existence needed no sitemap to establish, and the same agency's other
+index notes claim only that the document is an index. Either way the clause rests on nothing a
+reader can check. It is **withdrawn**, the four records are preserved unedited, and the disclosure is
+deviation **`v-0003`**.
+
+### Retained evidence
+
+`read-resource` reads a resource plainly under a permit and keeps the bytes in `fetched/`,
+registering the **file, digest, byte length, content type** and status, plus the document's root
+element and the `loc` entries it declares. It prints those entries and **never follows them**. It
+concludes nothing: the outcome is recorded afterwards by `discovery --fetch-id`, which copies the
+digest, length and content type from the registry rather than restating them in prose — the same
+separation of observation from judgement that `selection-v1.0.25` established for renders, and the
+same structural citation that Amendment 42 requires of evidence.
+
+Verification mirrors the render ledger, because it is the same argument about a different kind of
+evidence: the file must be a plain name inside `fetched/`, present on disk, and hash and measure to
+what was recorded; the permit must exist and have authorised that URL; a registry entry no record
+cites is evidence from nowhere; and a record citing a fetch must agree with it on URL, digest, length
+and content type. Enforced at the corpus gate, which **fails closed** when no capture root is
+supplied, and independently in the sealer, which may not import the capture package. The published
+provenance carries the registry sanitised — never the body, since a sitemap is a third-party
+document.
+
+`capture/test/fetch-evidence.test.mjs` (20) is mostly the refusals: bytes absent from disk, bytes
+that hash to something else, a mismatched length, a digest that is not a digest, a served resource
+with no content type, a file name escaping the retained tree, a missing status, a record citing an
+unregistered fetch, a record disagreeing with the registry on digest, content type or URL, a registry
+entry nothing cites, a permit that authorised a different URL, and the gate failing closed with no
+capture root. Every fixture must produce the same verdict in both implementations.
+
+### What this does not change
+
+The frozen method, the frozen criteria, the priority order, the canonicalisation rule and the robots
+procedure are untouched. No record is deleted; the four Health records keep their wording and are
+corrected by disclosure. All earlier tags are preserved and unmoved, including the three revoked
+under Amendment 47.

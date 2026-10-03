@@ -17,7 +17,7 @@
  * selecting or capturing.
  */
 
-import { existsSync, readFileSync, mkdirSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, statSync } from 'node:fs';
 import { join, resolve, relative } from 'node:path';
 import { chromium } from 'playwright';
 import {
@@ -37,6 +37,7 @@ import {
   quarantineArtefact, recordDeviation, agencyResolutions, agencyResolution, reResolveExhaustion,
   answerChain, sha256,
   renderBacklog, renderBacklogByUrl, renderPrerequisite, recordRender, findRender, RENDERED_DIR,
+  recordFetch, findFetch, assertFetchEvidenceUsable, FETCHED_DIR,
   findRenderForUrl, assertRenderEvidenceUsable, assertPermitUsable, adoptRender,
   reResolveCandidateSet, staleSetBindings,
   barrierAccounting, readContentUrls,
@@ -106,6 +107,12 @@ const USAGE = `usage:
                           [--reject --reason "<why>"]
                           (--url is refused once a URL has more than one attempt)
   cli-capture.mjs status  --out <dir>
+  cli-capture.mjs read-resource --out <dir> --agency <name> --url <url> --permit-id <p-NNNN>
+                          --category <c> --set-version <n>
+                          (reads a resource plainly under a permit and RETAINS the bytes:
+                           digest, length, content type, status and the loc entries it
+                           declares. Child sitemaps are not fetched. Concludes nothing;
+                           record the outcome with: discovery --fetch-id <f-NNNN>)
   cli-capture.mjs conclude-inconclusive --out <dir> --render <g-NNNN> --category <c>
                           --set-version <n> --note "<why nothing can be read from it>"
                           (for a render whose server did NOT serve the page: records
@@ -961,9 +968,24 @@ async function doDiscovery() {
     navigatedAt: flag('navigated-at'), permitId: require_('permit-id'),
   });
 
+  // Amendment 55. A plainly-read resource's retained bytes, cited structurally. The record copies
+  // the digest, length and content type from the registry rather than restating them in prose, so
+  // the ledger can re-verify the reading the outcome rests on.
+  const fetchId = flag('fetch-id');
+  const fetched = fetchId ? findFetch(log, fetchId) : null;
+  if (fetchId && !fetched) die(`--fetch-id names ${fetchId}, which is not in the fetch registry`);
+  if (fetched) {
+    const usable = assertFetchEvidenceUsable(log, { fetchId, capturesRoot: resolve(dir) });
+    if (usable.length) die(`the retained evidence cannot be relied on:\n  ${usable.join('\n  ')}`);
+  }
+
   appendAttempt(log, {
     permitId: permit.id,
     ...(flag('supersedes-discovery-id') ? { supersedesDiscoveryId: flag('supersedes-discovery-id') } : {}),
+    ...(fetched ? {
+      fetchId: fetched.id, fetchedSha256: fetched.fetchedSha256,
+      fetchedBytes: fetched.fetchedBytes, contentType: fetched.contentType,
+    } : {}),
     examinedAt: now(), agency: require_('agency'), website: require_('website'),
     url, status: 'discovery', discoveryKind: kind,
     outcome, category, candidateSetVersion: setVersion,
@@ -1721,6 +1743,79 @@ function doAdoptRender() {
  * So this command cannot dismiss a page the server actually served, and `classify-render` cannot
  * read one it did not. The status is the registry's, not this command's.
  */
+/**
+ * Reads a resource plainly - no browser - under a permit, and RETAINS the bytes.
+ *
+ * Amendment 55. The sitemap method had no retained evidence at all: `discovery` recorded an outcome
+ * the operator supplied, and the bytes were never kept, so a sitemap judgement rested on a reading
+ * no reader could check. This fetches, writes the body into the private tree beside the renders,
+ * registers digest, length, content type and status, and prints the `loc` entries the document
+ * declares so the judgement that follows is made from the document rather than from memory.
+ *
+ * It does not conclude. The outcome is recorded afterwards by `discovery --fetch-id`, the same
+ * separation of observation from judgement that selection-v1.0.25 established for renders.
+ *
+ * Child sitemaps are NOT fetched. The frozen method names the linked sitemap or /sitemap.xml as the
+ * inspected resource, and references beyond it are outside the bound - which is why the `loc`
+ * entries are printed and counted but never followed.
+ */
+async function doReadResource() {
+  const dir = require_('out');
+  const logPath = logPathFor(dir);
+  const log = readLog(logPath);
+  const url = require_('url');
+  const permitId = require_('permit-id');
+  validateUrl(url);
+
+  const permit = consumeDiscoveryPermit(log, {
+    agency: require_('agency'), category: require_('category'),
+    candidateSetVersion: Number(require_('set-version')), url,
+    navigatedAt: null, permitId,
+  });
+
+  const at = now();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 20000);
+  let res = null;
+  let body = null;
+  try {
+    res = await fetch(url, { redirect: 'follow', signal: controller.signal });
+    body = Buffer.from(await res.arrayBuffer());
+  } catch (error) {
+    clearTimeout(timer);
+    writeLog(logPath, log);
+    die(`the request failed (${error.name ?? error}); the permit is consumed and recorded`);
+  }
+  clearTimeout(timer);
+
+  const digest = sha256(body);
+  const file = `${permit.id}-${digest.slice(0, 12)}.bin`;
+  const fetchedDir = join(resolve(dir), FETCHED_DIR);
+  mkdirSync(fetchedDir, { recursive: true });
+  writeFileSync(join(fetchedDir, file), body);
+
+  // What the document DECLARES, read from the retained bytes. Counted and printed, never followed.
+  const text = body.toString('utf8');
+  const rootElement = (/<\s*([a-zA-Z][\w:-]*)/.exec(text.replace(/<\?[\s\S]*?\?>/g, '')) ?? [])[1] ?? null;
+  const locs = [...text.matchAll(/<loc>\s*([^<\s]+)\s*<\/loc>/gi)].map((m) => m[1]);
+
+  const entry = recordFetch(log, {
+    url, finalUrl: res.url ?? url, fetchedAt: at, permitId: permit.id,
+    httpStatus: res.status,
+    contentType: res.headers.get('content-type') ?? null,
+    fetchedBytes: body.length, fetchedSha256: digest, fetchFile: file,
+    rootElement, locCount: locs.length,
+  });
+  writeLog(logPath, log);
+  console.log(`retained ${entry.id}: HTTP ${entry.httpStatus} ${entry.contentType ?? '(no content-type)'}`);
+  console.log(`bytes ${entry.fetchedBytes}  sha256 ${digest.slice(0, 16)}  file ${FETCHED_DIR}/${file}`);
+  console.log(`root element: ${rootElement ?? '(none)'}   loc entries: ${locs.length}`);
+  for (const l of locs.slice(0, 20)) console.log(`  loc ${l}`);
+  if (locs.length > 20) console.log(`  ... and ${locs.length - 20} more`);
+  console.log('Child sitemaps are NOT fetched: the inspected resource is this document.');
+  console.log(`Nothing is concluded yet. Record the outcome with: discovery --fetch-id ${entry.id}`);
+}
+
 function doConcludeInconclusive() {
   const dir = require_('out');
   const logPath = logPathFor(dir);
@@ -2140,7 +2235,8 @@ function doInit() {
   console.log('nothing is captured yet; `next` names the first agency in the frozen draw order');
 }
 
-const commands = { init: doInit, packet: doPacket, 'conclude-inconclusive': doConcludeInconclusive, candidates: doCandidates, lock: doLock, 'approve-set': doApproveSet,
+const commands = { init: doInit, packet: doPacket, 'conclude-inconclusive': doConcludeInconclusive,
+  'read-resource': doReadResource, candidates: doCandidates, lock: doLock, 'approve-set': doApproveSet,
   'supersede-set': doSupersedeSet, publish: doPublish, next: doNext, capture: doCapture, exclude: doExclude, discovery: doDiscovery, budget: doBudget, approve: doApprove, status: doStatus, build: doBuild, exhaust: doExhaust, 'preflight-discovery': doPreflightDiscovery, 'reopen-set': doReopenSet, 'close-permit': doClosePermit,
   deviation: doDeviation, 'recheck-robots': doRecheckRobots, promote: doPromote,
   'not-selected': doNotSelected, 'correct-barriers': doCorrectBarriers, 're-resolve': doReResolve,

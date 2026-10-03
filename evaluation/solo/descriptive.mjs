@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -168,7 +168,7 @@ const FRAME_FILES = [
  * exhaustion records at all. A manifest that misnames its own protocol is worse than one that
  * omits it: a reader checking which rules a corpus was sealed under would be told the wrong ones.
  */
-export const SOLO_PROTOCOL_TAG = 'solo-protocol-v1.0.31';
+export const SOLO_PROTOCOL_TAG = 'solo-protocol-v1.0.32';
 
 /**
  * Two resolutions, mirrored from the capture package and checked equal by a test.
@@ -546,6 +546,82 @@ export function renderConclusionProblems(log) {
 export const RENDER_BEARING_RECORD_TYPES = Object.freeze([
   'observation', 'judgement-only', 'reclassification', 'technical-conclusion',
 ]);
+
+/**
+ * The sealer's own check on retained plain-read evidence. Amendment 55.
+ *
+ * The sitemap method kept nothing until now, so a sitemap judgement rested on a reading no reader
+ * could re-verify - which is how four approved records came to state what a child sitemap listed
+ * when no child sitemap was ever retrieved (deviation `v-0003`). A retained resource is now
+ * verified exactly as a render is: the file is where the registry says, inside `fetched/`, and its
+ * digest and length are what was recorded.
+ *
+ * Independent of the capture package, which this file may not import, and fail-closed: a registry
+ * entry that cannot be re-verified is a problem rather than a pass.
+ */
+export function fetchLedgerProblems(log, fetchedDir) {
+  const problems = [];
+  const fetches = Array.isArray(log?.fetches) ? log.fetches : [];
+  const attempts = Array.isArray(log?.attempts) ? log.attempts : [];
+  if (fetches.length === 0) return problems;
+  const canon = (u) => { try { const x = new URL(u); x.hash = ''; return x.href; } catch { return String(u); } };
+
+  for (const f of fetches) {
+    const where = `${f.id} (${f.url})`;
+    if (!/^[0-9a-f]{64}$/.test(f.fetchedSha256 ?? '')) problems.push(`${where} records no usable digest`);
+    if (!Number.isInteger(f.fetchedBytes) || f.fetchedBytes < 0) {
+      problems.push(`${where} records no usable byte length`);
+    }
+    if (!Number.isInteger(f.httpStatus)) problems.push(`${where} records no usable httpStatus`);
+    if (f.httpStatus >= 200 && f.httpStatus <= 299 && typeof f.contentType !== 'string') {
+      problems.push(`${where} was served but records no contentType`);
+    }
+    if (typeof f.fetchFile !== 'string' || f.fetchFile.length === 0) {
+      problems.push(`${where} names no file`);
+    } else if (basename(f.fetchFile) !== f.fetchFile) {
+      problems.push(`${where} names ${JSON.stringify(f.fetchFile)}, which is not a plain file name`);
+    } else if (fetchedDir) {
+      const path = join(resolve(fetchedDir), f.fetchFile);
+      if (!existsSync(path)) problems.push(`${where} names ${f.fetchFile}, which is not on disk`);
+      else {
+        const bytes = readFileSync(path);
+        const digest = createHash('sha256').update(bytes).digest('hex');
+        if (digest !== f.fetchedSha256) {
+          problems.push(`${where} hashes to ${digest}, not the recorded ${f.fetchedSha256}`);
+        }
+        if (bytes.length !== f.fetchedBytes) {
+          problems.push(`${where} is ${bytes.length} bytes on disk, not the recorded ${f.fetchedBytes}`);
+        }
+      }
+    }
+    // The permit that authorised the request, as the render registry requires of a render: the
+    // traffic behind retained evidence must be accounted for, not merely the bytes.
+    const permits = Array.isArray(log?.discoveryPermits) ? log.discoveryPermits : [];
+    const permit = permits.find((x) => x.id === f.permitId);
+    if (!f.permitId) problems.push(`${where} names no permit`);
+    else if (!permit) problems.push(`${where} names permit ${f.permitId}, which does not exist`);
+    else if (canon(permit.url) !== canon(f.url)) {
+      problems.push(`${where} names permit ${permit.id}, which authorised ${permit.url}`);
+    }
+    if (!attempts.some((a) => a.fetchId === f.id)) problems.push(`${where} has no record citing it`);
+  }
+
+  for (const a of attempts) {
+    if (!a.fetchId) continue;
+    const entry = fetches.find((f) => f.id === a.fetchId);
+    if (!entry) { problems.push(`${a.id} cites ${a.fetchId}, which is not registered`); continue; }
+    if (canon(entry.url) !== canon(a.url)) {
+      problems.push(`${a.id} cites ${entry.id}, which is of ${entry.url}, not ${a.url}`);
+    }
+    for (const [field, label] of [['fetchedSha256', 'digest'], ['fetchedBytes', 'byte length'],
+      ['contentType', 'content type']]) {
+      if (a[field] !== undefined && a[field] !== entry[field]) {
+        problems.push(`${a.id} cites ${entry.id}, whose ${label} differs`);
+      }
+    }
+  }
+  return problems;
+}
 
 export function unjudgedRenderProblems(log) {
   const problems = [];
@@ -1573,6 +1649,11 @@ export function sealCorpus({
         // Amendment 39. Evidence retrieved and never read must not reach a seal.
         for (const problem of unjudgedRenderProblems(log)) {
           problems.push(`unjudgedRender: ${problem}`);
+        }
+
+        // Amendment 55. Retained plain-read bytes, re-verified at sealing time like rendered ones.
+        for (const problem of fetchLedgerProblems(log, join(logRoot, 'fetched'))) {
+          problems.push(`fetchLedger: ${problem}`);
         }
 
         // Amendment 54. A conclusion that does not match its render's HTTP status must not reach a

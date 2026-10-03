@@ -2229,6 +2229,14 @@ export function publishProvenance(log, { to, capturesRoot = null }) {
         return acc;
       }, {}),
     },
+    // Amendment 55. The retained plain-read resources, sanitised. Never the body: a sitemap is a
+    // third-party document, and the digest plus length is what makes the reading checkable.
+    fetches: (log.fetches ?? []).map((f) => ({
+      id: f.id, url: f.url, fetchedAt: f.fetchedAt, httpStatus: f.httpStatus,
+      contentType: f.contentType ?? null, fetchedBytes: f.fetchedBytes,
+      fetchedSha256: f.fetchedSha256, fetchFile: f.fetchFile, permitId: f.permitId,
+      locCount: f.locCount ?? null, rootElement: f.rootElement ?? null,
+    })),
     // Amendment 50. Published alongside the raw outcome counts, because a count of blocked attempts
     // is not a coverage figure: half of this log's were recovered by the headed fallback. A reader
     // of the audit gets the four figures apart rather than having to infer them.
@@ -3916,6 +3924,128 @@ export function assertRenderEvidenceUsable(log, { renderId, capturesRoot }) {
 /** Where rendered evidence lives, relative to the capture root. Never beside the corpus captures. */
 export const RENDERED_DIR = 'rendered';
 
+/** Where a plainly-read resource's bytes are retained. */
+export const FETCHED_DIR = 'fetched';
+
+/**
+ * Amendment 55. A plainly-read resource retains its bytes, like a render does.
+ *
+ * The sitemap method reads a resource outside the browser, and until now the harness kept nothing:
+ * `discovery` recorded an outcome the operator supplied and the bytes were gone. So a sitemap
+ * judgement rested on a reading no reader could check, and the log could not distinguish a document
+ * that was read from one that was described. That is how `d-0276` came to state what a child
+ * sitemap listed when no child sitemap was ever retrieved - recorded as deviation `v-0003`.
+ *
+ * The registry mirrors the render registry deliberately: same shape, same verification, so the
+ * ledger checks and the sealer's mirror are the same argument applied to a different kind of
+ * evidence.
+ */
+export function recordFetch(log, fetched) {
+  (log.fetches ??= []);
+  const record = { ...fetched, id: `f-${String(log.fetches.length + 1).padStart(4, '0')}` };
+  log.fetches.push(record);
+  return record;
+}
+
+export function findFetch(log, id) {
+  return (log.fetches ?? []).find((f) => f.id === id) ?? null;
+}
+
+/**
+ * The retained bytes, re-verified against the registry: the file is where it says, inside
+ * `fetched/`, and its digest and length are what was recorded. Same failure direction as the render
+ * check - evidence that cannot be re-verified is not evidence.
+ */
+export function assertFetchEvidenceUsable(log, { fetchId, capturesRoot }) {
+  const problems = [];
+  const entry = findFetch(log, fetchId);
+  if (!entry) return [`${fetchId} is not in the fetch registry`];
+  const file = entry.fetchFile;
+  if (!file || typeof file !== 'string') return [`${entry.id} names no fetchFile`];
+  if (basename(file) !== file) {
+    problems.push(`${entry.id} names ${JSON.stringify(file)}, which is not a plain file name`);
+  }
+  if (!capturesRoot) return [...problems, `${entry.id} cannot be verified: no capture root was supplied`];
+  const path = join(resolve(capturesRoot), FETCHED_DIR, file);
+  if (!existsSync(path)) {
+    problems.push(`${entry.id} names ${file}, which is not on disk in ${FETCHED_DIR}/`);
+    return problems;
+  }
+  const bytes = readFileSync(path);
+  const digest = createHash('sha256').update(bytes).digest('hex');
+  if (entry.fetchedSha256 !== digest) {
+    problems.push(`${entry.id} records digest ${entry.fetchedSha256}, but ${file} hashes to ${digest}`);
+  }
+  if (entry.fetchedBytes !== bytes.length) {
+    problems.push(`${entry.id} records ${entry.fetchedBytes} bytes, but ${file} is ${bytes.length}`);
+  }
+  return problems;
+}
+
+/**
+ * Every retained fetch and every record citing one, checked together. Read by the corpus gate and
+ * mirrored in the sealer.
+ */
+export function checkFetchLedger(log, fetchedDir) {
+  const problems = [];
+  const root = fetchedDir ? resolve(fetchedDir) : null;
+  const fetches = log.fetches ?? [];
+  const attempts = log.attempts ?? [];
+  const seen = new Set();
+  for (const f of fetches) {
+    const where = `${f.id} (${f.url})`;
+    if (seen.has(f.id)) problems.push(`${f.id} appears more than once in the fetch registry`);
+    seen.add(f.id);
+    for (const [field, test] of [
+      ['url', (v) => typeof v === 'string' && /^https?:\/\//.test(v)],
+      ['fetchFile', (v) => typeof v === 'string' && v.length > 0],
+      ['fetchedSha256', (v) => /^[0-9a-f]{64}$/.test(v ?? '')],
+      ['fetchedBytes', (v) => Number.isInteger(v) && v >= 0],
+      ['fetchedAt', (v) => typeof v === 'string' && /Z$/.test(v)],
+      ['httpStatus', (v) => Number.isInteger(v)],
+    ]) {
+      if (!test(f[field])) problems.push(`${where} records no usable ${field}`);
+    }
+    // `contentType` may legitimately be absent on a non-2xx response, where there is no body.
+    if (f.httpStatus >= 200 && f.httpStatus <= 299 && typeof f.contentType !== 'string') {
+      problems.push(`${where} was served but records no contentType`);
+    }
+    // The permit that authorised the request, as the render registry requires of a render.
+    const permit = (log.discoveryPermits ?? []).find((x) => x.id === f.permitId);
+    if (!f.permitId) problems.push(`${where} names no permit`);
+    else if (!permit) problems.push(`${where} names permit ${f.permitId}, which does not exist`);
+    else if (permit.url !== f.url) {
+      problems.push(`${where} names permit ${permit.id}, which authorised ${permit.url}`);
+    }
+    if (root) for (const p of assertFetchEvidenceUsable(log, { fetchId: f.id, capturesRoot: dirname(root) })) {
+      problems.push(p);
+    }
+    // A registry entry no record cites is evidence from nowhere, exactly as for a render.
+    if (!attempts.some((a) => a.fetchId === f.id)) {
+      problems.push(`${where} has no record citing it`);
+    }
+  }
+  // And the converse: a record citing a fetch that is not registered.
+  for (const a of attempts) {
+    if (!a.fetchId) continue;
+    const entry = findFetch(log, a.fetchId);
+    if (!entry) { problems.push(`${a.id} cites ${a.fetchId}, which is not in the fetch registry`); continue; }
+    if (canonicalise(entry.url) !== canonicalise(a.url)) {
+      problems.push(`${a.id} cites ${entry.id}, which is of ${entry.url}, not ${a.url}`);
+    }
+    for (const [field, label] of [['fetchedSha256', 'digest'], ['fetchedBytes', 'byte length'],
+      ['contentType', 'content type']]) {
+      if (a[field] !== undefined && a[field] !== entry[field]) {
+        problems.push(
+          `${a.id} records ${label} ${JSON.stringify(a[field])} but cites ${entry.id}, whose ` +
+            `${label} is ${JSON.stringify(entry[field])}`
+        );
+      }
+    }
+  }
+  return problems;
+}
+
 /**
  * Navigation and internal-search records whose evidence is a plain fetch, not a rendered DOM.
  *
@@ -4797,6 +4927,17 @@ export function corpusBlockers(log, { capturesRoot = null } = {}) {
     if (renderProblems.length) {
       add('render-evidence', `rendered evidence does not match the log: ${renderProblems.length} problem(s)`,
         renderProblems);
+    }
+  }
+
+  // Amendment 55. Retained plain-read bytes, verified like rendered ones. Fail-closed on a
+  // missing capture root for the same reason: "could not check" must not read as "checked".
+  if ((log.fetches ?? []).length > 0 && !capturesRoot) {
+    add('fetch-evidence', 'retained fetch evidence could not be verified: no capture root was supplied', []);
+  } else if ((log.fetches ?? []).length > 0) {
+    const fetchProblems = checkFetchLedger(log, join(resolve(capturesRoot), FETCHED_DIR));
+    if (fetchProblems.length) {
+      add('fetch-evidence', `retained fetch evidence does not match the log: ${fetchProblems.length} problem(s)`, fetchProblems);
     }
   }
 
