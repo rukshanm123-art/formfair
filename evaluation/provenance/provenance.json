@@ -12,31 +12,31 @@
     "postLoadSettleMs": 2000
   },
   "counts": {
-    "discoveryPages": 892,
+    "discoveryPages": 911,
     "candidatesAssessed": 84,
     "captured": 9,
     "excluded": 48,
     "failed": 1,
     "captureBlocked": 0,
     "pendingApprovalAttempts": 0,
-    "pendingApprovalCandidateSets": 0
+    "pendingApprovalCandidateSets": 1
   },
   "discoveryByMethod": {
-    "navigation": 329,
-    "internal-search": 338,
-    "sitemap": 140,
-    "robots": 85
+    "navigation": 333,
+    "internal-search": 350,
+    "sitemap": 142,
+    "robots": 86
   },
   "discoveryByOutcome": {
     "unrecorded": 15,
     "unavailable": 58,
-    "no-candidates": 334,
+    "no-candidates": 342,
     "disallowed": 52,
     "candidates-found": 83,
     "retrieval-blocked": 139,
-    "retrieval-inconclusive": 5,
+    "retrieval-inconclusive": 8,
     "robots-unestablished": 10,
-    "rendered": 196
+    "rendered": 204
   },
   "exhaustedAgencies": [
     {
@@ -66,18 +66,18 @@
     "disagreements": []
   },
   "technicalAttrition": {
-    "records": 154,
-    "active": 150,
+    "records": 157,
+    "active": 153,
     "superseded": 4,
     "byOutcome": {
       "retrieval-blocked": 139,
-      "retrieval-inconclusive": 5,
+      "retrieval-inconclusive": 8,
       "robots-unestablished": 10
     },
     "activeByOutcome": {
       "retrieval-blocked": 138,
       "robots-unestablished": 10,
-      "retrieval-inconclusive": 2
+      "retrieval-inconclusive": 5
     },
     "byOrigin": {
       "New Zealand Security Intelligence Service https://www.nzsis.govt.nz": 5,
@@ -99,7 +99,7 @@
       "Ministry for Culture and Heritage https://nzhistory.govt.nz": 14,
       "Ministry for Culture and Heritage https://teara.govt.nz": 14,
       "Ministry for Culture and Heritage https://tetai.nz": 9,
-      "Social Investment Agency https://www.sia.govt.nz": 3,
+      "Social Investment Agency https://www.sia.govt.nz": 6,
       "Social Investment Agency https://thehub.sia.govt.nz": 1
     }
   },
@@ -129,6 +129,45 @@
       "permitId": "p-0466",
       "locCount": 5,
       "rootElement": "sitemapindex"
+    },
+    {
+      "id": "f-0003",
+      "url": "https://www.sia.govt.nz/sitemap.xml",
+      "fetchedAt": "2026-10-03T08:03:30Z",
+      "httpStatus": 200,
+      "contentType": "application/xml; charset=\"utf-8\"",
+      "fetchedBytes": 535,
+      "fetchedSha256": "bff138d9449b95f5fc186a745d22b6281ca1b7270a0ea6455ffa9a56892a0282",
+      "fetchFile": "p-0475-bff138d9449b.bin",
+      "permitId": "p-0475",
+      "locCount": 2,
+      "rootElement": "sitemapindex"
+    },
+    {
+      "id": "f-0004",
+      "url": "https://thehub.sia.govt.nz/sitemap.xml",
+      "fetchedAt": "2026-10-03T08:03:46Z",
+      "httpStatus": 200,
+      "contentType": "application/xml; charset=\"utf-8\"",
+      "fetchedBytes": 1054,
+      "fetchedSha256": "90ada2436179babaac9660570112a090acf4be029f9506546f9dc26ace458e4c",
+      "fetchFile": "p-0476-90ada2436179.bin",
+      "permitId": "p-0476",
+      "locCount": 5,
+      "rootElement": "sitemapindex"
+    },
+    {
+      "id": "f-0005",
+      "url": "https://www.sia.govt.nz/robots.txt",
+      "fetchedAt": "2026-10-03T08:04:13Z",
+      "httpStatus": 200,
+      "contentType": "text/plain",
+      "fetchedBytes": 59,
+      "fetchedSha256": "d193ff183d2d5ab1d883fb8bc15f7f0dc048f4ff16041eca1bfc663706007b01",
+      "fetchFile": "p-0477-d193ff183d2d.bin",
+      "permitId": "p-0477",
+      "locCount": 0,
+      "rootElement": null
     }
   ],
   "barriers": {
@@ -195,8 +234,8 @@
       "d-0893"
     ],
     "robotsUnestablished": 10,
-    "retrievalInconclusive": 2,
-    "unreadUrls": 56
+    "retrievalInconclusive": 5,
+    "unreadUrls": 59
   },
   "deviations": [
     {
@@ -8526,6 +8565,182 @@
       "browser": "Chromium 153.0.8010.12",
       "browserMode": "headless",
       "settleMs": 2000
+    },
+    {
+      "id": "g-0304",
+      "url": "https://www.sia.govt.nz/",
+      "finalUrl": "https://www.sia.govt.nz/",
+      "navigatedAt": "2026-10-03T08:00:55Z",
+      "permitId": "p-0467",
+      "httpStatus": 200,
+      "loadState": "load",
+      "renderFile": "g1791014454961.html",
+      "renderedSha256": "3466825640ef2ab99123e22183627c7058476e5b3ce66222800a70c2cdd34700",
+      "renderedBytes": 19290,
+      "domNodes": 256,
+      "linkCount": 36,
+      "formCount": 2,
+      "controlCount": 4,
+      "buttonCount": 6,
+      "accessBarriers": [],
+      "submissionProtection": [],
+      "browser": "Chromium 153.0.8010.12",
+      "browserMode": "headless",
+      "settleMs": 2000
+    },
+    {
+      "id": "g-0305",
+      "url": "https://thehub.sia.govt.nz/",
+      "finalUrl": "https://thehub.sia.govt.nz/",
+      "navigatedAt": "2026-10-03T08:01:07Z",
+      "permitId": "p-0468",
+      "httpStatus": 200,
+      "loadState": "load",
+      "renderFile": "g1791014467491.html",
+      "renderedSha256": "a3c17c09bc6817b3b6ea50a6dda24be9a2510932b543176a5e9c2895ca5cdb41",
+      "renderedBytes": 27286,
+      "domNodes": 255,
+      "linkCount": 33,
+      "formCount": 1,
+      "controlCount": 2,
+      "buttonCount": 2,
+      "accessBarriers": [],
+      "submissionProtection": [],
+      "browser": "Chromium 153.0.8010.12",
+      "browserMode": "headless",
+      "settleMs": 2000
+    },
+    {
+      "id": "g-0306",
+      "url": "https://www.sia.govt.nz/search/SearchForm?Search=apply",
+      "finalUrl": "https://www.sia.govt.nz/search/SearchForm?Search=apply",
+      "navigatedAt": "2026-10-03T08:01:59Z",
+      "permitId": "p-0469",
+      "httpStatus": 500,
+      "loadState": "load",
+      "renderFile": "g1791014518922.html",
+      "renderedSha256": "8b89a5d67242f3febc589f195128340de2480aa55f6df6f0e6599e96de125de4",
+      "renderedBytes": 29784,
+      "domNodes": 329,
+      "linkCount": 32,
+      "formCount": 4,
+      "controlCount": 8,
+      "buttonCount": 8,
+      "accessBarriers": [],
+      "submissionProtection": [],
+      "browser": "Chromium 153.0.8010.12",
+      "browserMode": "headless",
+      "settleMs": 2000
+    },
+    {
+      "id": "g-0307",
+      "url": "https://www.sia.govt.nz/search/SearchForm?Search=application",
+      "finalUrl": "https://www.sia.govt.nz/search/SearchForm?Search=application",
+      "navigatedAt": "2026-10-03T08:02:10Z",
+      "permitId": "p-0470",
+      "httpStatus": 500,
+      "loadState": "load",
+      "renderFile": "g1791014530310.html",
+      "renderedSha256": "8b89a5d67242f3febc589f195128340de2480aa55f6df6f0e6599e96de125de4",
+      "renderedBytes": 29784,
+      "domNodes": 329,
+      "linkCount": 32,
+      "formCount": 4,
+      "controlCount": 8,
+      "buttonCount": 8,
+      "accessBarriers": [],
+      "submissionProtection": [],
+      "browser": "Chromium 153.0.8010.12",
+      "browserMode": "headless",
+      "settleMs": 2000
+    },
+    {
+      "id": "g-0308",
+      "url": "https://www.sia.govt.nz/search/SearchForm?Search=tono",
+      "finalUrl": "https://www.sia.govt.nz/search/SearchForm?Search=tono",
+      "navigatedAt": "2026-10-03T08:02:21Z",
+      "permitId": "p-0471",
+      "httpStatus": 500,
+      "loadState": "load",
+      "renderFile": "g1791014541189.html",
+      "renderedSha256": "8393b4217f93e2513551792911e040c238e51bacf973d5bacd28e14d14067d4f",
+      "renderedBytes": 29786,
+      "domNodes": 329,
+      "linkCount": 32,
+      "formCount": 4,
+      "controlCount": 8,
+      "buttonCount": 8,
+      "accessBarriers": [],
+      "submissionProtection": [],
+      "browser": "Chromium 153.0.8010.12",
+      "browserMode": "headless",
+      "settleMs": 2000
+    },
+    {
+      "id": "g-0309",
+      "url": "https://thehub.sia.govt.nz/search/?query=apply",
+      "finalUrl": "https://thehub.sia.govt.nz/search?query=apply",
+      "navigatedAt": "2026-10-03T08:02:38Z",
+      "permitId": "p-0472",
+      "httpStatus": 200,
+      "loadState": "load",
+      "renderFile": "g1791014558603.html",
+      "renderedSha256": "d4bd6e48516ab77af5baed89f45e3fb8f564b38d6fe10c612e0f675bb1b85696",
+      "renderedBytes": 95804,
+      "domNodes": 915,
+      "linkCount": 31,
+      "formCount": 2,
+      "controlCount": 191,
+      "buttonCount": 14,
+      "accessBarriers": [],
+      "submissionProtection": [],
+      "browser": "Chromium 153.0.8010.12",
+      "browserMode": "headless",
+      "settleMs": 2000
+    },
+    {
+      "id": "g-0310",
+      "url": "https://thehub.sia.govt.nz/search/?query=application",
+      "finalUrl": "https://thehub.sia.govt.nz/search?query=application",
+      "navigatedAt": "2026-10-03T08:02:50Z",
+      "permitId": "p-0473",
+      "httpStatus": 200,
+      "loadState": "load",
+      "renderFile": "g1791014570303.html",
+      "renderedSha256": "b89214a008a91727142c359ec6e0c1438293be44ab1c73317041a65333aaeb9f",
+      "renderedBytes": 95435,
+      "domNodes": 914,
+      "linkCount": 31,
+      "formCount": 2,
+      "controlCount": 191,
+      "buttonCount": 14,
+      "accessBarriers": [],
+      "submissionProtection": [],
+      "browser": "Chromium 153.0.8010.12",
+      "browserMode": "headless",
+      "settleMs": 2000
+    },
+    {
+      "id": "g-0311",
+      "url": "https://thehub.sia.govt.nz/search/?query=tono",
+      "finalUrl": "https://thehub.sia.govt.nz/search?query=tono",
+      "navigatedAt": "2026-10-03T08:03:00Z",
+      "permitId": "p-0474",
+      "httpStatus": 200,
+      "loadState": "load",
+      "renderFile": "g1791014580519.html",
+      "renderedSha256": "3620dfa54740f400c859e6868053cab513adce6a306cacbc13d177d8e04bd1ea",
+      "renderedBytes": 94982,
+      "domNodes": 914,
+      "linkCount": 31,
+      "formCount": 2,
+      "controlCount": 191,
+      "buttonCount": 14,
+      "accessBarriers": [],
+      "submissionProtection": [],
+      "browser": "Chromium 153.0.8010.12",
+      "browserMode": "headless",
+      "settleMs": 2000
     }
   ],
   "renderBacklog": {
@@ -8533,8 +8748,8 @@
     "urls": 0
   },
   "permits": {
-    "issued": 466,
-    "consumed": 459,
+    "issued": 477,
+    "consumed": 470,
     "recordedLate": 9,
     "lateRecords": [
       {
@@ -8614,7 +8829,7 @@
     "closedRecordingFailed": 3,
     "closedDuplicateRequest": 3,
     "open": 0,
-    "networkRequestsAuthorised": 465,
+    "networkRequestsAuthorised": 476,
     "closures": [
       {
         "closureId": "x-0001",
@@ -8728,7 +8943,8 @@
     "Ministry for Culture and Heritage / account-registration v1": 57,
     "Ministry for Culture and Heritage / service-application v1": 74,
     "Ministry for Culture and Heritage / enquiry-or-contact v1": 72,
-    "Social Investment Agency / account-registration v1": 17
+    "Social Investment Agency / account-registration v1": 17,
+    "Social Investment Agency / service-application v1": 19
   },
   "candidateSets": [
     {
@@ -9760,6 +9976,45 @@
         "d-0971",
         "d-0972",
         "d-0973"
+      ],
+      "discoveryMethods": [
+        "internal-search",
+        "navigation",
+        "robots",
+        "sitemap"
+      ]
+    },
+    {
+      "agency": "Social Investment Agency",
+      "category": "service-application",
+      "version": 1,
+      "discovered": 0,
+      "locked": 0,
+      "droppedBeyondBound": 0,
+      "lockedAt": "2026-10-03T08:05:02Z",
+      "approval": "pending",
+      "approvedAt": null,
+      "approvalNote": null,
+      "supportedByDiscoveryRecords": [
+        "d-0977",
+        "d-0978",
+        "d-0979",
+        "d-0980",
+        "d-0981",
+        "d-0982",
+        "d-0983",
+        "d-0984",
+        "d-0985",
+        "d-0986",
+        "d-0987",
+        "d-0988",
+        "d-0989",
+        "d-0990",
+        "d-0991",
+        "d-0992",
+        "d-0993",
+        "d-0994",
+        "d-0995"
       ],
       "discoveryMethods": [
         "internal-search",
