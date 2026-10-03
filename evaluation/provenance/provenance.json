@@ -13,12 +13,12 @@
   },
   "counts": {
     "discoveryPages": 892,
-    "candidatesAssessed": 83,
+    "candidatesAssessed": 84,
     "captured": 9,
-    "excluded": 47,
+    "excluded": 48,
     "failed": 1,
     "captureBlocked": 0,
-    "pendingApprovalAttempts": 1,
+    "pendingApprovalAttempts": 0,
     "pendingApprovalCandidateSets": 0
   },
   "discoveryByMethod": {
