@@ -17,7 +17,10 @@
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync, renameSync, unlinkSync, mkdirSync, readdirSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
-import { LEDGER_HEADER, recordExamination, CATEGORIES, needsHeadedFallback } from './capture.mjs';
+import {
+  LEDGER_HEADER, recordExamination, CATEGORIES, needsHeadedFallback,
+  STRUCTURAL_REPORT_VERSION,
+} from './capture.mjs';
 import { POLICY } from './politeness.mjs';
 import { DISCOVERY_EVIDENCE, RENDERED_METHODS } from './render-discovery.mjs';
 import { evaluatePolicy } from './robots-policy.mjs';
@@ -4042,6 +4045,139 @@ export function policyReuseProblems(log, attempt) {
 }
 
 /**
+ * Amendment 59. Records written on or after this instant must carry a structural report.
+ *
+ * An explicit boundary, because the version marker alone cannot distinguish "no report was ever
+ * taken" from "the page had no name field" for the 348 attempts and 319 renders that predate the
+ * repair. Grandfathering by a stated timestamp is auditable; inferring it from the marker's absence
+ * would be circular.
+ */
+export const STRUCTURAL_REPORT_REQUIRED_FROM = Date.parse('2026-10-04T02:00:00Z');
+
+/** Did this record obtain a document for `detectBlocking` to run on? */
+export function bearsDocument(record) {
+  if (!record) return false;
+  if (record.refused === true) return false;
+  return /^[0-9a-f]{64}$/.test(record.htmlSha256 ?? '') ||
+    /^[0-9a-f]{64}$/.test(record.renderedSha256 ?? '');
+}
+
+/**
+ * Amendment 59. Is this record's structural report present, well formed and self-consistent?
+ *
+ * `detectBlocking` computed four fields and both writers dropped them, so across the whole log the
+ * name-field report was persisted nowhere and the affordance report survived on one hand-populated
+ * render. Presence is therefore the first thing checked - but only the first. A report whose counts
+ * disagree with its own `nameFields` would be worse than none, because a reader takes the counts as
+ * the finding; and a report copied onto a record for a different page would attribute one
+ * document's structure to another.
+ */
+export function structuralReportProblems(record, { citedFrom = null } = {}) {
+  const problems = [];
+  if (!record) return ['there is no record to check'];
+  const FIELDS = ['registrationAffordances', 'nameFields', 'collectedNameFields', 'searchKeyNameFields'];
+  const at = Date.parse(record.capturedAt ?? record.examinedAt ?? '');
+  const required = bearsDocument(record) && !Number.isNaN(at) && at >= STRUCTURAL_REPORT_REQUIRED_FROM;
+  const present = FIELDS.some((f) => record[f] !== undefined) || record.structuralReportVersion !== undefined;
+
+  if (!bearsDocument(record) && present) {
+    return ['carries a structural report although it obtained no document; there was nothing to inspect'];
+  }
+  if (required && !present) {
+    return [
+      'obtained a document but carries no structural report; Amendments 46 and 51 require one, and ' +
+        'it was computed and discarded for the whole log before Amendment 59',
+    ];
+  }
+  if (!present) return problems;
+
+  // A record from before the boundary may carry a PARTIAL report and must not be failed for it.
+  // `g-0163`'s `registrationAffordances` was populated by hand during the Amendment 46
+  // reclassification: it is real evidence, derived from the retained bytes, and materially
+  // different from a report that never existed. What it must not do is pass as a current one, and
+  // the absent version marker is exactly what says so.
+  const current = required;
+  if (current && record.structuralReportVersion !== STRUCTURAL_REPORT_VERSION) {
+    problems.push(
+      `records structuralReportVersion ${JSON.stringify(record.structuralReportVersion)}, not ` +
+        `${STRUCTURAL_REPORT_VERSION}; an unversioned or older report must not pass as a current one`
+    );
+  }
+  if (!current && record.structuralReportVersion !== undefined &&
+      record.structuralReportVersion !== STRUCTURAL_REPORT_VERSION) {
+    problems.push(
+      `records structuralReportVersion ${JSON.stringify(record.structuralReportVersion)}, which is ` +
+        'not a version this protocol has issued'
+    );
+  }
+  for (const f of ['registrationAffordances', 'nameFields']) {
+    if (record[f] === undefined && !current) continue;
+    if (!Array.isArray(record[f])) problems.push(`${f} is ${JSON.stringify(record[f])}, not an array`);
+  }
+  for (const f of ['collectedNameFields', 'searchKeyNameFields']) {
+    if (record[f] === undefined && !current) continue;
+    if (!Number.isInteger(record[f]) || record[f] < 0) {
+      problems.push(`${f} is ${JSON.stringify(record[f])}, not a count`);
+    }
+  }
+  if (Array.isArray(record.nameFields)) {
+    for (const [i, f] of record.nameFields.entries()) {
+      if (!f || typeof f !== 'object') { problems.push(`nameFields[${i}] is not an object`); continue; }
+      if (!['collection', 'query'].includes(f.role)) {
+        problems.push(`nameFields[${i}].role is ${JSON.stringify(f.role)}, not collection or query`);
+      }
+      if (!Array.isArray(f.basis)) problems.push(`nameFields[${i}].basis is not an array`);
+    }
+    const collected = record.nameFields.filter((f) => f?.role === 'collection').length;
+    const query = record.nameFields.filter((f) => f?.role === 'query').length;
+    if (Number.isInteger(record.collectedNameFields) && record.collectedNameFields !== collected) {
+      problems.push(`collectedNameFields is ${record.collectedNameFields}, but nameFields holds ${collected}`);
+    }
+    if (Number.isInteger(record.searchKeyNameFields) && record.searchKeyNameFields !== query) {
+      problems.push(`searchKeyNameFields is ${record.searchKeyNameFields}, but nameFields holds ${query}`);
+    }
+  }
+
+  if (citedFrom) {
+    if (canonicalise(citedFrom.url) !== canonicalise(record.url)) {
+      problems.push(
+        `carries a structural report while citing ${citedFrom.id}, which is ${citedFrom.url}, not ${record.url}`
+      );
+    }
+    for (const f of FIELDS) {
+      if (record[f] === undefined && citedFrom[f] === undefined) continue;
+      if (JSON.stringify(record[f]) !== JSON.stringify(citedFrom[f])) {
+        problems.push(`${f} differs from ${citedFrom.id}, the evidence it rests on`);
+      }
+    }
+    if (record.structuralReportVersion !== citedFrom.structuralReportVersion) {
+      problems.push(`structuralReportVersion differs from ${citedFrom.id}`);
+    }
+  }
+  return problems;
+}
+
+/** Every record and render, checked. Read by the corpus gate. */
+export function structuralReportAudit(log) {
+  const problems = [];
+  const byId = new Map((log.attempts ?? []).map((a) => [a.id, a]));
+  for (const a of log.attempts ?? []) {
+    if (isSuperseded(log, a) || isDiscoverySuperseded(log, a.id)) continue;
+    const source = a.promotedFrom ? byId.get(a.promotedFrom)
+      : (a.evidenceFromAttemptId ? byId.get(a.evidenceFromAttemptId) : null);
+    const carries = a.registrationAffordances !== undefined || a.nameFields !== undefined ||
+      a.structuralReportVersion !== undefined;
+    for (const p of structuralReportProblems(a, { citedFrom: carries ? source : null })) {
+      problems.push(`${a.id}: ${p}`);
+    }
+  }
+  for (const g of log.renders ?? []) {
+    for (const p of structuralReportProblems(g)) problems.push(`${g.id}: ${p}`);
+  }
+  return problems;
+}
+
+/**
  * Amendment 58. Does each round's policy documentation agree with the policy it actually acted on?
  *
  * A reuse record could cite `r-0083` while every permit in the round rested on `r-0084`: both real,
@@ -5226,6 +5362,12 @@ export function corpusBlockers(log, { capturesRoot = null } = {}) {
   if (reuse.length) {
     add('policy-reuse', `${reuse.length} policy-reuse record(s) do not rest on a policy that governed them`, reuse);
   }
+  // Amendment 59. The structural report must be present, well formed and self-consistent.
+  const structural = structuralReportAudit(log);
+  if (structural.length) {
+    add('structural-report', `${structural.length} record(s) have a missing or inconsistent structural report`, structural);
+  }
+
   // Amendment 58. And the documented policy must be the one the round decided under.
   const agreement = policyAgreementProblems(log);
   if (agreement.length) {

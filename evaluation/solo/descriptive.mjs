@@ -168,7 +168,7 @@ const FRAME_FILES = [
  * exhaustion records at all. A manifest that misnames its own protocol is worse than one that
  * omits it: a reader checking which rules a corpus was sealed under would be told the wrong ones.
  */
-export const SOLO_PROTOCOL_TAG = 'solo-protocol-v1.0.35';
+export const SOLO_PROTOCOL_TAG = 'solo-protocol-v1.0.36';
 
 /**
  * Two resolutions, mirrored from the capture package and checked equal by a test.
@@ -675,6 +675,108 @@ export function policyReuseProblems(log) {
  * must carry two reuse records, one per governing interval. Derived independently of the capture
  * package.
  */
+/** Amendment 59. The sealer's own structural-report check. */
+export const STRUCTURAL_REPORT_VERSION = 1;
+export const STRUCTURAL_REPORT_REQUIRED_FROM = Date.parse('2026-10-04T02:00:00Z');
+
+/**
+ * Amendment 59. Every document-bearing capture and render must carry a structural report, and a
+ * report that is present must be well formed, self-consistent, and consistent with any evidence it
+ * was taken from.
+ *
+ * Amendments 46 and 51 computed four fields in `detectBlocking` and both writers dropped them: the
+ * name-field report was persisted nowhere in 348 attempts and 319 renders, and an approved record
+ * cited "the structural name-field report is empty" when the field did not exist. Derived here
+ * independently of the capture package, which this file may not import, and grandfathered by an
+ * explicit boundary rather than by the marker's absence, which would be circular.
+ */
+export function structuralReportProblems(log) {
+  const problems = [];
+  const attempts = Array.isArray(log?.attempts) ? log.attempts : [];
+  const renders = Array.isArray(log?.renders) ? log.renders : [];
+  const superseded = new Set(
+    attempts.flatMap((a) => [a.supersedesAttemptId, a.supersedesDiscoveryId])
+      .filter((id) => id !== undefined && id !== null)
+  );
+  const canon = (u) => { try { const x = new URL(u); x.hash = ''; return x.href; } catch { return String(u); } };
+  const FIELDS = ['registrationAffordances', 'nameFields', 'collectedNameFields', 'searchKeyNameFields'];
+  const digest = /^[0-9a-f]{64}$/;
+  const bears = (r) => r?.refused !== true &&
+    (digest.test(r?.htmlSha256 ?? '') || digest.test(r?.renderedSha256 ?? ''));
+  const byId = new Map(attempts.map((a) => [a.id, a]));
+
+  const check = (r, label, citedFrom) => {
+    const at = Date.parse(r.capturedAt ?? r.examinedAt ?? '');
+    const current = bears(r) && !Number.isNaN(at) && at >= STRUCTURAL_REPORT_REQUIRED_FROM;
+    const present = FIELDS.some((f) => r[f] !== undefined) || r.structuralReportVersion !== undefined;
+    if (!bears(r) && present) {
+      problems.push(`${label} carries a structural report although it obtained no document`);
+      return;
+    }
+    if (current && !present) {
+      problems.push(`${label} obtained a document but carries no structural report`);
+      return;
+    }
+    if (!present) return;
+    if (current && r.structuralReportVersion !== STRUCTURAL_REPORT_VERSION) {
+      problems.push(`${label} records structuralReportVersion ${JSON.stringify(r.structuralReportVersion)}`);
+    }
+    if (!current && r.structuralReportVersion !== undefined &&
+        r.structuralReportVersion !== STRUCTURAL_REPORT_VERSION) {
+      problems.push(`${label} records an unissued structuralReportVersion`);
+    }
+    for (const f of ['registrationAffordances', 'nameFields']) {
+      if (r[f] === undefined && !current) continue;
+      if (!Array.isArray(r[f])) problems.push(`${label}.${f} is not an array`);
+    }
+    for (const f of ['collectedNameFields', 'searchKeyNameFields']) {
+      if (r[f] === undefined && !current) continue;
+      if (!Number.isInteger(r[f]) || r[f] < 0) problems.push(`${label}.${f} is not a count`);
+    }
+    if (Array.isArray(r.nameFields)) {
+      for (const [i, f] of r.nameFields.entries()) {
+        if (!f || typeof f !== 'object') { problems.push(`${label}.nameFields[${i}] is not an object`); continue; }
+        if (!['collection', 'query'].includes(f.role)) {
+          problems.push(`${label}.nameFields[${i}].role is ${JSON.stringify(f.role)}`);
+        }
+        if (!Array.isArray(f.basis)) problems.push(`${label}.nameFields[${i}].basis is not an array`);
+      }
+      const collected = r.nameFields.filter((f) => f?.role === 'collection').length;
+      const query = r.nameFields.filter((f) => f?.role === 'query').length;
+      if (Number.isInteger(r.collectedNameFields) && r.collectedNameFields !== collected) {
+        problems.push(`${label}.collectedNameFields is ${r.collectedNameFields}, but nameFields holds ${collected}`);
+      }
+      if (Number.isInteger(r.searchKeyNameFields) && r.searchKeyNameFields !== query) {
+        problems.push(`${label}.searchKeyNameFields is ${r.searchKeyNameFields}, but nameFields holds ${query}`);
+      }
+    }
+    if (citedFrom) {
+      if (canon(citedFrom.url) !== canon(r.url)) {
+        problems.push(`${label} carries a report while citing ${citedFrom.id}, which is a different page`);
+      }
+      for (const f of FIELDS) {
+        if (r[f] === undefined && citedFrom[f] === undefined) continue;
+        if (JSON.stringify(r[f]) !== JSON.stringify(citedFrom[f])) {
+          problems.push(`${label}.${f} differs from ${citedFrom.id}`);
+        }
+      }
+      if (r.structuralReportVersion !== citedFrom.structuralReportVersion) {
+        problems.push(`${label}.structuralReportVersion differs from ${citedFrom.id}`);
+      }
+    }
+  };
+
+  for (const a of attempts) {
+    if (superseded.has(a.id)) continue;
+    const source = a.promotedFrom ? byId.get(a.promotedFrom)
+      : (a.evidenceFromAttemptId ? byId.get(a.evidenceFromAttemptId) : null);
+    const carries = FIELDS.some((f) => a[f] !== undefined) || a.structuralReportVersion !== undefined;
+    check(a, a.id, carries ? source : null);
+  }
+  for (const g of renders) check(g, g.id, null);
+  return problems;
+}
+
 export function policyAgreementProblems(log) {
   const problems = [];
   const attempts = Array.isArray(log?.attempts) ? log.attempts : [];
@@ -1853,6 +1955,11 @@ export function sealCorpus({
         // Amendment 39. Evidence retrieved and never read must not reach a seal.
         for (const problem of unjudgedRenderProblems(log)) {
           problems.push(`unjudgedRender: ${problem}`);
+        }
+
+        // Amendment 59. The structural report must be present and consistent.
+        for (const problem of structuralReportProblems(log)) {
+          problems.push(`structuralReport: ${problem}`);
         }
 
         // Amendment 58. And the documented policy must be the one the round decided under.

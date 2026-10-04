@@ -4792,3 +4792,100 @@ The frozen method, the frozen criteria, the priority order and the robots proced
 The live state needs no repair: it contains no policy-reuse record at all, since Amendment 57 was
 frozen before any round used it. All earlier tags are preserved and unmoved, including the three
 revoked under Amendment 47.
+
+## Amendment 59 — the structural report was computed and discarded
+
+*Frozen as `selection-v1.0.56`, `capture-v1.0.31` and `solo-protocol-v1.0.36`, 4 October 2026.*
+
+No live record changes and no request occurs. The `c-0976` repair follows this freeze.
+
+### What was wrong
+
+Amendments 46 and 51 added four fields to `detectBlocking` — `registrationAffordances`,
+`nameFields`, `collectedNameFields`, `searchKeyNameFields` — and stated that the researcher's
+criterion-three assertion must be consistent with the recorded structural report. **Both writers
+dropped them.**
+
+| field | attempts carrying it | renders carrying it |
+| --- | --- | --- |
+| `accessBarriers` | 348 | 319 |
+| `submissionProtection` | 348 | 319 |
+| `authenticationSignals` | 348 | 319 |
+| `registrationAffordances` | 0 | **1** |
+| `nameFields` | **0** | **0** |
+| `collectedNameFields` | **0** | **0** |
+| `searchKeyNameFields` | **0** | **0** |
+
+Three fields were wired through and four were not. The single surviving affordance report, on
+`g-0163`, had been populated **by hand** during the Amendment 46 reclassification. So the contract
+both amendments announced had never held for a single record produced by the pipeline.
+
+It had already corrupted an approved decision. `c-0976` cites *"the structural name-field report is
+empty"* as its evidence that a login page asks for nobody's name. The field did not exist, so a
+`?? []` default was read as a finding — the same error this project made with `a.bytes` in Amendment
+45 and with `checkedAt` in the `r-0014` diagnosis.
+
+### Why both amendments' tests passed
+
+They tested `detectBlocking` in isolation. Testing the function proved the report was **computed**;
+nothing tested that it was **kept**. A unit test of a producer cannot see a consumer that throws the
+value away, and that is the whole shape of this defect.
+
+### The rules
+
+1. Every capture or render that **obtained a document** persists the four fields plus a
+   `structuralReportVersion`, built by one shared `structuralReport()` so the two pipelines cannot
+   diverge.
+2. A **refused** request, which obtained no document, must carry none of them: there was nothing to
+   inspect.
+3. The report must be **well formed**: arrays are arrays, counts are non-negative integers, each
+   `nameFields` entry has a `role` of `collection` or `query` and a `basis` array.
+4. The counts must be **the counts** — `collectedNameFields` and `searchKeyNameFields` recomputed
+   from `nameFields` and compared. An inconsistent count is worse than no report, because a reader
+   takes the count as the finding.
+5. A record carrying a report **copied** from evidence it cites — a promotion or an
+   `evidenceFromAttemptId` citation — must match that source field for field, and must be of the
+   **same page**.
+6. A **version marker**, so evidence predating this amendment cannot pass as newly generated.
+7. Enforced at the corpus gate and **independently in the sealer**.
+
+### Grandfathering, by a stated boundary
+
+`STRUCTURAL_REPORT_REQUIRED_FROM` is an explicit instant. Records bearing a document from before it
+may carry no report, or a **partial** one, without failing — `g-0163`'s hand-derived affordances are
+real evidence and materially different from a report that never existed, and failing them would be
+rewriting history. What a pre-boundary record may not do is claim a current version, which is
+exactly what the marker prevents. Inferring the era from the marker's absence would have been
+circular, which is why the boundary is stated rather than derived.
+
+### The live report is not an offline replay
+
+Where a fact can be re-derived from retained markup it is. `nameFields` **cannot** be, because it
+depends on visibility, and saved HTML has no external stylesheets: replaying it can show controls
+the live page hid, or hide controls it showed. So the live report is the authority, and the
+limitation is **tested** rather than assumed — a test captures a page whose form is visible, replays
+the same saved bytes under a stylesheet that hides it, and asserts the two disagree.
+
+### Tests
+
+`capture/test/structural-report.test.mjs` (21) drives **both real pipelines** against a served page
+with a genuine contact form: `capturePage` and `renderDiscoveryPage` each asserted to persist the
+report on the record a reader will read, with the name field found and classified as `collection`,
+and a record-search page asserted to yield a `query` field instead. Then the refusals: a refused
+request carrying a report, a document-bearing record after the boundary carrying none, a
+non-array `nameFields`, a bad `role`, a missing `basis`, a count that is not a count, counts
+inconsistent with `nameFields`, an absent version, an unissued version, a report differing from the
+evidence it cites, a report attached to evidence for another URL, and the corpus gate raising each.
+Pre-boundary records with no report and with a partial report are asserted **accepted**.
+
+The audit of the active approved log found **one** record resting on a report that never existed:
+`c-0976`. Four Amendment 44 dispositions, `d-0688` and `c-0729` citing `g-0163`'s real affordances,
+and six records citing the fetch registry all rest on evidence that does exist.
+
+The capture suite is **757** tests and the solo suite **152**.
+
+### What this does not change
+
+The frozen method, the frozen criteria, the priority order, the canonicalisation rule and the robots
+procedure are untouched. No record is deleted. All earlier tags are preserved and unmoved, including
+the three revoked under Amendment 47.

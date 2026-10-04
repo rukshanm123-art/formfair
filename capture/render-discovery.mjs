@@ -24,7 +24,10 @@
 import { createHash } from 'node:crypto';
 import { mkdirSync, writeFileSync, existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { detectBlocking, validateUrl, VIEWPORT, LOCALE, NAVIGATION_TIMEOUT_MS, LOAD_EVENT_TIMEOUT_MS } from './capture.mjs';
+import {
+  detectBlocking, validateUrl, VIEWPORT, LOCALE, NAVIGATION_TIMEOUT_MS, LOAD_EVENT_TIMEOUT_MS,
+  structuralReport,
+} from './capture.mjs';
 import { POLICY } from './politeness.mjs';
 import { installRedirectGuard, isRefusedNavigation, REFUSE_ALL_REDIRECTS } from './redirect-guard.mjs';
 
@@ -210,6 +213,8 @@ export async function renderDiscoveryPage({
       accessBarriers: blocking.accessBarriers,
       submissionProtection: blocking.submissionProtection,
       authenticationSignals: blocking.authenticationSignals,
+      // Amendment 59. The structural report, persisted on the render as well as the capture.
+      ...structuralReport(blocking),
       title: found.title,
       domNodes: found.domNodes,
       links: [...new Set(found.links)],

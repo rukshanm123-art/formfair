@@ -416,6 +416,36 @@ export function classifyNameField(facts = {}) {
   };
 }
 
+/**
+ * Amendment 59. The version of the structural report, so old evidence cannot pass as new.
+ *
+ * Amendments 46 and 51 computed `registrationAffordances`, `nameFields`, `collectedNameFields` and
+ * `searchKeyNameFields` in `detectBlocking` and BOTH writers dropped them: across 348 attempts and
+ * 319 renders the name-field report was persisted nowhere, and the affordance report survived on a
+ * single render that had been populated by hand. The amendments' stated contract - that the
+ * researcher's criterion-three assertion must be consistent with a recorded structural report - had
+ * therefore never held, and `c-0976` cited "the structural name-field report is empty" as evidence
+ * when the field did not exist. A `?? []` default read as a finding.
+ *
+ * A version marker is part of the repair: without it, evidence captured before this amendment would
+ * be indistinguishable from evidence whose report was genuinely empty, and the gate could not tell
+ * "no report was ever taken" from "the page had no name field".
+ */
+export const STRUCTURAL_REPORT_VERSION = 1;
+
+/** The four fields every document-bearing capture and render must carry, from one place. */
+export function structuralReport(blocking) {
+  const nameFields = Array.isArray(blocking?.nameFields) ? blocking.nameFields : [];
+  return {
+    structuralReportVersion: STRUCTURAL_REPORT_VERSION,
+    registrationAffordances: Array.isArray(blocking?.registrationAffordances)
+      ? blocking.registrationAffordances : [],
+    nameFields,
+    collectedNameFields: nameFields.filter((f) => f?.role === 'collection').length,
+    searchKeyNameFields: nameFields.filter((f) => f?.role === 'query').length,
+  };
+}
+
 /** A sign-in wall is a fact about the page; everything else may be bot management. */
 const isAuthBarrier = (barrier) => /sign-in wall/.test(barrier);
 
@@ -581,6 +611,8 @@ export async function capturePage({
       accessBarriers: blocking.accessBarriers,
       submissionProtection: blocking.submissionProtection,
       authenticationSignals: blocking.authenticationSignals,
+      // Amendment 59. The structural report, persisted. It was computed here and dropped.
+      ...structuralReport(blocking),
       userAgent,
       settleMs,
       // 'load' for a page captured at the load event, 'domcontentloaded' for one whose
