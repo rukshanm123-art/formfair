@@ -5132,3 +5132,35 @@ stands. Criterion four for its page remains **unestablished**: this amendment ma
 recordable, and does not make it.
 
 *Frozen as `selection-v1.0.59`, `capture-v1.0.34` and `solo-protocol-v1.0.39`, 4 October 2026.*
+
+## Amendment 63 — a promotion inherits the bytes, not the re-retrieval marker
+
+*4 October 2026.* Amendment 62 refuses a decision that carries `extendsAttemptId`, because a
+decision makes no request: the re-retrieval gathers the evidence and the decision is recorded from
+it afterwards. That rule is right, and `promote` carries the retrieval's fields forward, so the
+promotion inherited the marker and Amendment 62 refused its own intended outcome:
+
+> a captured record may not extend c-1017; only an evidence-only retrieval re-retrieves a page
+
+This is the performing-versus-inheriting confusion Amendment 61 resolved for the structural report,
+reappearing one field along, and it was found the same way: by trying to record the thing the
+amendment existed to make recordable.
+
+`extendsAttemptId` stays on the record that performed the re-retrieval. `promote` no longer copies
+it, and nothing is lost — the decision names `promotedFrom`, that retrieval carries
+`extendsAttemptId`, and the chain from decision to re-retrieval to the earlier retrieval stays
+readable in the log and the ledger. A record that asserts the marker outright is still refused, so
+dropping it on promotion does not weaken the rule.
+
+`capture/test/pre-request-refusal.test.mjs` (10) adds the promotion through the real command,
+asserting the decision carries no marker, the chain resolves, and the live report still rides with
+the bytes it rests on.
+
+The capture suite is **788** tests, the solo suite **162**, and the evaluation suite **244**.
+
+### What this does not change
+
+The frozen method, the frozen criteria, the priority order and the robots procedure are untouched.
+`c-1017` and `c-1022` both stand. No request was made for this correction.
+
+*Frozen as `selection-v1.0.60`, `capture-v1.0.35` and `solo-protocol-v1.0.40`, 4 October 2026.*

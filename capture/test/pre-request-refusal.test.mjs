@@ -261,3 +261,53 @@ describe('the rules are one implementation, called from both places', () => {
     assert.equal(preRequestProblems(log, attempt).length, 1);
   });
 });
+
+describe('Amendment 63: a promotion inherits the bytes, not the re-retrieval marker', () => {
+  // Amendment 62 refuses a decision that extends, because a decision makes no request. A
+  // promotion carries the retrieval's fields forward, so it inherited `extendsAttemptId` and
+  // Amendment 62's own rule refused it: "a captured record may not extend c-1017". That is the
+  // performing-versus-inheriting confusion Amendment 61 resolved for the structural report,
+  // reappearing one field along. Reproduced against the live log before this fix.
+  test('the promotion is permitted, and the chain to the earlier retrieval stays readable', started(async (dir) => {
+    await lockedRound(dir);
+    assert.equal((await retrieve(dir, 'contact')).status, 0);
+    const path = join(dir, 'capture-log.json');
+    const edited = JSON.parse(readFileSync(path, 'utf8'));
+    const first = edited.attempts.filter((a) => a.status === 'retrieved').at(-1);
+    const target = edited.attempts.find((a) => a.id === first.id);
+    for (const f of ['structuralReportVersion', 'structuralReportSource', 'registrationAffordances',
+      'nameFields', 'collectedNameFields', 'searchKeyNameFields']) delete target[f];
+    target.capturedAt = '2026-10-04T01:16:04Z';
+    target.examinedAt = '2026-10-04T01:16:04Z';
+    writeFileSync(path, `${JSON.stringify(edited, null, 2)}\n`);
+
+    assert.equal((await retrieve(dir, 'contact-live', ['--extends', first.id])).status, 0);
+    const reRetrieval = reopen(dir).attempts.filter((a) => a.status === 'retrieved').at(-1);
+    assert.equal(reRetrieval.extendsAttemptId, first.id);
+
+    const promoted = await run(['promote', '--id', reRetrieval.id, '--evidence', 'a visible name field'], dir);
+    assert.equal(promoted.status, 0, promoted.stderr);
+
+    const log = reopen(dir);
+    const capture = log.attempts.find((a) => a.status === 'captured');
+    // The decision does not claim to have made the request.
+    assert.equal(capture.extendsAttemptId, undefined);
+    // And nothing is lost: decision -> re-retrieval -> the retrieval it extended.
+    assert.equal(capture.promotedFrom, reRetrieval.id);
+    assert.equal(log.attempts.find((a) => a.id === capture.promotedFrom).extendsAttemptId, first.id);
+    // The live report still rides along, because those are the bytes it rests on.
+    assert.equal(capture.structuralReportSource, 'live');
+    assert.equal(capture.collectedNameFields, 1);
+    assert.deepEqual(structuralReportAudit(log, { capturesRoot: dir }), []);
+  }));
+
+  test('a decision that asserts the marker itself is still refused', () => {
+    // Dropping it on promotion must not weaken the rule for a record that claims it outright.
+    const prior = { id: 'c-1', status: 'retrieved', agency: 'A', url: 'https://a.govt.nz/c', pageId: 'p1' };
+    const decision = {
+      id: 'c-2', status: 'captured', agency: 'A', url: 'https://a.govt.nz/c', pageId: 'p2',
+      extendsAttemptId: 'c-1',
+    };
+    assert.match(extendsTargetProblem({ attempts: [prior, decision] }, decision), /may not extend/);
+  });
+});

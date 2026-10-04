@@ -783,7 +783,18 @@ function doPromote() {
     );
   }
 
-  const { id: _drop, examinedAt: _at, status: _st, eligibility: _el, approval: _ap, ...carried } = retrieved;
+  // Amendment 63. `extendsAttemptId` stays on the record that PERFORMED the re-retrieval.
+  //
+  // Amendment 62 refuses a decision that extends, because a decision makes no request and the
+  // decision is recorded from the retrieval afterwards. A promotion carries the retrieval's fields
+  // forward, so it inherited the marker and its own rule refused it - the same performing-versus-
+  // inheriting confusion Amendment 61 resolved for the structural report. Nothing is lost by
+  // dropping it: the decision names `promotedFrom`, that retrieval carries `extendsAttemptId`, and
+  // the chain from decision to re-retrieval to the earlier retrieval stays readable.
+  const {
+    id: _drop, examinedAt: _at, status: _st, eligibility: _el, approval: _ap,
+    extendsAttemptId: _ext, ...carried
+  } = retrieved;
   appendAttempt(log, {
     ...carried,
     examinedAt: now(),
