@@ -168,7 +168,7 @@ const FRAME_FILES = [
  * exhaustion records at all. A manifest that misnames its own protocol is worse than one that
  * omits it: a reader checking which rules a corpus was sealed under would be told the wrong ones.
  */
-export const SOLO_PROTOCOL_TAG = 'solo-protocol-v1.0.38';
+export const SOLO_PROTOCOL_TAG = 'solo-protocol-v1.0.39';
 
 /**
  * Two resolutions, mirrored from the capture package and checked equal by a test.
@@ -772,6 +772,57 @@ export function offlineStructuralReport(html) {
     collectedNameFields: nameFields.filter((f) => f.role === 'collection').length,
     searchKeyNameFields: nameFields.filter((f) => f.role === 'query').length,
   };
+}
+
+/**
+ * An authorised re-retrieval, checked independently of the capture package.
+ *
+ * Amendment 62. A second request for a page already retrieved is permitted only to obtain evidence
+ * the first retrieval does not carry. The capture package refuses this before the request; this
+ * mirror refuses it at the seal, so a record written by some other path cannot pass. It is NOT a
+ * copy rule: an extending retrieval has its own bytes and its own live report, which is the whole
+ * reason the request was made.
+ */
+export function reRetrievalProblems(log) {
+  const problems = [];
+  const attempts = Array.isArray(log?.attempts) ? log.attempts : [];
+  const byId = new Map(attempts.map((a) => [a.id, a]));
+  const superseded = new Set(
+    attempts.flatMap((a) => [a.supersedesAttemptId, a.supersedesDiscoveryId]).filter((id) => id != null)
+  );
+  const canon = (u) => { try { const x = new URL(u); x.hash = ''; return x.href; } catch { return String(u); } };
+  for (const a of attempts) {
+    if (!a.extendsAttemptId || superseded.has(a.id)) continue;
+    const prior = byId.get(a.extendsAttemptId);
+    if (!prior) { problems.push(`${a.id} extends ${a.extendsAttemptId}, which is not a recorded attempt`); continue; }
+    if (a.status !== 'retrieved') {
+      problems.push(`${a.id} is a ${a.status} record extending ${prior.id}; only a retrieval re-retrieves a page`);
+    }
+    if (prior.status !== 'retrieved') {
+      problems.push(`${a.id} extends ${prior.id}, which is a ${prior.status} attempt, not an evidence-only retrieval`);
+    }
+    if (superseded.has(prior.id)) {
+      problems.push(`${a.id} extends ${prior.id}, which has been superseded and is not standing evidence`);
+    }
+    if (prior.agency !== a.agency || canon(prior.url) !== canon(a.url)) {
+      problems.push(`${a.id} extends ${prior.id}, which is a different page or agency`);
+    }
+    // Nothing a second request would establish means the request should not have been made.
+    const complete = prior.structuralReportVersion === STRUCTURAL_REPORT_VERSION &&
+      prior.structuralReportSource === 'live' &&
+      Array.isArray(prior.registrationAffordances) && Array.isArray(prior.nameFields) &&
+      Number.isInteger(prior.collectedNameFields) && Number.isInteger(prior.searchKeyNameFields);
+    if (complete) {
+      problems.push(`${a.id} re-retrieved a page whose retrieval ${prior.id} already carried a complete live report`);
+    }
+    if (a.pageId && a.pageId === prior.pageId) {
+      problems.push(`${a.id} reuses the pageId of ${prior.id}; a re-retrieval carries its own bytes`);
+    }
+    if (a.supersedesAttemptId === prior.id) {
+      problems.push(`${a.id} supersedes ${prior.id} while extending it; the earlier retrieval is incomplete, not false`);
+    }
+  }
+  return problems;
 }
 
 export function structuralReportProblems(log, { capturesRoot = null } = {}) {
@@ -2119,6 +2170,9 @@ export function sealCorpus({
         }
 
         // Amendment 59. The structural report must be present and consistent.
+        for (const problem of reRetrievalProblems(log)) {
+          problems.push(`${where}: ${problem}`);
+        }
         for (const problem of structuralReportProblems(log, { capturesRoot: logRoot })) {
           problems.push(`structuralReport: ${problem}`);
         }

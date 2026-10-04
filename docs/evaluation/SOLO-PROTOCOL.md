@@ -5047,3 +5047,88 @@ no version. The live log audits clean at both trust points under every rule abov
 are preserved and unmoved.
 
 *Frozen as `selection-v1.0.58`, `capture-v1.0.33` and `solo-protocol-v1.0.38`, 4 October 2026.*
+
+## Amendment 62 — a refusal must not cost a request
+
+*4 October 2026.* The researcher authorised exactly **one** fresh retrieval of
+`www.sia.govt.nz/about/contact-us`, to obtain the live structural report `c-1017` lacks and
+criterion four needs. The request was made, the page was fetched, the live structural report was
+computed — and then the write was refused, because the duplicate-URL rule had no way to express an
+authorised re-retrieval. The bytes were quarantined and the computed record was discarded. One
+authorised request was spent on a write that could never have succeeded, and the single thing an
+offline replay cannot reproduce was the thing thrown away.
+
+`render-discovery` already carried this lesson, recorded against permits: *"A permit is meant to be
+a precondition of traffic, not a comment on it."* The identity rules had never been given it.
+
+### Checked before the request, because the response cannot change the answer
+
+A colliding `pageId` and an already-recorded URL are decidable from the log and the arguments
+alone. They are now refused before robots is consulted and before anything is fetched, and the
+refusal says so: *nothing was requested, fetched or written*. The same applies to the identity of a
+supersession target and of a re-retrieval target. The checks that genuinely need the response — a
+redirect's final URL, the digest, the byte length — necessarily stay at write time.
+
+The rules are **one implementation each**, called from both the pre-request gate and
+`appendAttempt`, because this project keeps rediscovering the same hole wherever one rule is
+enforced in two places.
+
+### An authorised re-retrieval is now expressible
+
+`c-1017` retrieved its page truthfully before the report boundary and carries no structural report.
+It is **incomplete, not false**. Amendment 59 proved an offline replay cannot establish live
+visibility, so the only way to settle the candidate is to request the page once more — and the
+duplicate-URL rule could not say that, because the earlier record is neither rejected nor an
+evidence citation.
+
+`extendsAttemptId` names a **standing evidence-only retrieval of the same page for the same
+agency** which lacks a complete current report. It does **not** supersede it. It carries its own
+`pageId` and file, so neither retrieval's bytes are overwritten, and it is not a copy: an extending
+retrieval has its own live report, which is the entire reason the request was made. A decision may
+not extend — the decision is recorded from the new retrieval afterwards. Every one of these is
+decidable before the request, which is the point: a re-retrieval that would establish nothing must
+cost nothing to refuse.
+
+### Pacing is an obligation on traffic, so it precedes the traffic
+
+The pacer held `last = 0` in every process, so the **first navigation of each CLI invocation never
+waited**, and the five-second floor was enforced only by `appendAttempt` refusing to record the
+attempt — by which time the impolite request had already been sent. The pacer is now seeded from
+the log's last recorded navigation, so a separate invocation waits instead of requesting and being
+refused. The write-time check stays as a backstop: it verifies rather than trusts.
+
+### What a refused write must keep
+
+A failed write quarantined the bytes and dropped the computed record. A live structural report
+cannot be re-derived from retained markup, and an authorised request cannot be repeated for free,
+so the quarantine now keeps the computed record beside the bytes, clearly marked **not a log
+record**. Nothing reads it as one.
+
+### Tests
+
+`capture/test/pre-request-refusal.test.mjs` (8) counts the requests the test server actually
+received: asserting a non-zero exit proves nothing, because the refusal that cost a request exited
+non-zero too. It covers a duplicate URL, a colliding `pageId`, a re-retrieval that would establish
+nothing, and `--extends` on a decision — each asserted to have fetched **nothing, not even
+robots** — then the authorised re-retrieval making its request and recording a live report while
+the first retrieval stands unsuperseded with its own bytes, and a write refused after the request
+keeping the computed report in quarantine.
+`evaluation/solo/test/re-retrieval.test.mjs` (10) drives the capture rule and the sealer's
+independent mirror over one table and requires them to agree, because Amendment 61's Finding 4
+reached only one of the two.
+
+Two fixtures were corrected by the rules themselves while writing these tests: a stub standing in
+for `c-1017` set only `capturedAt`, and Amendment 61 rightly read the CLI's own `examinedAt` and
+demanded a report; and a staged write failure was pre-empted by the new pre-request gate, so the
+test was rebuilt on a redirect's final URL — a failure only the response can reveal.
+
+The capture suite is **786** tests, the solo suite **162**, and the evaluation suite **244**.
+
+### What this does not change
+
+The frozen method, the frozen criteria, the priority order and the robots procedure are untouched.
+No robots policy was refetched for any of this, and `r-0085` remained fresh throughout. `c-1017`
+stands. Criterion four for its page remains **unestablished**: this amendment makes the request
+recordable, and does not make it.
+
+*Frozen as `selection-v1.0.59`, `capture-v1.0.34` and `solo-protocol-v1.0.39`, 4 October 2026.*

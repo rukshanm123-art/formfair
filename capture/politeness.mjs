@@ -123,10 +123,20 @@ export function isAllowed(groups, pathname, agentToken = '*') {
 }
 
 /** Paces top-level navigations across a whole run, including any crawl-delay asked for. */
-export function createPacer({ minDelayMs = POLICY.minDelayBetweenNavigationsMs, sleep } = {}) {
-  let last = 0;
+export function createPacer({ minDelayMs = POLICY.minDelayBetweenNavigationsMs, sleep, last = 0 } = {}) {
   const wait = sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
   return {
+    /**
+     * Amendment 62. The pacer starts at zero in every process, so the FIRST navigation of each CLI
+     * invocation never waited, and the five-second floor was enforced only by `appendAttempt`
+     * refusing to record the attempt afterwards - by which time the impolite request had already
+     * been sent. Pacing is an obligation on traffic, so it has to be honoured before the traffic.
+     * Seeding from the log's last recorded navigation makes a separate invocation wait rather than
+     * request and be refused.
+     */
+    seen(atMs) {
+      if (typeof atMs === 'number' && Number.isFinite(atMs)) last = Math.max(last, atMs);
+    },
     async beforeNavigation(crawlDelaySeconds = null) {
       const required = Math.max(minDelayMs, (crawlDelaySeconds ?? 0) * 1000);
       const elapsed = Date.now() - last;

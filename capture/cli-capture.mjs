@@ -35,6 +35,7 @@ import {
   unresolvedDiscoveryRounds, openDiscoveryPermits, robotsCheckIsFresh, isDiscoverySuperseded,
   reopenCandidateSet, closeDiscoveryPermit, permitAudit, PERMIT_DISPOSITIONS, corpusBlockers,
   quarantineArtefact, recordDeviation, agencyResolutions, agencyResolution, reResolveExhaustion,
+  preRequestProblems, lastNavigation,
   answerChain, sha256,
   renderBacklog, renderBacklogByUrl, renderPrerequisite, recordRender, findRender, RENDERED_DIR,
   recordFetch, findFetch, assertFetchEvidenceUsable, FETCHED_DIR, parseRetained,
@@ -232,10 +233,39 @@ async function doCapture() {
   // that superseded a rejected decision only when it happened to succeed would leave the
   // rejected one unresolved exactly when the rerun also failed.
   const supersedesAttemptId = flag('supersedes-attempt-id');
+  // Amendment 62. An authorised re-retrieval of a page already retrieved, naming the retrieval it
+  // extends. A decision does not extend: it is recorded from the new retrieval afterwards.
+  const extendsAttemptId = flag('extends');
+  if (extendsAttemptId && !retrieveOnly) {
+    die('--extends requires --retrieve-only: a re-retrieval gathers evidence and concludes nothing');
+  }
   const base = {
     examinedAt: now(), agency, website, url,
     ...(supersedesAttemptId ? { supersedesAttemptId } : {}),
+    ...(extendsAttemptId ? { extendsAttemptId } : {}),
   };
+
+  // Amendment 62. Refused BEFORE anything is requested, when it can be refused for free.
+  //
+  // These checks are a pure function of the log and the arguments, and they used to run only at
+  // write time - after the page had been fetched. The one authorised retrieval of
+  // www.sia.govt.nz/about/contact-us was spent on a write the duplicate-URL rule was always going
+  // to refuse, and the live structural report it had just computed was discarded with it.
+  const prospective = {
+    ...base, url, agency, category, pageId,
+    status: retrieveOnly ? 'retrieved' : 'captured',
+  };
+  // Amendment 62. Politeness honoured BEFORE the request, not checked after it. The pacer is
+  // per-process, so a separate invocation's first navigation never waited and the floor was
+  // enforced by refusing to record a request already sent.
+  pacer.seen(lastNavigation(log));
+  const blockers = preRequestProblems(log, prospective);
+  if (blockers.length) {
+    die(
+      `refusing to request ${url}:\n  ${blockers.join('\n  ')}\n` +
+        '  Nothing was requested, fetched or written.'
+    );
+  }
 
   // robots.txt decides before anything is fetched from the site itself.
   //
@@ -482,6 +512,24 @@ async function doCapture() {
       ? quarantineArtefact(capturesDir, record.file, { reason: `not adopted: ${error.message}` })
       : null;
     if (moved) console.error(`quarantined ${record.file} -> ${moved}`);
+    // Amendment 62. The RECORD too, not only the bytes. A live structural report cannot be
+    // re-derived from retained markup - Amendment 59 proved that - so discarding the computed
+    // record on a failed write throws away the one thing the request was made to obtain, and the
+    // request cannot be repeated for free. The sidecar is evidence of what was computed, not an
+    // adopted record: nothing reads it as a log entry.
+    if (moved) {
+      try {
+        const sidecar = `${moved}.record.json`;
+        writeFileSync(sidecar, JSON.stringify({
+          quarantinedAt: now(), reason: error.message,
+          note: 'Computed by the capture pipeline and refused at write time. NOT a log record.',
+          record,
+        }, null, 2) + '\n');
+        console.error(`kept the computed record -> ${sidecar}`);
+      } catch (writeError) {
+        console.error(`could not keep the computed record: ${writeError.message}`);
+      }
+    }
     throw error;
   }
   writeLog(logPath, log);
@@ -1412,6 +1460,9 @@ async function doRenderDiscovery() {
   const logPath = logPathFor(dir);
   const log = readLog(logPath);
   const renderedDir = join(resolve(dir), 'rendered');
+  // Amendment 62. The same reason the permit is checked below: pacing is a precondition of
+  // traffic, not a comment on it, and the pacer starts at zero in each process.
+  pacer.seen(lastNavigation(log));
 
   // The permit is checked BEFORE the browser opens. It used to be consumed after the render, so an
   // expired, closed or mismatched permit was discovered only once the request had already been made.

@@ -59,7 +59,7 @@ const sha256 = (v) => createHash('sha256').update(v).digest('hex');
 const isoUtcish = (v) => typeof v === 'string' && !Number.isNaN(Date.parse(v)) && v.endsWith('Z');
 
 /** The most recent recorded top-level navigation, whatever produced it. */
-function lastNavigation(log) {
+export function lastNavigation(log) {
   const times = log.attempts
     // selection-v1.0.11: a record that states no request was made must not contribute a
     // navigation time. The two `NOT NAVIGATED` search records carried `navigatedAt` and were
@@ -545,6 +545,136 @@ export function restatedEvidenceProblems(attempt) {
  * double-count, and refuses an attempt that fails its own checks rather than recording
  * something the seal will later have to interpret.
  */
+/** Amendment 62. The supersession target's identity - decidable before any request. */
+export function supersedesTargetProblem(log, attempt) {
+  if (!attempt.supersedesAttemptId) return null;
+  const target = (log.attempts ?? []).find((a) => a.id === attempt.supersedesAttemptId);
+  if (!target) return `supersedesAttemptId ${attempt.supersedesAttemptId} matches no recorded attempt`;
+  if (target.agency !== attempt.agency || target.url !== attempt.url) {
+    return (
+      `attempt ${target.id} is ${target.agency} / ${target.url}, which is not what this ` +
+      `attempt supersedes (${attempt.agency} / ${attempt.url})`
+    );
+  }
+  return null;
+}
+
+/**
+ * Amendment 62. An authorised RE-RETRIEVAL of a page already retrieved, for evidence the first
+ * retrieval does not carry.
+ *
+ * `c-1017` retrieved the SIA contact page truthfully before the report boundary and carries no
+ * structural report, and Amendment 59 proved an offline replay cannot establish the live
+ * visibility criterion four needs. So the only way to settle the candidate is to request the page
+ * once more - and the duplicate-URL rule had no way to express that, because the earlier record is
+ * neither rejected nor an evidence citation. This is deliberately narrow: it names a STANDING
+ * evidence-only retrieval of the same page which lacks a complete current report, it does NOT
+ * supersede it (that record is incomplete, not false), and it carries its own pageId so neither
+ * retrieval's bytes are overwritten. Every one of these is decidable before the request, which is
+ * the point: a re-retrieval that would establish nothing must cost nothing to refuse.
+ */
+export function extendsTargetProblem(log, attempt) {
+  if (!attempt.extendsAttemptId) return null;
+  const prior = (log.attempts ?? []).find((a) => a.id === attempt.extendsAttemptId);
+  if (!prior) return `extendsAttemptId names ${attempt.extendsAttemptId}, which is not a recorded attempt`;
+  if (attempt.status !== 'retrieved') {
+    return (
+      `a ${attempt.status} record may not extend ${prior.id}; only an evidence-only retrieval ` +
+      're-retrieves a page, and the decision is recorded from it afterwards'
+    );
+  }
+  if (prior.status !== 'retrieved') {
+    return `${prior.id} is a ${prior.status} attempt; extendsAttemptId names an evidence-only retrieval`;
+  }
+  if (isSuperseded(log, prior)) {
+    return `${prior.id} has been superseded; it is not standing evidence to extend`;
+  }
+  if (prior.agency !== attempt.agency || canonicalise(prior.url) !== canonicalise(attempt.url)) {
+    return (
+      `${prior.id} is ${prior.agency} / ${prior.url}, not ${attempt.agency} / ${attempt.url}; ` +
+      'a re-retrieval extends the same page for the same agency'
+    );
+  }
+  if (hasCompleteCurrentReport(prior)) {
+    return (
+      `${prior.id} already carries a complete live structural report; there is nothing a second ` +
+      'request would establish, so the page is not requested again'
+    );
+  }
+  if (attempt.pageId && prior.pageId === attempt.pageId) {
+    return `a re-retrieval must carry its own pageId; ${prior.pageId} belongs to ${prior.id} and its bytes stand`;
+  }
+  return null;
+}
+
+/**
+ * The duplicate-URL rule, as one function.
+ *
+ * Amendment 62. This lived inline in `appendAttempt`, which runs AFTER the page has been
+ * requested. It is a pure function of the log and the record's identity - nothing a response can
+ * change - so an authorised request was spent on a write that could never have succeeded. It is
+ * extracted so the same rule can decide before the request, and is not restated anywhere.
+ */
+export function duplicateUrlProblem(log, attempt) {
+  if (attempt.status === 'discovery') return null;
+  const priorForUrl = (log.attempts ?? []).filter(
+    (a) => a.status !== 'discovery' && a.agency === attempt.agency && a.url === attempt.url
+  );
+  if (priorForUrl.length === 0) return null;
+  // Each of these is a second record for one URL BY DESIGN, and each is validated on its own terms.
+  if (attempt.supersedesAttemptId) return null;
+  if (attempt.evidenceFromAttemptId) return null;
+  if (attempt.promotedFrom) return null;
+  if (attempt.extendsAttemptId) return null;
+  // A rejected decision is corrected by recording a NEW attempt that supersedes it. The original
+  // stays in the log: a correction that erases what it corrected is not a correction, and the
+  // ledger has to show what was decided first.
+  const rejected = priorForUrl.filter((a) => a.approval === APPROVAL.REJECTED && !isSuperseded(log, a));
+  if (attempt.supersedes === attempt.url && rejected.length > 0) return null;
+  const retrievals = priorForUrl.filter((a) => a.status === 'retrieved' && !isSuperseded(log, a));
+  return (
+    `url ${attempt.url} is already recorded for ${attempt.agency}` +
+    (rejected.length
+      ? '. Its decision was rejected; record the correction with ' +
+        `supersedesAttemptId set to ${rejected.map((a) => a.id).join(' or ')}.`
+      : '') +
+    (!rejected.length && retrievals.length
+      ? '. It holds an evidence-only retrieval; an authorised re-retrieval names it with ' +
+        `extendsAttemptId set to ${retrievals.map((a) => a.id).join(' or ')}.`
+      : '')
+  );
+}
+
+/**
+ * Everything refusable BEFORE the request, so a refusal costs nothing.
+ *
+ * Amendment 62. The identity checks do not depend on the response: a colliding pageId and an
+ * already-recorded URL are both decidable from the log and the arguments. Checking them only at
+ * write time meant the bytes were on the wire first, and the one authorised retrieval of
+ * `www.sia.govt.nz/about/contact-us` was consumed by a write that was always going to fail. The
+ * checks that genuinely need the response - a redirect's final URL, the digest - necessarily stay
+ * at write time.
+ */
+export function preRequestProblems(log, attempt) {
+  const problems = [];
+  const sameBytesAs = attempt.recordType === RECORD_TYPES.STRUCTURAL_REANALYSIS
+    ? attempt.evidenceFromAttemptId
+    : attempt.promotedFrom;
+  if (attempt.pageId && (log.attempts ?? []).some(
+    (a) => a.pageId === attempt.pageId && a.id !== sameBytesAs
+  )) {
+    problems.push(`pageId ${attempt.pageId} is already recorded`);
+  }
+  for (const problem of [
+    duplicateUrlProblem(log, attempt),
+    supersedesTargetProblem(log, attempt),
+    extendsTargetProblem(log, attempt),
+  ]) {
+    if (problem) problems.push(problem);
+  }
+  return problems;
+}
+
 export function appendAttempt(log, attempt) {
   const problems = [...checkAttempt(attempt), ...restatedEvidenceProblems(attempt)];
   if (problems.length) throw new Error(`invalid capture attempt:\n  ${problems.join('\n  ')}`);
@@ -562,6 +692,21 @@ export function appendAttempt(log, attempt) {
       `${attempt.promotedFrom} is a ${promotionOf.status} attempt; only an assessment-only ` +
         'retrieval is promoted'
     );
+  }
+  // Amendment 62. An authorised RE-RETRIEVAL of a page already retrieved, for evidence the first
+  // retrieval does not carry.
+  //
+  // `c-1017` retrieved this contact page truthfully before the report boundary and carries no
+  // structural report, and Amendment 59 proved an offline replay cannot establish the live
+  // visibility criterion four needs. So the only way to settle the candidate is to request the
+  // page once more - and the duplicate-URL rule had no way to express that, because the earlier
+  // record is neither rejected nor an evidence citation. This is deliberately narrow: it names a
+  // standing evidence-only retrieval of the same page, which must lack a complete current report,
+  // it does NOT supersede it (that record is incomplete, not false), and it carries its own
+  // pageId and file so neither retrieval's bytes are overwritten.
+  if (attempt.extendsAttemptId) {
+    const problem = extendsTargetProblem(log, attempt);
+    if (problem) throw new Error(problem);
   }
   // Amendment 61. A structural reanalysis names the evidence it re-read, exactly as a promotion
   // names the retrieval it settles: same bytes, same identity, a reading added rather than a
@@ -922,16 +1067,10 @@ export function appendAttempt(log, attempt) {
     }
   }
   if (attempt.supersedesAttemptId) {
+    // Amendment 62. The same two checks the pre-request gate runs, from one implementation.
+    const identity = supersedesTargetProblem(log, attempt);
+    if (identity) throw new Error(identity);
     const target = log.attempts.find((a) => a.id === attempt.supersedesAttemptId);
-    if (!target) {
-      throw new Error(`supersedesAttemptId ${attempt.supersedesAttemptId} matches no recorded attempt`);
-    }
-    if (target.agency !== attempt.agency || target.url !== attempt.url) {
-      throw new Error(
-        `attempt ${target.id} is ${target.agency} / ${target.url}, which is not what this ` +
-          `attempt supersedes (${attempt.agency} / ${attempt.url})`
-      );
-    }
     // Amendment 40. A retrieval is not a decision, so there is nothing to reject before resolving
     // it. Its whole purpose is to be read and then settled - excluded from, or promoted - and
     // requiring a rejection first would mean recording a verdict on the page in order to be allowed
@@ -963,20 +1102,10 @@ export function appendAttempt(log, attempt) {
     // Amendment 40. A promotion is the same candidate, the same URL and the same bytes; the
     // duplicate-URL rule exists to stop one page being counted twice, and a promotion counts once.
     // `promotedFrom` is validated above against a real retrieval of this page.
-  } else if (priorForUrl.length > 0) {
-    // A rejected decision is corrected by recording a NEW attempt that supersedes it. The
-    // original stays in the log: a correction that erases what it corrected is not a
-    // correction, and the ledger has to show what was decided first.
-    const rejected = priorForUrl.filter((a) => a.approval === APPROVAL.REJECTED && !isSuperseded(log, a));
-    if (attempt.supersedes !== attempt.url || rejected.length === 0) {
-      throw new Error(
-        `url ${attempt.url} is already recorded for ${attempt.agency}` +
-          (rejected.length
-            ? '. Its decision was rejected; record the correction with ' +
-              `supersedesAttemptId set to ${rejected.map((a) => a.id).join(' or ')}.`
-            : '')
-      );
-    }
+  } else {
+    // Amendment 62. ONE implementation of this rule, called here and before the request.
+    const problem = duplicateUrlProblem(log, attempt);
+    if (problem) throw new Error(problem);
   }
   if (attempt.status === 'captured') {
     const canonical = canonicalise(attempt.finalUrl ?? attempt.url);
