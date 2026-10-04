@@ -168,7 +168,7 @@ const FRAME_FILES = [
  * exhaustion records at all. A manifest that misnames its own protocol is worse than one that
  * omits it: a reader checking which rules a corpus was sealed under would be told the wrong ones.
  */
-export const SOLO_PROTOCOL_TAG = 'solo-protocol-v1.0.34';
+export const SOLO_PROTOCOL_TAG = 'solo-protocol-v1.0.35';
 
 /**
  * Two resolutions, mirrored from the capture package and checked equal by a test.
@@ -612,6 +612,7 @@ export function sitemapRepresentationProblems(entry, bytes) {
  */
 export function policyReuseProblems(log) {
   const problems = [];
+  const canonUrl = (u) => { try { const x = new URL(u); x.hash = ''; return x.href; } catch { return String(u); } };
   const attempts = Array.isArray(log?.attempts) ? log.attempts : [];
   const checks = Array.isArray(log?.robotsChecks) ? log.robotsChecks : [];
   const superseded = new Set(
@@ -633,20 +634,97 @@ export function policyReuseProblems(log) {
       problems.push(`${where} names robots check ${JSON.stringify(a.robotsCheckId)}, which is not recorded`);
       continue;
     }
+    // Amendment 58. The record must be OF the policy file, not merely of the same origin.
+    if (canonUrl(a.url) !== canonUrl(check.url)) {
+      problems.push(`${where} rests on ${check.id}, the policy at ${check.url}`);
+    }
     let origin = null;
     try { origin = new URL(a.url).origin; } catch { problems.push(`${where} has no usable origin`); }
     if (origin && check.origin !== origin) {
       problems.push(`${where} rests on ${check.id}, the policy for ${check.origin}`);
     }
+    let site = null;
+    try { site = new URL(a.website).origin; } catch { problems.push(`${where} has no usable website`); }
+    if (site && site !== check.origin) {
+      problems.push(`${where} has website ${site}, which is not ${check.origin}`);
+    }
+    // Amendment 58. Two-sided: a record cannot rest on a policy fetched after it.
     const at = Date.parse(a.examinedAt ?? '');
     const fetched = Date.parse(check.fetchedAt ?? '');
     if (Number.isNaN(at) || Number.isNaN(fetched)) {
       problems.push(`${where} cannot be dated against ${check.id}`);
+    } else if (at < fetched) {
+      problems.push(`${where} rests on ${check.id}, which was fetched AFTER it`);
     } else if (at - fetched >= DAY) {
       problems.push(`${where} rests on ${check.id}, fetched more than 24 hours earlier`);
     }
     if (check.disposition === 'unestablished') {
       problems.push(`${where} rests on ${check.id}, which established no policy`);
+    }
+  }
+  return problems;
+}
+
+/**
+ * Amendment 58. The sealer's own check that a round documents the policy it decided under.
+ *
+ * A reuse record could name one real fresh policy while every permit in the round rested on
+ * another, so the published account would name a policy nothing was decided under. The documented
+ * set must EQUAL the acted-under set per origin per round - equality, not containment, which is
+ * also what makes a refreshed policy representable: a round spanning a refresh cites two checks and
+ * must carry two reuse records, one per governing interval. Derived independently of the capture
+ * package.
+ */
+export function policyAgreementProblems(log) {
+  const problems = [];
+  const attempts = Array.isArray(log?.attempts) ? log.attempts : [];
+  const permits = Array.isArray(log?.discoveryPermits) ? log.discoveryPermits : [];
+  const checks = Array.isArray(log?.robotsChecks) ? log.robotsChecks : [];
+  const superseded = new Set(
+    attempts.map((a) => a.supersedesDiscoveryId).filter((id) => id !== undefined && id !== null)
+  );
+  const active = (a) => !superseded.has(a.id);
+  const originOf = (u) => { try { return new URL(u).origin; } catch { return null; } };
+  const known = new Set(checks.map((c) => c.id));
+  const scopes = new Map();
+  const key = (agency, category, version, origin) => `${agency}\u0000${category}\u0000${version}\u0000${origin}`;
+
+  for (const a of attempts) {
+    if (a.recordType !== 'policy-reuse' || !active(a)) continue;
+    const origin = originOf(a.url);
+    if (!origin || !known.has(a.robotsCheckId)) continue;
+    const k = key(a.agency, a.category, a.candidateSetVersion, origin);
+    if (!scopes.has(k)) scopes.set(k, { documented: new Set(), used: new Set() });
+    scopes.get(k).documented.add(a.robotsCheckId);
+  }
+  if (scopes.size === 0) return problems;
+
+  for (const p of permits) {
+    const origin = originOf(p.url);
+    if (!origin || !p.robotsCheckId) continue;
+    const k = key(p.agency, p.category, p.candidateSetVersion, origin);
+    if (scopes.has(k)) scopes.get(k).used.add(p.robotsCheckId);
+  }
+  for (const a of attempts) {
+    if (!a.robotsCheckId || !active(a) || a.recordType === 'policy-reuse') continue;
+    const origin = originOf(a.url);
+    if (!origin) continue;
+    const k = key(a.agency, a.category, a.candidateSetVersion, origin);
+    if (scopes.has(k)) scopes.get(k).used.add(a.robotsCheckId);
+  }
+
+  for (const [k, { documented, used }] of scopes) {
+    const [agency, category, version, origin] = k.split('\u0000');
+    const where = `${agency} / ${category} v${version}, ${origin}`;
+    for (const id of used) {
+      if (!documented.has(id)) {
+        problems.push(`${where} acted under ${id}, which no policy-reuse record documents`);
+      }
+    }
+    for (const id of documented) {
+      if (used.size > 0 && !used.has(id)) {
+        problems.push(`${where} documents ${id} but acted under ${[...used].join(', ')}`);
+      }
     }
   }
   return problems;
@@ -1775,6 +1853,11 @@ export function sealCorpus({
         // Amendment 39. Evidence retrieved and never read must not reach a seal.
         for (const problem of unjudgedRenderProblems(log)) {
           problems.push(`unjudgedRender: ${problem}`);
+        }
+
+        // Amendment 58. And the documented policy must be the one the round decided under.
+        for (const problem of policyAgreementProblems(log)) {
+          problems.push(`policyAgreement: ${problem}`);
         }
 
         // Amendment 57. A policy-reuse record must rest on a policy that governed it.

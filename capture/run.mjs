@@ -3995,16 +3995,41 @@ export function policyReuseProblems(log, attempt) {
   if (!check) {
     return [`names robots check ${JSON.stringify(attempt.robotsCheckId)}, which is not recorded`];
   }
+  // Amendment 58. The record must be OF the policy file, not merely of the same origin. A record
+  // whose url was `/contact` passed every check: it named a real, fresh policy for the right
+  // origin, and claimed to be a robots-method record about a page. The URL is compared exactly to
+  // the check's own, and the website is required to belong to that origin, so a reuse record
+  // cannot document one origin's policy while pointing at another's page.
+  if (canonicalise(attempt.url) !== canonicalise(check.url)) {
+    problems.push(`${check.id} is the policy at ${check.url}, and this record is of ${attempt.url}`);
+  }
   let origin = null;
   try { origin = new URL(attempt.url).origin; } catch { problems.push(`${attempt.url} is not a usable URL`); }
   if (origin && check.origin !== origin) {
     problems.push(`${check.id} is the policy for ${check.origin}, not ${origin}`);
   }
-  // Fresh AS OF THE RECORD, not as of now: a record written while the policy was in force stays
-  // true afterwards, and one written after it went stale was never true.
+  let site = null;
+  try { site = new URL(attempt.website).origin; } catch { problems.push(`${attempt.website} is not a usable website`); }
+  if (site && site !== check.origin) {
+    problems.push(`this record's website is ${site}, which is not ${check.origin}`);
+  }
+
+  // Amendment 58. The window is TWO-SIDED: check.fetchedAt <= examinedAt < fetchedAt + 24h.
+  //
+  // It was one-sided, so a policy fetched AFTER the record it supposedly governed passed every
+  // check - the record resting on evidence that did not yet exist. Amendment 57's own test asserted
+  // that this was permitted, under a title saying it was refused, which is worse than no test: it
+  // read as coverage in the suite while asserting the opposite.
   const at = Date.parse(attempt.examinedAt ?? '');
+  const fetched = Date.parse(check.fetchedAt ?? '');
   if (Number.isNaN(at)) problems.push('records no usable examinedAt, so its policy cannot be dated');
-  else if (!robotsCheckIsFresh(check, at)) {
+  else if (Number.isNaN(fetched)) problems.push(`${check.id} records no usable fetchedAt`);
+  else if (at < fetched) {
+    problems.push(
+      `${check.id} was fetched at ${check.fetchedAt}, AFTER this record at ${attempt.examinedAt}; ` +
+        'a record cannot rest on a policy that did not yet exist'
+    );
+  } else if (at - fetched >= ROBOTS_MAX_AGE_MS) {
     problems.push(
       `${check.id} was fetched at ${check.fetchedAt}, more than 24 hours before this record at ` +
         `${attempt.examinedAt}; a stale policy did not govern this round`
@@ -4012,6 +4037,80 @@ export function policyReuseProblems(log, attempt) {
   }
   if (check.disposition === 'unestablished') {
     problems.push(`${check.id} is unestablished, so no policy was in force to reuse`);
+  }
+  return problems;
+}
+
+/**
+ * Amendment 58. Does each round's policy documentation agree with the policy it actually acted on?
+ *
+ * A reuse record could cite `r-0083` while every permit in the round rested on `r-0084`: both real,
+ * both fresh, both for the right origin, and the published account of the round would name a policy
+ * nothing was decided under. So for each origin in a round, the set of checks named by the
+ * reuse records must EQUAL the set of checks the round's robots-grounded decisions used.
+ *
+ * Equality, not containment, and that is what makes a refreshed policy representable. If a long
+ * round spans a refresh, its permits cite two checks and the round must carry two reuse records -
+ * one per governing interval - rather than one record pretending a single check governed
+ * everything. The invariant then holds by construction instead of by hoping the round was short.
+ */
+export function policyAgreementProblems(log) {
+  const problems = [];
+  const attempts = log?.attempts ?? [];
+  const permits = log?.discoveryPermits ?? [];
+  const active = (a) => !isDiscoverySuperseded(log, a.id);
+  const originOf = (u) => { try { return new URL(u).origin; } catch { return null; } };
+  const checkById = new Map((log?.robotsChecks ?? []).map((c) => [c.id, c]));
+
+  // Every round that documents a policy at all, keyed by agency, category, version and origin.
+  const scopes = new Map();
+  const touch = (key) => scopes.get(key) ?? scopes.set(key, { documented: new Set(), used: new Set() }).get(key);
+  const keyFor = (a, origin) => `${a.agency}\u0000${a.category}\u0000${a.candidateSetVersion}\u0000${origin}`;
+
+  for (const a of attempts) {
+    if (a.recordType !== RECORD_TYPES.POLICY_REUSE || !active(a)) continue;
+    const origin = originOf(a.url);
+    const check = checkById.get(a.robotsCheckId);
+    if (!origin || !check) continue;
+    touch(keyFor(a, origin)).documented.add(a.robotsCheckId);
+  }
+  if (scopes.size === 0) return problems;
+
+  // What the round actually acted on: the permits it consumed, and any robots-grounded record.
+  for (const p of permits) {
+    const origin = originOf(p.url);
+    if (!origin || !p.robotsCheckId) continue;
+    const key = `${p.agency}\u0000${p.category}\u0000${p.candidateSetVersion}\u0000${origin}`;
+    if (scopes.has(key)) scopes.get(key).used.add(p.robotsCheckId);
+  }
+  for (const a of attempts) {
+    if (!a.robotsCheckId || !active(a)) continue;
+    if (a.recordType === RECORD_TYPES.POLICY_REUSE) continue;
+    const origin = originOf(a.url);
+    if (!origin) continue;
+    const key = keyFor(a, origin);
+    if (scopes.has(key)) scopes.get(key).used.add(a.robotsCheckId);
+  }
+
+  for (const [key, { documented, used }] of scopes) {
+    const [agency, category, version, origin] = key.split('\u0000');
+    const where = `${agency} / ${category} v${version}, ${origin}`;
+    for (const id of used) {
+      if (!documented.has(id)) {
+        problems.push(
+          `${where} acted under robots check ${id}, which no policy-reuse record documents. If the ` +
+            'policy was refreshed mid-round, each governing interval needs its own record.'
+        );
+      }
+    }
+    for (const id of documented) {
+      if (used.size > 0 && !used.has(id)) {
+        problems.push(
+          `${where} documents robots check ${id}, but the round acted under ` +
+            `${[...used].join(', ')}; the published policy is not the one it decided under`
+        );
+      }
+    }
   }
   return problems;
 }
@@ -5126,6 +5225,11 @@ export function corpusBlockers(log, { capturesRoot = null } = {}) {
   const reuse = policyReuseAudit(log);
   if (reuse.length) {
     add('policy-reuse', `${reuse.length} policy-reuse record(s) do not rest on a policy that governed them`, reuse);
+  }
+  // Amendment 58. And the documented policy must be the one the round decided under.
+  const agreement = policyAgreementProblems(log);
+  if (agreement.length) {
+    add('policy-agreement', `${agreement.length} round(s) document a policy they did not act under`, agreement);
   }
 
   // Amendment 55. Retained plain-read bytes, verified like rendered ones. Fail-closed on a

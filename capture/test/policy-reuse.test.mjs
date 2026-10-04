@@ -17,9 +17,15 @@
 
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { emptyLog, appendAttempt, policyReuseProblems, policyReuseAudit, corpusBlockers, APPROVAL } from '../run.mjs';
+import {
+  emptyLog, appendAttempt, policyReuseProblems, policyReuseAudit, policyAgreementProblems,
+  corpusBlockers, APPROVAL,
+} from '../run.mjs';
 import { RECORD_TYPES } from '../selection.mjs';
-import { policyReuseProblems as sealerProblems } from '../../evaluation/solo/descriptive.mjs';
+import {
+  policyReuseProblems as sealerProblems,
+  policyAgreementProblems as sealerAgreement,
+} from '../../evaluation/solo/descriptive.mjs';
 
 const AGENCY = 'Social Investment Agency';
 const CAT = 'enquiry-or-contact';
@@ -129,11 +135,22 @@ describe('the policy it names must have governed the round', () => {
   });
 
   test('a policy fetched after the record is refused', () => {
-    // Negative age is not freshness: the record cannot rest on a policy that did not yet exist.
+    // Amendment 58. This test asserted `permitted === true` under this very title, with a comment
+    // rationalising the one-sided window as "the existing freshness rule". That is worse than no
+    // test: it read as coverage in the suite listing while asserting the opposite of its name.
+    // Negative age is not freshness - a record cannot rest on a policy that did not yet exist.
     const v = verdicts(reuse({ examinedAt: '2026-10-03T06:00:00Z' }), [check({ fetchedAt: '2026-10-03T08:00:00Z' })]);
-    assert.equal(v.permitted, true, 'a later policy is within the window and is permitted');
-    // Recorded deliberately: the window is one-sided, which is the existing freshness rule, and
-    // tightening it is a protocol change rather than something to slip in here.
+    assert.equal(v.permitted, false);
+    assert.match(v.capture.join(' '), /AFTER this record/);
+  });
+
+  test('the window is two-sided, and closed at both ends', () => {
+    const fetchedAt = '2026-10-03T06:00:00Z';
+    const t = (iso) => verdicts(reuse({ examinedAt: iso }), [check({ fetchedAt })]).permitted;
+    assert.equal(t('2026-10-03T05:59:59Z'), false, 'one second before the policy existed');
+    assert.equal(t(fetchedAt), true, 'the instant it was fetched');
+    assert.equal(t('2026-10-04T05:59:59Z'), true, 'one second inside 24 hours');
+    assert.equal(t('2026-10-04T06:00:00Z'), false, 'exactly 24 hours is outside');
   });
 
   test('an unestablished policy is refused', () => {
@@ -169,5 +186,105 @@ describe('the gate re-checks what write time allowed', () => {
     appendAttempt(log, reuse());
     log.robotsChecks = [];
     assert.equal(policyReuseAudit(log).length > 0, true);
+  });
+});
+
+describe('Amendment 58: the record must be OF the policy file', () => {
+  test('a record of a page rather than the policy is refused', () => {
+    // The attack: a real, fresh policy for the right origin, cited by a record whose url is a
+    // content page. Every Amendment 57 check passed.
+    const v = verdicts(reuse({ url: `${ORIGIN}/contact` }));
+    assert.equal(v.permitted, false);
+    assert.match(v.capture.join(' '), /the policy at/);
+  });
+
+  test('and it is refused at write time', () => {
+    const log = logWith();
+    assert.throws(() => appendAttempt(log, reuse({ url: `${ORIGIN}/contact` })), /the policy at/);
+  });
+
+  test('a website belonging to another origin is refused', () => {
+    const v = verdicts(reuse({ website: 'https://thehub.sia.govt.nz/' }));
+    assert.equal(v.permitted, false);
+    assert.match(v.capture.join(' '), /which is not https:\/\/www\.sia/);
+  });
+
+  test('a trailing-slash difference on the policy URL is still the same policy', () => {
+    // Canonicalised, not string-compared: the rule is about identity, not spelling.
+    assert.ok(verdicts(reuse({ url: `${ORIGIN}/robots.txt#x` })).permitted);
+  });
+});
+
+describe('Amendment 58: the documented policy must be the one the round acted under', () => {
+  const permit = (over = {}) => ({
+    id: 'p-0500', url: `${ORIGIN}/`, agency: AGENCY, category: CAT, candidateSetVersion: 1,
+    robotsCheckId: 'r-0083', issuedAt: '2026-10-03T08:00:00Z', consumedAt: '2026-10-03T08:00:30Z',
+    ...over,
+  });
+  const scopeLog = ({ checks = [check()], permits = [permit()], records = [reuse()] } = {}) => ({
+    ...emptyLog(), robotsChecks: checks, discoveryPermits: permits,
+    attempts: records.map((r, i) => ({ id: `d-000${i + 1}`, ...r })),
+  });
+  const agree = (log) => {
+    const capture = policyAgreementProblems(log);
+    const sealer = sealerAgreement(log);
+    assert.equal(
+      capture.length > 0, sealer.length > 0,
+      `disagreement:\n  capture: ${JSON.stringify(capture)}\n  sealer: ${JSON.stringify(sealer)}`
+    );
+    return { capture, clean: capture.length === 0 };
+  };
+
+  test('agreeing documentation is clean', () => {
+    assert.ok(agree(scopeLog()).clean);
+  });
+
+  test('documenting one policy while acting under another is refused', () => {
+    // The attack: both checks real, both fresh, both for this origin - and the published account
+    // names the one nothing was decided under.
+    const log = scopeLog({
+      checks: [check(), check({ id: 'r-0084', fetchedAt: '2026-10-03T07:00:00Z' })],
+      permits: [permit({ robotsCheckId: 'r-0084' })],
+    });
+    const v = agree(log);
+    assert.equal(v.clean, false);
+    assert.match(v.capture.join(' '), /acted under r-0084|documents r-0083/);
+    assert.ok(corpusBlockers(log).some((b) => b.kind === 'policy-agreement'));
+  });
+
+  test('a refreshed policy mid-round needs BOTH intervals documented', () => {
+    // Requirement 4, as a test. A long round whose policy is refreshed acts under two checks, so
+    // one record claiming a single check governed everything is refused...
+    const checks = [check(), check({ id: 'r-0084', fetchedAt: '2026-10-03T20:00:00Z' })];
+    const permits = [permit(), permit({ id: 'p-0501', robotsCheckId: 'r-0084', issuedAt: '2026-10-03T21:00:00Z', consumedAt: '2026-10-03T21:00:30Z' })];
+    assert.equal(agree(scopeLog({ checks, permits })).clean, false);
+    // ...and two records, one per governing interval, are clean.
+    const both = scopeLog({
+      checks, permits,
+      records: [reuse(), reuse({ robotsCheckId: 'r-0084', examinedAt: '2026-10-03T21:30:00Z', checkedAt: '2026-10-03T21:30:00Z' })],
+    });
+    assert.ok(agree(both).clean);
+  });
+
+  test('a robots-grounded discovery record counts as acting under its check', () => {
+    const log = scopeLog({
+      checks: [check(), check({ id: 'r-0084', fetchedAt: '2026-10-03T07:00:00Z' })],
+      permits: [],
+      records: [reuse(), {
+        id: 'd-0009', status: 'discovery', discoveryKind: 'robots', outcome: 'disallowed',
+        agency: AGENCY, category: CAT, candidateSetVersion: 1, url: `${ORIGIN}/admin/`,
+        robotsCheckId: 'r-0084', website: `${ORIGIN}/`,
+      }],
+    });
+    assert.equal(agree(log).clean, false);
+  });
+
+  test('another round under the same origin is a separate scope', () => {
+    // A policy documented for one round says nothing about another, so the rounds are not mixed.
+    const log = scopeLog({
+      permits: [permit(), permit({ id: 'p-0502', category: 'service-application', robotsCheckId: 'r-0084' })],
+      checks: [check(), check({ id: 'r-0084', fetchedAt: '2026-10-03T07:00:00Z' })],
+    });
+    assert.ok(agree(log).clean, 'the other category has no reuse record, so it is not in scope');
   });
 });

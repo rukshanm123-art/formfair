@@ -4729,3 +4729,66 @@ procedure itself are untouched. `d-0987` is preserved unedited and corrected by 
 Social Investment Agency service-application set is approved as an empty, declared nil result; the
 corpus stays at 6 of 40. All earlier tags are preserved and unmoved, including the three revoked
 under Amendment 47.
+
+## Amendment 58 — Amendment 57's invariant was incomplete
+
+*Frozen as `selection-v1.0.55`, `capture-v1.0.30` and `solo-protocol-v1.0.35`, 4 October 2026.*
+
+No live record changes and no request occurs. Frozen before the evidence it will govern.
+
+### Three attacks that passed both implementations
+
+| attack | why it passed |
+| --- | --- |
+| a policy fetched **after** the reuse record | the window was one-sided: only staleness was checked |
+| a record whose URL is `/contact`, not the check's `/robots.txt` | only the *origin* was compared, never the URL |
+| a record citing `r-1` while the round's permits used `r-2` | nothing compared the documented policy with the acted-on one |
+
+The second and third are the same mistake in different places: Amendment 57 verified that the cited
+policy **existed, was fresh and was for the right origin**, and never that it was the policy this
+record was *about* or the one the round *decided under*.
+
+### The test that was worse than no test
+
+Amendment 57's suite contained a test titled *"a policy fetched after the record is refused"* whose
+assertion was `permitted === true`, with a comment rationalising the one-sided window as "the
+existing freshness rule". Its own preceding comment said *"the record cannot rest on a policy that
+did not yet exist"*. So the file asserted the opposite of its title and of its own reasoning, and
+read as coverage in the suite listing while licensing the attack. It is corrected, and the window is
+now asserted closed at both ends.
+
+### The rules
+
+1. **Two-sided freshness**: `check.fetchedAt <= record.examinedAt < check.fetchedAt + 24h`. A record
+   cannot rest on a policy that did not yet exist, and the boundaries are tested at the instant of
+   fetching, one second before it, one second inside the window, and exactly 24 hours after.
+2. **The record is of the policy file.** Its canonical URL must equal the recorded check's own URL,
+   and its `website` must belong to that origin. Compared canonically, so the rule is about identity
+   rather than spelling.
+3. **Documentation must agree with what the round acted on.** Per origin per round, the set of checks
+   named by policy-reuse records must **equal** the set used by that round's permits and other
+   robots-grounded records. Equality, not containment.
+4. **A refreshed policy is represented, not papered over.** Equality in rule 3 is what makes this
+   work: a long round whose policy is refreshed acts under two checks, so it must carry **two**
+   reuse records — one per governing interval — and a single record claiming one check governed
+   everything is refused. The invariant then holds by construction rather than by hoping rounds are
+   short.
+
+Enforced at write time for rules 1 and 2, and at the corpus gate and independently in the sealer for
+all four — rule 3 cannot be a write-time check, because the permits it compares against may be
+consumed after the documentation is written.
+
+`capture/test/policy-reuse.test.mjs` (28) covers each attack at write time where possible and at
+both gates, the four window boundaries, a page-URL record, a foreign `website`, a fragment-only URL
+difference that is still the same policy, documenting one policy while acting under another, a
+refreshed policy needing both intervals, a robots-grounded discovery record counting as acting under
+its check, and another round of the same origin remaining a separate scope.
+
+The capture suite is **736** tests and the solo suite **152**.
+
+### What this does not change
+
+The frozen method, the frozen criteria, the priority order and the robots procedure are untouched.
+The live state needs no repair: it contains no policy-reuse record at all, since Amendment 57 was
+frozen before any round used it. All earlier tags are preserved and unmoved, including the three
+revoked under Amendment 47.
