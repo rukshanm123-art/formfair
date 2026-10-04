@@ -13,13 +13,13 @@
   },
   "counts": {
     "discoveryPages": 931,
-    "candidatesAssessed": 84,
-    "captured": 9,
-    "excluded": 48,
+    "candidatesAssessed": 92,
+    "captured": 10,
+    "excluded": 50,
     "failed": 1,
     "captureBlocked": 0,
     "pendingApprovalAttempts": 0,
-    "pendingApprovalCandidateSets": 1
+    "pendingApprovalCandidateSets": 0
   },
   "discoveryByMethod": {
     "navigation": 337,
@@ -337,6 +337,21 @@
       "kind": "deviation-text-mangled-in-recording",
       "summary": "v-0005 lost a word to shell substitution and reads: created by , which requires a permit",
       "detail": "v-0005 explains why the robots refetch happened structurally, and one sentence lost a word when it was recorded. It reads \"The robots method... discovery record can only be created by , which requires a permit\". The missing word is the name of the command: the discovery recorder. It was eaten by shell command substitution, because the word was wrapped in backticks in the text passed to the CLI and the shell evaluated it instead of passing it through. The sentence should read: the robots method... discovery record can only be created by the discovery command, which requires a permit, and a permit asserts a request - so documenting reuse required making a request. Nothing else in v-0005 is affected and its substance is unchanged: the policies authorising the round were reused, a separate robots request nevertheless occurred under p-0477 and f-0005 to create d-0987, it changed no permission or outcome, and the \"rather than refetching\" clause in d-0987 is withdrawn. Deviations are append-only and carry no supersession field, so this is recorded as its own entry rather than by editing v-0005. No page was requested for this record."
+    },
+    {
+      "id": "v-0007",
+      "recordedAt": "2026-10-04T02:49:15Z",
+      "kind": "structural-report-basis-never-existed",
+      "summary": "Approved exclusion c-0976 cited a structural name-field report and a registration-affordance report as its evidence, and neither field existed on any record in this log",
+      "detail": "Amendments 46 and 51 added registrationAffordances, nameFields, collectedNameFields and searchKeyNameFields to detectBlocking and required the criterion-three assertion to be consistent with the recorded report. Both writers computed the report and discarded it, so across the live log it was persisted on zero of 348 attempts and zero of 319 renders; the affordance report survived on one render, g-0163, because it had been populated by hand during the Amendment 46 reclassification. Both amendments had passing tests, because both tested detectBlocking in isolation: the tests proved the report was COMPUTED and nothing tested that it was KEPT. c-0976 then cited 'the structural name-field report is empty' and that the page 'exposes no registration affordance' as evidence for failing criterion three, reading a '?? []' default as a finding - the same error this project made earlier with a.bytes and with checkedAt. The CONCLUSION was correct and survives: c-1018, an offline reanalysis of the same retained bytes under Amendment 61, independently finds zero name fields of either role and zero registration affordances in the markup. What was wrong was the basis, and a conclusion may not rest on evidence that was never recorded. c-0976 is rejected and superseded append-only by c-1019, which rests on c-1018. An audit of every string field of every active record found exactly two records citing a structural report: c-0976, repaired here, and d-0688, which cites g-0163's hand-populated affordances - real evidence derived from retained bytes, materially different from a report that never existed, and left unchanged. c-1018 establishes what the markup contains and not what was visible, so criterion four is not settled by it. No request was made for any part of this correction."
+    },
+    {
+      "id": "v-0008",
+      "recordedAt": "2026-10-04T08:37:16Z",
+      "kind": "authorised-request-spent-on-refused-write",
+      "summary": "An authorised request for the SIA contact page was made and its recording failed, leaving quarantined bytes and no log record; it established no criterion",
+      "detail": "At approximately 2026-10-04T08:10:42Z a retrieve-only request was made for https://www.sia.govt.nz/about/contact-us, authorised by the researcher and permitted by the recorded robots check r-0085, which was fresh at the time. No robots policy was refetched. The response was served and the capture pipeline computed its live structural report, and then the write was refused by the duplicate-URL rule, which at that time had no way to express an authorised re-retrieval of a page already retrieved by c-1017: the earlier record is neither rejected nor an evidence citation. Because the identity rules ran only at write time, the request was spent on a write that could never have succeeded, and because a failed write quarantined only the bytes, the computed live report was discarded - the one thing an offline replay cannot reproduce. The response survives as a quarantined artefact of 22,817 bytes at quarantine/2026-10-04T08-10-42Z-sia-about-contact-us-live.html with its reason file. No sidecar record exists for it, because the sidecar was introduced by the repair that followed. Those bytes have NOT been used, adopted, reanalysed or cited, and no figure here is drawn from any log record, because none was created. This request established NO criterion and settled no candidate: it is reported as a technical failure of the method, not as a finding about the page. The repair is Amendment 62, frozen at commit d55ef39 with selection-v1.0.59, capture-v1.0.34 and solo-protocol-v1.0.39 and eight green CI jobs: identity checks now refuse before anything is requested, an authorised re-retrieval is expressible through extendsAttemptId, the pacer is seeded from the log so politeness precedes the traffic, and a refused write keeps the computed record beside the bytes. A second request was made only after the researcher authorised it afresh, and it is recorded as c-1022.",
+      "requestsAffected": 1
     }
   ],
   "robotsChecks": [
@@ -10284,8 +10299,8 @@
       "locked": 2,
       "droppedBeyondBound": 0,
       "lockedAt": "2026-10-04T01:08:22Z",
-      "approval": "pending",
-      "approvedAt": null,
+      "approval": "approved",
+      "approvedAt": "2026-10-04T01:15:44Z",
       "approvalNote": null,
       "supportedByDiscoveryRecords": [
         "d-0996",
