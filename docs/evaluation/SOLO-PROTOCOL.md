@@ -4889,3 +4889,66 @@ The capture suite is **757** tests and the solo suite **152**.
 The frozen method, the frozen criteria, the priority order, the canonicalisation rule and the robots
 procedure are untouched. No record is deleted. All earlier tags are preserved and unmoved, including
 the three revoked under Amendment 47.
+
+## Amendment 60 — a structural report declares how it was obtained
+
+*Frozen as `selection-v1.0.57`, `capture-v1.0.32` and `solo-protocol-v1.0.37`, 4 October 2026.*
+
+No live record changes and no request occurs. This unblocks the `c-0976` repair, which Amendment 59
+as frozen made impossible to record.
+
+### What Amendment 59 did not anticipate
+
+Amendment 59 requires that a report carried by a record which cites evidence must **equal** that
+evidence's report, field for field. That is the right rule for a **copy** — a promotion carries the
+same bytes under a decision, so it must carry the same findings.
+
+The `c-0976` repair is not a copy. `c-0976` rests on a report that never existed, and the evidence
+it cites, `c-0974`, was captured **before any report was taken at all**. Re-deriving the report from
+`c-0974`'s retained bytes and recording it produces five refusals under Amendment 59:
+
+```
+registrationAffordances differs from c-0974, the evidence it rests on
+nameFields differs from c-0974, the evidence it rests on
+collectedNameFields differs from c-0974, the evidence it rests on
+searchKeyNameFields differs from c-0974, the evidence it rests on
+structuralReportVersion differs from c-0974
+```
+
+Each is correct about a copy and wrong about a reanalysis. So the repair the audit demands could not
+be written, and the only way to record it would have been to disable the rule that had just been
+frozen.
+
+### The rule
+
+`structuralReportSource` is part of the report, and is one of:
+
+- **`live`** — taken from the page as the browser loaded it over the network. The pipelines always
+  record this; the equality rule of Amendment 59 applies unchanged.
+- **`offline-reanalysis`** — re-derived from retained bytes. It must **name the evidence whose bytes
+  it re-read**, that evidence must actually hold a document, and it must be of the **same page**.
+  The equality rule does not apply, because there is nothing to copy.
+
+A record that carries a report and declares no recognised source is refused, and a reanalysis that
+cites nothing is refused.
+
+### Why the distinction is not bookkeeping
+
+Amendment 59 established, with a test, that an offline replay is **not** equivalent to the live
+page: `nameFields` depends on visibility, and saved markup has no external stylesheets, so a replay
+can show controls the live page hid or hide controls it showed. Having proved that, the protocol
+cannot then let a reanalysis be read as a live report. The marker is what keeps the two apart in the
+record, so a reader of any report can see which side of that limitation it came from.
+
+`capture/test/structural-report.test.mjs` (28) adds the cases: a reanalysis of pre-amendment bytes
+permitted where Amendment 59 refused it, the same report refused when it claims to be live, a
+reanalysis citing nothing, a reanalysis citing evidence with no document, a reanalysis of a different
+page, an unknown source, and the pipelines asserted to record `live`.
+
+The capture suite is **764** tests and the solo suite **152**.
+
+### What this does not change
+
+The frozen method, the frozen criteria, the priority order and the robots procedure are untouched.
+Every Amendment 59 rule stands; only the copied-report rule is scoped to copies. All earlier tags
+are preserved and unmoved, including the three revoked under Amendment 47.

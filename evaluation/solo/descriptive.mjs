@@ -168,7 +168,7 @@ const FRAME_FILES = [
  * exhaustion records at all. A manifest that misnames its own protocol is worse than one that
  * omits it: a reader checking which rules a corpus was sealed under would be told the wrong ones.
  */
-export const SOLO_PROTOCOL_TAG = 'solo-protocol-v1.0.36';
+export const SOLO_PROTOCOL_TAG = 'solo-protocol-v1.0.37';
 
 /**
  * Two resolutions, mirrored from the capture package and checked equal by a test.
@@ -750,19 +750,37 @@ export function structuralReportProblems(log) {
         problems.push(`${label}.searchKeyNameFields is ${r.searchKeyNameFields}, but nameFields holds ${query}`);
       }
     }
+    // Amendment 60. The report's provenance, declared. A reanalysis of retained bytes is not a
+    // copy of a live report, and must not be read as one: visibility depends on external styles
+    // the saved markup does not carry.
+    const src = r.structuralReportSource;
+    if (current && !['live', 'offline-reanalysis'].includes(src)) {
+      problems.push(`${label} records structuralReportSource ${JSON.stringify(src)}`);
+    }
+    if (!current && src !== undefined && !['live', 'offline-reanalysis'].includes(src)) {
+      problems.push(`${label} records an unknown structuralReportSource`);
+    }
     if (citedFrom) {
       if (canon(citedFrom.url) !== canon(r.url)) {
         problems.push(`${label} carries a report while citing ${citedFrom.id}, which is a different page`);
       }
-      for (const f of FIELDS) {
-        if (r[f] === undefined && citedFrom[f] === undefined) continue;
-        if (JSON.stringify(r[f]) !== JSON.stringify(citedFrom[f])) {
-          problems.push(`${label}.${f} differs from ${citedFrom.id}`);
+      if (src === 'offline-reanalysis') {
+        if (!bears(citedFrom)) {
+          problems.push(`${label} is an offline reanalysis citing ${citedFrom.id}, which holds no document`);
+        }
+      } else {
+        for (const f of FIELDS) {
+          if (r[f] === undefined && citedFrom[f] === undefined) continue;
+          if (JSON.stringify(r[f]) !== JSON.stringify(citedFrom[f])) {
+            problems.push(`${label}.${f} differs from ${citedFrom.id}`);
+          }
+        }
+        if (r.structuralReportVersion !== citedFrom.structuralReportVersion) {
+          problems.push(`${label}.structuralReportVersion differs from ${citedFrom.id}`);
         }
       }
-      if (r.structuralReportVersion !== citedFrom.structuralReportVersion) {
-        problems.push(`${label}.structuralReportVersion differs from ${citedFrom.id}`);
-      }
+    } else if (src === 'offline-reanalysis') {
+      problems.push(`${label} is an offline reanalysis but cites no evidence whose bytes it re-read`);
     }
   };
 

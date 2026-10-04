@@ -434,10 +434,22 @@ export function classifyNameField(facts = {}) {
 export const STRUCTURAL_REPORT_VERSION = 1;
 
 /** The four fields every document-bearing capture and render must carry, from one place. */
-export function structuralReport(blocking) {
+/**
+ * How a structural report was obtained. Amendment 60.
+ *
+ * `live` is a report taken from the page as the browser loaded it over the network. A report
+ * re-derived from retained bytes is `offline-reanalysis`, and the two are not interchangeable:
+ * `nameFields` depends on visibility, and saved HTML has no external stylesheets, so a replay can
+ * show controls the live page hid or hide controls it showed. Amendment 59 tests that limitation;
+ * this records which side of it a report came from, so a reanalysis can never be read as live.
+ */
+export const STRUCTURAL_REPORT_SOURCES = Object.freeze(['live', 'offline-reanalysis']);
+
+export function structuralReport(blocking, { source = 'live' } = {}) {
   const nameFields = Array.isArray(blocking?.nameFields) ? blocking.nameFields : [];
   return {
     structuralReportVersion: STRUCTURAL_REPORT_VERSION,
+    structuralReportSource: source,
     registrationAffordances: Array.isArray(blocking?.registrationAffordances)
       ? blocking.registrationAffordances : [],
     nameFields,

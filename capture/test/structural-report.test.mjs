@@ -32,6 +32,7 @@ import {
   structuralReportProblems, structuralReportAudit, bearsDocument, emptyLog,
   STRUCTURAL_REPORT_REQUIRED_FROM, corpusBlockers,
 } from '../run.mjs';
+import { STRUCTURAL_REPORT_SOURCES } from '../capture.mjs';
 import { structuralReportProblems as sealerProblems } from '../../evaluation/solo/descriptive.mjs';
 
 /** A real contact form, of the shape the study exists to measure. */
@@ -190,7 +191,7 @@ describe('the gates reject a report that is missing, malformed or inconsistent',
   const sound = (over = {}) => ({
     id: 'c-1', url: 'https://a.govt.nz/contact', htmlSha256: 'a'.repeat(64), htmlBytes: 10,
     capturedAt: after, refused: false,
-    structuralReportVersion: 1,
+    structuralReportVersion: 1, structuralReportSource: 'live',
     registrationAffordances: [],
     nameFields: [{ name: 'name', label: 'Your name', role: 'collection', basis: [] }],
     collectedNameFields: 1, searchKeyNameFields: 0, ...over,
@@ -300,4 +301,67 @@ describe('records from before the boundary are grandfathered, not laundered', ()
     assert.ok(structuralReportProblems(g).length > 0);
   });
 
+});
+
+describe('Amendment 60: a report declares how it was obtained', () => {
+  const after = new Date(STRUCTURAL_REPORT_REQUIRED_FROM + 3600_000).toISOString().replace(/\.\d{3}Z$/, 'Z');
+  const preBoundary = new Date(STRUCTURAL_REPORT_REQUIRED_FROM - 3600_000).toISOString().replace(/\.\d{3}Z$/, 'Z');
+  // Evidence captured before any report existed - exactly c-0974's situation.
+  const evidence = {
+    id: 'c-0974', url: 'https://a.govt.nz/login', htmlSha256: 'a'.repeat(64),
+    capturedAt: preBoundary, refused: false,
+  };
+  const reanalysis = (over = {}) => ({
+    id: 'c-0978', url: evidence.url, htmlSha256: evidence.htmlSha256, examinedAt: after,
+    refused: false, evidenceFromAttemptId: 'c-0974',
+    structuralReportVersion: 1, structuralReportSource: 'offline-reanalysis',
+    registrationAffordances: [], nameFields: [], collectedNameFields: 0, searchKeyNameFields: 0,
+    ...over,
+  });
+  const both = (r, cited) => {
+    const capture = structuralReportProblems(r, { citedFrom: cited });
+    const sealer = sealerProblems({ attempts: cited ? [cited, r] : [r], renders: [] });
+    assert.equal(capture.length > 0, sealer.length > 0,
+      `disagreement:\n  capture: ${JSON.stringify(capture)}\n  sealer: ${JSON.stringify(sealer)}`);
+    return { capture, clean: capture.length === 0 };
+  };
+
+  test('a reanalysis of pre-amendment bytes is permitted, which Amendment 59 refused', () => {
+    // The repair this enables: c-0976 rested on a report that never existed, and the evidence it
+    // cites was captured before any report was taken. Under Amendment 59 alone the corrected
+    // record could not be written at all.
+    assert.ok(both(reanalysis(), evidence).clean);
+  });
+
+  test('the same report claiming to be live is refused', () => {
+    // Equality with the cited evidence is the rule for a copy, and there is nothing to copy.
+    const v = both(reanalysis({ structuralReportSource: 'live' }), evidence);
+    assert.equal(v.clean, false);
+    assert.match(v.capture.join(' '), /differs from c-0974/);
+  });
+
+  test('a reanalysis citing nothing is refused', () => {
+    assert.equal(both(reanalysis({ evidenceFromAttemptId: undefined })).clean, false);
+  });
+
+  test('a reanalysis citing evidence that holds no document is refused', () => {
+    const empty = { id: 'c-0974', url: evidence.url, refused: true, capturedAt: preBoundary };
+    const v = both(reanalysis(), empty);
+    assert.equal(v.clean, false);
+    assert.match(v.capture.join(' '), /holds no document/);
+  });
+
+  test('a reanalysis of a different page is refused', () => {
+    const other = { ...evidence, url: 'https://a.govt.nz/elsewhere' };
+    assert.equal(both(reanalysis(), other).clean, false);
+  });
+
+  test('an unknown source is refused', () => {
+    assert.equal(both(reanalysis({ structuralReportSource: 'guessed' }), evidence).clean, false);
+  });
+
+  test('the pipelines record live, never a reanalysis', () => {
+    assert.equal(structuralReport({}).structuralReportSource, 'live');
+    assert.equal(structuralReport({}, { source: 'offline-reanalysis' }).structuralReportSource, 'offline-reanalysis');
+  });
 });

@@ -19,7 +19,7 @@ import { existsSync, readFileSync, writeFileSync, renameSync, unlinkSync, mkdirS
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import {
   LEDGER_HEADER, recordExamination, CATEGORIES, needsHeadedFallback,
-  STRUCTURAL_REPORT_VERSION,
+  STRUCTURAL_REPORT_VERSION, STRUCTURAL_REPORT_SOURCES,
 } from './capture.mjs';
 import { POLICY } from './politeness.mjs';
 import { DISCOVERY_EVIDENCE, RENDERED_METHODS } from './render-discovery.mjs';
@@ -4138,21 +4138,45 @@ export function structuralReportProblems(record, { citedFrom = null } = {}) {
     }
   }
 
+  // Amendment 60. How the report was obtained, declared.
+  const source = record.structuralReportSource;
+  if (current && !STRUCTURAL_REPORT_SOURCES.includes(source)) {
+    problems.push(
+      `records structuralReportSource ${JSON.stringify(source)}, not one of ` +
+        STRUCTURAL_REPORT_SOURCES.join(' or ')
+    );
+  }
+  if (!current && source !== undefined && !STRUCTURAL_REPORT_SOURCES.includes(source)) {
+    problems.push(`records an unknown structuralReportSource ${JSON.stringify(source)}`);
+  }
+
   if (citedFrom) {
     if (canonicalise(citedFrom.url) !== canonicalise(record.url)) {
       problems.push(
         `carries a structural report while citing ${citedFrom.id}, which is ${citedFrom.url}, not ${record.url}`
       );
     }
-    for (const f of FIELDS) {
-      if (record[f] === undefined && citedFrom[f] === undefined) continue;
-      if (JSON.stringify(record[f]) !== JSON.stringify(citedFrom[f])) {
-        problems.push(`${f} differs from ${citedFrom.id}, the evidence it rests on`);
+    // Amendment 60. Equality is the rule for a COPY of a live report. A report re-derived from
+    // retained bytes is not a copy, and Amendment 59 refused it: the `c-0976` repair needed exactly
+    // that - a report for evidence captured before any report existed. A reanalysis must instead
+    // declare itself, name bytes that exist, and be of the same page.
+    if (source === 'offline-reanalysis') {
+      if (!bearsDocument(citedFrom)) {
+        problems.push(`is an offline reanalysis citing ${citedFrom.id}, which holds no document to re-read`);
+      }
+    } else {
+      for (const f of FIELDS) {
+        if (record[f] === undefined && citedFrom[f] === undefined) continue;
+        if (JSON.stringify(record[f]) !== JSON.stringify(citedFrom[f])) {
+          problems.push(`${f} differs from ${citedFrom.id}, the evidence it rests on`);
+        }
+      }
+      if (record.structuralReportVersion !== citedFrom.structuralReportVersion) {
+        problems.push(`structuralReportVersion differs from ${citedFrom.id}`);
       }
     }
-    if (record.structuralReportVersion !== citedFrom.structuralReportVersion) {
-      problems.push(`structuralReportVersion differs from ${citedFrom.id}`);
-    }
+  } else if (source === 'offline-reanalysis') {
+    problems.push('is an offline reanalysis but cites no evidence whose bytes it re-read');
   }
   return problems;
 }
