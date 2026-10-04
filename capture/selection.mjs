@@ -132,6 +132,16 @@ export const RECORD_TYPES = Object.freeze({
    * and was still fresh when the record was written.
    */
   POLICY_REUSE: 'policy-reuse',
+  /**
+   * A structural report derived from retained bytes, for evidence that never had one. Amendment 61.
+   *
+   * `c-0976` rested on a report that never existed and cited evidence captured before any report
+   * was taken, so the replacement needed a report and there was none to copy. This kind carries one
+   * - computed by a pure derivation over the retained markup, not supplied by a caller - and
+   * concludes nothing about the page: a markup derivation cannot establish visibility, and
+   * criterion four turns on exactly that.
+   */
+  STRUCTURAL_REANALYSIS: 'structural-reanalysis',
 });
 
 /**

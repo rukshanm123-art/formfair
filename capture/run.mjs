@@ -19,7 +19,8 @@ import { existsSync, readFileSync, writeFileSync, renameSync, unlinkSync, mkdirS
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import {
   LEDGER_HEADER, recordExamination, CATEGORIES, needsHeadedFallback,
-  STRUCTURAL_REPORT_VERSION, STRUCTURAL_REPORT_SOURCES,
+  STRUCTURAL_REPORT_VERSION, STRUCTURAL_REPORT_SOURCES, NAME_FIELD_HINT, classifyNameField,
+  REGISTER_LABEL,
 } from './capture.mjs';
 import { POLICY } from './politeness.mjs';
 import { DISCOVERY_EVIDENCE, RENDERED_METHODS } from './render-discovery.mjs';
@@ -562,8 +563,15 @@ export function appendAttempt(log, attempt) {
         'retrieval is promoted'
     );
   }
+  // Amendment 61. A structural reanalysis names the evidence it re-read, exactly as a promotion
+  // names the retrieval it settles: same bytes, same identity, a reading added rather than a
+  // second retrieval. The collision rule exists to stop two DIFFERENT pages sharing an identity,
+  // which neither of those is.
+  const sameBytesAs = attempt.recordType === RECORD_TYPES.STRUCTURAL_REANALYSIS
+    ? attempt.evidenceFromAttemptId
+    : attempt.promotedFrom;
   if (attempt.pageId && log.attempts.some(
-    (a) => a.pageId === attempt.pageId && a.id !== attempt.promotedFrom
+    (a) => a.pageId === attempt.pageId && a.id !== sameBytesAs
   )) {
     throw new Error(`pageId ${attempt.pageId} is already recorded`);
   }
@@ -4054,10 +4062,114 @@ export function policyReuseProblems(log, attempt) {
  */
 export const STRUCTURAL_REPORT_REQUIRED_FROM = Date.parse('2026-10-04T02:00:00Z');
 
-/** Did this record obtain a document for `detectBlocking` to run on? */
+/**
+ * Amendment 61. The DEFINED offline reanalysis: a pure derivation over retained markup.
+ *
+ * The sealer must be able to reproduce an offline report and compare it, and the sealer is
+ * dependency-free - it cannot launch a browser. So the offline derivation is defined over the
+ * markup alone, with no layout and no scripting, and both implementations compute it independently
+ * from the retained file.
+ *
+ * That makes its limits explicit rather than implied. A markup derivation cannot know what was
+ * VISIBLE: it has no stylesheets, so it cannot distinguish a control the live page showed from one
+ * it hid. An offline report therefore establishes that a name-collecting control exists in the
+ * retained markup, and never that it was visible without entering data or submitting - which is
+ * criterion four, and why a candidate cannot be selected on an offline report.
+ *
+ * Deterministic by construction: no clock, no network, no browser. Given the same bytes it returns
+ * the same report in both packages, which is what makes comparison meaningful.
+ */
+export function offlineStructuralReport(html) {
+  const text = Buffer.isBuffer(html) ? html.toString('utf8') : String(html ?? '');
+  const attr = (tag, name) => {
+    const m = new RegExp(`\\b${name}=("([^"]*)"|'([^']*)')`, 'i').exec(tag);
+    return m ? (m[2] ?? m[3] ?? '') : '';
+  };
+  const labelFor = (id) => {
+    if (!id) return '';
+    const m = new RegExp(`<label[^>]*\\bfor=("${id}"|'${id}')[^>]*>([\\s\\S]*?)</label>`, 'i').exec(text);
+    return (m?.[2] ?? '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+  };
+  const forms = [...text.matchAll(/<form\b([^>]*)>([\s\S]*?)<\/form>/gi)];
+  const nameFields = [];
+  for (const [, formAttrs, body] of forms) {
+    const formAction = attr(formAttrs, 'action');
+    const formRole = attr(formAttrs, 'role');
+    const formId = attr(formAttrs, 'id');
+    const formClass = attr(formAttrs, 'class');
+    const submitLabels = [...body.matchAll(/<input\b[^>]*>|<button\b[^>]*>([\s\S]*?)<\/button>/gi)]
+      .map((x) => {
+        if (x[0].startsWith('<button')) return (x[1] ?? '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+        const type = attr(x[0], 'type').toLowerCase();
+        return ['submit', 'button'].includes(type) ? attr(x[0], 'value') : '';
+      })
+      .filter((v) => v !== '');
+    for (const input of body.matchAll(/<input\b[^>]*>/gi)) {
+      const tag = input[0];
+      const type = (attr(tag, 'type') || 'text').toLowerCase();
+      if (!['text', 'email', 'tel', 'url', 'number', 'search'].includes(type)) continue;
+      const name = attr(tag, 'name');
+      const id = attr(tag, 'id');
+      const aria = attr(tag, 'aria-label');
+      const label = labelFor(id);
+      if (!NAME_FIELD_HINT.test(`${name} ${id} ${label} ${aria}`)) continue;
+      nameFields.push(classifyNameField({
+        name, id, label, ariaLabel: aria, formAction, formRole, formId, formClass, submitLabels,
+      }));
+    }
+  }
+  // Affordances, from the markup's own anchors and buttons. Visibility is unknown here, which is
+  // why the source marker matters.
+  const affordances = [];
+  for (const el of text.matchAll(/<a\b[^>]*>[\s\S]*?<\/a>|<button\b[^>]*>[\s\S]*?<\/button>/gi)) {
+    const tag = el[0];
+    const inner = tag.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+    const aria = attr(tag, 'aria-label');
+    const matched = REGISTER_LABEL.test(inner) ? inner : (REGISTER_LABEL.test(aria) ? aria : null);
+    if (!matched) continue;
+    affordances.push({
+      label: matched.slice(0, 80),
+      element: tag.startsWith('<a') ? 'a' : 'button',
+      target: tag.startsWith('<a') ? (attr(tag, 'href') || null) : null,
+    });
+  }
+  return {
+    structuralReportVersion: STRUCTURAL_REPORT_VERSION,
+    structuralReportSource: 'offline-reanalysis',
+    registrationAffordances: affordances.slice(0, 10),
+    nameFields,
+    collectedNameFields: nameFields.filter((f) => f.role === 'collection').length,
+    searchKeyNameFields: nameFields.filter((f) => f.role === 'query').length,
+  };
+}
+
+/**
+ * Amendment 61. Does this record already carry a complete, current, live structural report?
+ *
+ * The question that decides whether an offline reanalysis is permitted at all. If the answer is
+ * yes, there is a live report to copy and re-deriving one offline could only lose information -
+ * `nameFields` depends on visibility, which retained markup cannot establish.
+ */
+export function hasCompleteCurrentReport(record) {
+  if (!record) return false;
+  if (record.structuralReportVersion !== STRUCTURAL_REPORT_VERSION) return false;
+  if (record.structuralReportSource !== 'live') return false;
+  return Array.isArray(record.registrationAffordances) && Array.isArray(record.nameFields) &&
+    Number.isInteger(record.collectedNameFields) && Number.isInteger(record.searchKeyNameFields);
+}
+
+/**
+ * Did this record obtain a document for `detectBlocking` to run on, and does it OWN that document?
+ *
+ * One report per document, on the record that owns the bytes. A discovery observation names the
+ * render it registered through `renderId`, and the report lives on that registry entry: demanding
+ * one of the observation too would duplicate a finding and invite the two copies to disagree.
+ */
 export function bearsDocument(record) {
   if (!record) return false;
   if (record.refused === true) return false;
+  // A record that defers to a render in the registry is not the owner of those bytes.
+  if (record.renderId && record.status === 'discovery') return false;
   return /^[0-9a-f]{64}$/.test(record.htmlSha256 ?? '') ||
     /^[0-9a-f]{64}$/.test(record.renderedSha256 ?? '');
 }
@@ -4072,11 +4184,18 @@ export function bearsDocument(record) {
  * the finding; and a report copied onto a record for a different page would attribute one
  * document's structure to another.
  */
-export function structuralReportProblems(record, { citedFrom = null } = {}) {
+export function structuralReportProblems(record, { citedFrom = null, capturesRoot = null } = {}) {
   const problems = [];
   if (!record) return ['there is no record to check'];
   const FIELDS = ['registrationAffordances', 'nameFields', 'collectedNameFields', 'searchKeyNameFields'];
-  const at = Date.parse(record.capturedAt ?? record.examinedAt ?? '');
+  // Amendment 61. The record's OWN time decides whether it must carry a report.
+  //
+  // This read `capturedAt` first, so a decision written today inherited the capture time of the
+  // evidence it rests on and appeared grandfathered. A promotion of `c-1016`, captured at 01:16Z
+  // before the 02:00Z boundary, would have passed with no report at all. Grandfathering belongs to
+  // the historical evidence record, never to a decision made now, so `examinedAt` - the time this
+  // record was written - comes first.
+  const at = Date.parse(record.examinedAt ?? record.capturedAt ?? record.navigatedAt ?? '');
   const required = bearsDocument(record) && !Number.isNaN(at) && at >= STRUCTURAL_REPORT_REQUIRED_FROM;
   const present = FIELDS.some((f) => record[f] !== undefined) || record.structuralReportVersion !== undefined;
 
@@ -4160,9 +4279,83 @@ export function structuralReportProblems(record, { citedFrom = null } = {}) {
     // retained bytes is not a copy, and Amendment 59 refused it: the `c-0976` repair needed exactly
     // that - a report for evidence captured before any report existed. A reanalysis must instead
     // declare itself, name bytes that exist, and be of the same page.
-    if (source === 'offline-reanalysis') {
+    // Amendment 61. The restrictions below bind the record that PERFORMS the reanalysis. A decision
+    // that inherits such a report from a reanalysis record is a copy, and is held to equality like
+    // any other copy - otherwise an exclusion resting on reanalysed evidence would be read as
+    // re-deriving a report for a record obtained after the boundary, which is the reanalysis
+    // record itself.
+    const performsReanalysis = record.recordType === RECORD_TYPES.STRUCTURAL_REANALYSIS;
+    if (source === 'offline-reanalysis' && performsReanalysis) {
+      // Amendment 61. The label is evidence-only, and wearing it does not exempt a decision from
+      // copy-equality. A reanalysis concludes nothing: an exclusion that called itself one took
+      // the branch below and skipped equality with the evidence it rests on altogether.
+      if (record.status !== 'retrieved' || record.approval !== APPROVAL.NOT_APPLICABLE) {
+        problems.push(
+          `is recorded as ${RECORD_TYPES.STRUCTURAL_REANALYSIS} with status ` +
+            `${JSON.stringify(record.status)} and approval ${JSON.stringify(record.approval)}; a ` +
+            'reanalysis is evidence-only, and a decision must copy the report it rests on'
+        );
+      }
+      if (record.fails !== undefined) {
+        problems.push('is recorded as a reanalysis but carries a criterion conclusion');
+      }
+      // Amendment 61. A reanalysis is permitted ONLY where there is no live report to copy.
+      //
+      // Amendment 60 skipped equality for every offline claim, which made it a laundering route: a
+      // decision could cite evidence carrying a live report that found one collected name field,
+      // replace the report with an empty one, declare `offline-reanalysis`, and pass both
+      // validators with zero problems. The exception exists for evidence captured before any
+      // report was taken, and for nothing else.
       if (!bearsDocument(citedFrom)) {
         problems.push(`is an offline reanalysis citing ${citedFrom.id}, which holds no document to re-read`);
+      }
+      if (hasCompleteCurrentReport(citedFrom)) {
+        problems.push(
+          `is an offline reanalysis, but ${citedFrom.id} already carries a complete live report; ` +
+            'a live report must be copied exactly, never re-derived offline'
+        );
+      }
+      const citedAt = Date.parse(citedFrom.capturedAt ?? citedFrom.navigatedAt ?? citedFrom.examinedAt ?? '');
+      if (!Number.isNaN(citedAt) && citedAt >= STRUCTURAL_REPORT_REQUIRED_FROM) {
+        problems.push(
+          `is an offline reanalysis of ${citedFrom.id}, which was obtained after the boundary and ` +
+            'must therefore carry its own live report'
+        );
+      }
+      // Amendment 61. RECOMPUTED from the retained bytes, not accepted as stated. A derivation
+      // nobody re-runs is an assertion wearing a derivation's provenance - the shape of the defect
+      // this whole sequence began with.
+      // Amendment 61. No file, no re-reading - so no reanalysis. This guard read
+      // `capturesRoot && citedFrom.file` and simply skipped recomputation when either was absent,
+      // which let a fabricated empty report pass for any evidence that named no retained file.
+      // The writer already refuses such a target; the trust points did not, and a record already
+      // in the log is only ever seen by the trust points.
+      if (!citedFrom.file) {
+        problems.push(
+          `is an offline reanalysis citing ${citedFrom.id}, which names no retained file, so the ` +
+            'derivation cannot be re-run'
+        );
+      }
+      if (capturesRoot && citedFrom.file) {
+        const path = join(resolve(capturesRoot), 'captures', citedFrom.file);
+        if (!existsSync(path)) {
+          problems.push(`cites ${citedFrom.id}, whose file ${citedFrom.file} is not on disk to re-read`);
+        } else {
+          const bytes = readFileSync(path);
+          if (createHash('sha256').update(bytes).digest('hex') !== citedFrom.htmlSha256) {
+            problems.push(`cites ${citedFrom.id}, whose bytes on disk no longer match its digest`);
+          } else {
+            const recomputed = offlineStructuralReport(bytes);
+            for (const f of FIELDS) {
+              if (JSON.stringify(record[f]) !== JSON.stringify(recomputed[f])) {
+                problems.push(
+                  `${f} is not what re-reading ${citedFrom.file} produces; an offline report is ` +
+                    'recomputed, never asserted'
+                );
+              }
+            }
+          }
+        }
       }
     } else {
       for (const f of FIELDS) {
@@ -4174,6 +4367,10 @@ export function structuralReportProblems(record, { citedFrom = null } = {}) {
       if (record.structuralReportVersion !== citedFrom.structuralReportVersion) {
         problems.push(`structuralReportVersion differs from ${citedFrom.id}`);
       }
+      // A copy carries the source it copied, so an inherited reanalysis stays marked as one.
+      if (record.structuralReportSource !== citedFrom.structuralReportSource) {
+        problems.push(`structuralReportSource differs from ${citedFrom.id}`);
+      }
     }
   } else if (source === 'offline-reanalysis') {
     problems.push('is an offline reanalysis but cites no evidence whose bytes it re-read');
@@ -4182,8 +4379,19 @@ export function structuralReportProblems(record, { citedFrom = null } = {}) {
 }
 
 /** Every record and render, checked. Read by the corpus gate. */
-export function structuralReportAudit(log) {
+export function structuralReportAudit(log, { capturesRoot = null } = {}) {
   const problems = [];
+  // Amendment 61. An offline report is recomputed, never asserted - so the audit cannot pass one
+  // without the bytes to recompute it from. Omitting the root would otherwise skip every
+  // recomputation silently, which is how a fabricated report would pass.
+  if (!capturesRoot && (log.attempts ?? []).some((a) =>
+    a.structuralReportSource === 'offline-reanalysis' && !isSuperseded(log, a) &&
+    !isDiscoverySuperseded(log, a.id))) {
+    problems.push(
+      'the log holds offline structural reanalyses, but no captures root was supplied to re-read ' +
+        'their bytes; they cannot be checked and must not pass'
+    );
+  }
   const byId = new Map((log.attempts ?? []).map((a) => [a.id, a]));
   for (const a of log.attempts ?? []) {
     if (isSuperseded(log, a) || isDiscoverySuperseded(log, a.id)) continue;
@@ -4191,7 +4399,7 @@ export function structuralReportAudit(log) {
       : (a.evidenceFromAttemptId ? byId.get(a.evidenceFromAttemptId) : null);
     const carries = a.registrationAffordances !== undefined || a.nameFields !== undefined ||
       a.structuralReportVersion !== undefined;
-    for (const p of structuralReportProblems(a, { citedFrom: carries ? source : null })) {
+    for (const p of structuralReportProblems(a, { citedFrom: carries ? source : null, capturesRoot })) {
       problems.push(`${a.id}: ${p}`);
     }
   }
@@ -5387,7 +5595,7 @@ export function corpusBlockers(log, { capturesRoot = null } = {}) {
     add('policy-reuse', `${reuse.length} policy-reuse record(s) do not rest on a policy that governed them`, reuse);
   }
   // Amendment 59. The structural report must be present, well formed and self-consistent.
-  const structural = structuralReportAudit(log);
+  const structural = structuralReportAudit(log, { capturesRoot });
   if (structural.length) {
     add('structural-report', `${structural.length} record(s) have a missing or inconsistent structural report`, structural);
   }

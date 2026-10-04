@@ -22,7 +22,8 @@
 import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { chromium } from 'playwright';
@@ -30,7 +31,7 @@ import { capturePage, detectBlocking, structuralReport, STRUCTURAL_REPORT_VERSIO
 import { renderDiscoveryPage } from '../render-discovery.mjs';
 import {
   structuralReportProblems, structuralReportAudit, bearsDocument, emptyLog,
-  STRUCTURAL_REPORT_REQUIRED_FROM, corpusBlockers,
+  STRUCTURAL_REPORT_REQUIRED_FROM, corpusBlockers, offlineStructuralReport,
 } from '../run.mjs';
 import { STRUCTURAL_REPORT_SOURCES } from '../capture.mjs';
 import { structuralReportProblems as sealerProblems } from '../../evaluation/solo/descriptive.mjs';
@@ -187,10 +188,12 @@ describe('a request that obtained no document must carry no report', () => {
 });
 
 describe('the gates reject a report that is missing, malformed or inconsistent', () => {
-  const after = new Date(STRUCTURAL_REPORT_REQUIRED_FROM + 3600_000).toISOString().replace(/\.\d{3}Z$/, 'Z');
+  // NOT named `after`: that shadowed the imported `after` hook, and the suite then failed at
+  // collection time while the summary still read `fail 0`.
+  const postBoundary = new Date(STRUCTURAL_REPORT_REQUIRED_FROM + 3600_000).toISOString().replace(/\.\d{3}Z$/, 'Z');
   const sound = (over = {}) => ({
     id: 'c-1', url: 'https://a.govt.nz/contact', htmlSha256: 'a'.repeat(64), htmlBytes: 10,
-    capturedAt: after, refused: false,
+    capturedAt: postBoundary, refused: false,
     structuralReportVersion: 1, structuralReportSource: 'live',
     registrationAffordances: [],
     nameFields: [{ name: 'name', label: 'Your name', role: 'collection', basis: [] }],
@@ -211,7 +214,7 @@ describe('the gates reject a report that is missing, malformed or inconsistent',
   });
 
   test('MISSING: a document-bearing record after the boundary with no report', () => {
-    const r = { id: 'c-1', url: 'https://a.govt.nz/contact', htmlSha256: 'a'.repeat(64), capturedAt: after, refused: false };
+    const r = { id: 'c-1', url: 'https://a.govt.nz/contact', htmlSha256: 'a'.repeat(64), capturedAt: postBoundary, refused: false };
     const v = both(r);
     assert.equal(v.clean, false);
     assert.match(v.capture.join(' '), /carries no structural report/);
@@ -304,23 +307,44 @@ describe('records from before the boundary are grandfathered, not laundered', ()
 });
 
 describe('Amendment 60: a report declares how it was obtained', () => {
-  const after = new Date(STRUCTURAL_REPORT_REQUIRED_FROM + 3600_000).toISOString().replace(/\.\d{3}Z$/, 'Z');
+  // NOT named `after`: that shadowed the imported `after` hook, and the suite then failed at
+  // collection time while the summary still read `fail 0`.
+  const postBoundary = new Date(STRUCTURAL_REPORT_REQUIRED_FROM + 3600_000).toISOString().replace(/\.\d{3}Z$/, 'Z');
   const preBoundary = new Date(STRUCTURAL_REPORT_REQUIRED_FROM - 3600_000).toISOString().replace(/\.\d{3}Z$/, 'Z');
   // Evidence captured before any report existed - exactly c-0974's situation.
+  // Real bytes on disk, so the offline derivation can actually be re-run against them.
+  const RETAINED = '<!doctype html><title>Sign in</title><form method="post">' +
+    '<label for="u">Username</label><input id="u" name="username">' +
+    '<label for="p">Password</label><input id="p" type="password" name="password">' +
+    '<button type="submit">Sign in</button></form>';
+  let retainedRoot;
+  before(() => {
+    retainedRoot = mkdtempSync(join(tmpdir(), 'formfair-reanalysis-'));
+    mkdirSync(join(retainedRoot, 'captures'), { recursive: true });
+    writeFileSync(join(retainedRoot, 'captures', 'c-0974.html'), RETAINED);
+  });
+  after(() => { if (retainedRoot) rmSync(retainedRoot, { recursive: true, force: true }); });
   const evidence = {
-    id: 'c-0974', url: 'https://a.govt.nz/login', htmlSha256: 'a'.repeat(64),
+    id: 'c-0974', url: 'https://a.govt.nz/login', file: 'c-0974.html',
+    htmlSha256: createHash('sha256').update(RETAINED).digest('hex'),
     capturedAt: preBoundary, refused: false,
   };
+  // Amendment 61. A reanalysis is evidence-only and is RECOMPUTED, so the fixture carries the
+  // record type, the evidence-only status, and real retained bytes - with the digest the file
+  // actually hashes to. Asserting a report over a fabricated digest tested only the validator's
+  // bookkeeping; this exercises the re-reading the rule depends on.
   const reanalysis = (over = {}) => ({
-    id: 'c-0978', url: evidence.url, htmlSha256: evidence.htmlSha256, examinedAt: after,
-    refused: false, evidenceFromAttemptId: 'c-0974',
+    id: 'c-0978', recordType: 'structural-reanalysis', url: evidence.url,
+    htmlSha256: evidence.htmlSha256, examinedAt: postBoundary, refused: false,
+    status: 'retrieved', approval: 'not-applicable', evidenceFromAttemptId: 'c-0974',
     structuralReportVersion: 1, structuralReportSource: 'offline-reanalysis',
-    registrationAffordances: [], nameFields: [], collectedNameFields: 0, searchKeyNameFields: 0,
+    ...offlineStructuralReport(Buffer.from(RETAINED)),
     ...over,
   });
   const both = (r, cited) => {
-    const capture = structuralReportProblems(r, { citedFrom: cited });
-    const sealer = sealerProblems({ attempts: cited ? [cited, r] : [r], renders: [] });
+    const capture = structuralReportProblems(r, { citedFrom: cited, capturesRoot: retainedRoot });
+    const sealer = sealerProblems({ attempts: cited ? [cited, r] : [r], renders: [] },
+      { capturesRoot: retainedRoot });
     assert.equal(capture.length > 0, sealer.length > 0,
       `disagreement:\n  capture: ${JSON.stringify(capture)}\n  sealer: ${JSON.stringify(sealer)}`);
     return { capture, clean: capture.length === 0 };
@@ -363,5 +387,118 @@ describe('Amendment 60: a report declares how it was obtained', () => {
   test('the pipelines record live, never a reanalysis', () => {
     assert.equal(structuralReport({}).structuralReportSource, 'live');
     assert.equal(structuralReport({}, { source: 'offline-reanalysis' }).structuralReportSource, 'offline-reanalysis');
+  });
+});
+
+describe('Amendment 61: the reanalysis exemption is not a door', () => {
+  // Amendment 61 bound the offline-reanalysis restrictions to the record that PERFORMS the
+  // reanalysis, so that a decision inheriting such a report is held to copy-equality instead of
+  // being read as re-deriving one. Keying on the record type opened three ways to misuse the
+  // label, and a fourth defect was already live: Finding 4's repair had reached the capture
+  // package only, so the independent mirror still grandfathered a decision by its evidence's
+  // capture time. Each of these passed BOTH implementations with zero problems.
+  // NOT named `after`: that shadowed the imported `after` hook, and the suite then failed at
+  // collection time while the summary still read `fail 0`.
+  const postBoundary = new Date(STRUCTURAL_REPORT_REQUIRED_FROM + 3600_000).toISOString().replace(/\.\d{3}Z$/, 'Z');
+  const preBoundary = new Date(STRUCTURAL_REPORT_REQUIRED_FROM - 3600_000).toISOString().replace(/\.\d{3}Z$/, 'Z');
+  const BYTES = '<!doctype html><title>Register</title><form method="post">' +
+    '<label for="n">Your name</label><input id="n" name="name"><button>Register</button></form>';
+  // NOT "Go": Amendment 51 reads it as a query-submit label, which makes the field a search key.
+  // The derivation was right and the fixture was wrong - a useful confirmation of the classifier.
+  let root;
+  before(() => {
+    root = mkdtempSync(join(tmpdir(), 'formfair-a61-'));
+    mkdirSync(join(root, 'captures'), { recursive: true });
+    writeFileSync(join(root, 'captures', 'e.html'), BYTES);
+  });
+  after(() => { if (root) rmSync(root, { recursive: true, force: true }); });
+
+  const held = () => ({
+    id: 'c-900', url: 'https://a.govt.nz/r', file: 'e.html',
+    htmlSha256: createHash('sha256').update(BYTES).digest('hex'),
+    capturedAt: preBoundary, refused: false,
+  });
+  const reanalysis = (over = {}) => ({
+    id: 'c-901', recordType: 'structural-reanalysis', url: 'https://a.govt.nz/r',
+    htmlSha256: createHash('sha256').update(BYTES).digest('hex'), examinedAt: postBoundary, refused: false,
+    status: 'retrieved', approval: 'not-applicable', evidenceFromAttemptId: 'c-900',
+    structuralReportVersion: 1, structuralReportSource: 'offline-reanalysis',
+    ...offlineStructuralReport(Buffer.from(BYTES)), ...over,
+  });
+  const both = (r, cited, { capturesRoot = root } = {}) => {
+    const capture = structuralReportProblems(r, { citedFrom: cited, capturesRoot });
+    const sealer = sealerProblems({ attempts: cited ? [cited, r] : [r], renders: [] }, { capturesRoot });
+    assert.equal(capture.length > 0, sealer.length > 0,
+      `disagreement:\n  capture: ${JSON.stringify(capture)}\n  sealer: ${JSON.stringify(sealer)}`);
+    return capture;
+  };
+
+  test('the honest reanalysis is clean, and it finds the name field in the markup', () => {
+    const r = reanalysis();
+    assert.deepEqual(both(r, held()), []);
+    assert.equal(r.collectedNameFields, 1, 'the whole point: the markup does ask for a name');
+  });
+
+  test('an exclusion wearing the reanalysis label is refused', () => {
+    // The label skips copy-equality. A decision that claimed it could therefore rest on a report
+    // it had replaced, which is the laundering route Amendment 60 closed, reopened by record type.
+    const v = both(reanalysis({ id: 'c-902', status: 'excluded', approval: 'approved', fails: 3 }), held());
+    assert.match(v.join(' '), /evidence-only/);
+    assert.match(v.join(' '), /criterion conclusion/);
+  });
+
+  test('a reanalysis citing evidence that names no retained file is refused', () => {
+    // No file means nothing is re-read, and the report is accepted exactly as asserted. The
+    // recomputation guard read `capturesRoot && citedFrom.file` and skipped silently without it.
+    const fileless = { ...held(), file: undefined, renderedSha256: 'a'.repeat(64) };
+    assert.match(both(reanalysis({ registrationAffordances: [], nameFields: [], collectedNameFields: 0, searchKeyNameFields: 0 }), fileless).join(' '),
+      /names no retained file/);
+  });
+
+  test('a fabricated report over real bytes is still refused', () => {
+    const v = both(reanalysis({ nameFields: [], collectedNameFields: 0, searchKeyNameFields: 0 }), held());
+    assert.match(v.join(' '), /not what re-reading|differs/);
+  });
+
+  test('an audit with no captures root refuses rather than skipping recomputation', () => {
+    // A derivation nobody re-runs is an assertion wearing a derivation's provenance.
+    const log = { attempts: [held(), reanalysis()], renders: [] };
+    assert.ok(structuralReportAudit(log, { capturesRoot: null }).length > 0);
+    assert.ok(sealerProblems(log, { capturesRoot: null }).length > 0);
+    assert.deepEqual(structuralReportAudit(log, { capturesRoot: root }), []);
+  });
+
+  test('a decision inheriting a reanalysis report is held to copy-equality, not re-derivation', () => {
+    // The failure that began Amendment 61: the exclusion resting on c-0974's reanalysis was read
+    // as re-deriving a report for a post-boundary record - the reanalysis record itself.
+    const r = reanalysis();
+    const inherits = {
+      id: 'c-903', url: r.url, htmlSha256: r.htmlSha256, examinedAt: postBoundary, refused: false,
+      status: 'excluded', fails: 3, evidenceFromAttemptId: 'c-901',
+      structuralReportVersion: 1, structuralReportSource: 'offline-reanalysis',
+      registrationAffordances: r.registrationAffordances, nameFields: r.nameFields,
+      collectedNameFields: r.collectedNameFields, searchKeyNameFields: r.searchKeyNameFields,
+    };
+    assert.deepEqual(structuralReportProblems(inherits, { citedFrom: r, capturesRoot: root }), []);
+    // And it must be an exact copy: dropping a field is caught as a difference, not re-derived.
+    const edited = { ...inherits, nameFields: [], collectedNameFields: 0 };
+    assert.match(structuralReportProblems(edited, { citedFrom: r, capturesRoot: root }).join(' '),
+      /differs from c-901/);
+    // Including the source, so an inherited reanalysis cannot be re-labelled live.
+    assert.match(structuralReportProblems({ ...inherits, structuralReportSource: 'live' },
+      { citedFrom: r, capturesRoot: root }).join(' '), /structuralReportSource differs/);
+  });
+
+  test("Finding 4's repair holds in the sealer too, not only the gate", () => {
+    // Reproduced: capture refused this and the sealer returned zero problems, because the mirror
+    // still read `capturedAt` before `examinedAt`. A decision written today inherited the
+    // pre-boundary capture time of its evidence and appeared grandfathered.
+    const log = { attempts: [
+      { id: 'c-1016', url: 'https://a.govt.nz/f', htmlSha256: 'a'.repeat(64), capturedAt: preBoundary, refused: false },
+      { id: 'c-1020', url: 'https://a.govt.nz/f', htmlSha256: 'a'.repeat(64), capturedAt: preBoundary,
+        examinedAt: postBoundary, refused: false, status: 'captured', promotedFrom: 'c-1016' },
+    ], renders: [] };
+    assert.ok(structuralReportAudit(log, { capturesRoot: root }).length > 0);
+    assert.ok(sealerProblems(log, { capturesRoot: root }).length > 0, 'the mirror must refuse it as well');
   });
 });

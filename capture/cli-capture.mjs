@@ -22,7 +22,7 @@ import { join, resolve, relative } from 'node:path';
 import { chromium } from 'playwright';
 import {
   capturePage, validateUrl, validatePageId, CATEGORIES, captureDisposition, needsHeadedFallback,
-  detectBlocking, VIEWPORT, LOCALE,
+  detectBlocking, VIEWPORT, LOCALE, structuralReport,
 } from './capture.mjs';
 import { renderDiscoveryPage, RENDERED_METHODS } from './render-discovery.mjs';
 import { POLICY, createPacer } from './politeness.mjs';
@@ -38,6 +38,7 @@ import {
   answerChain, sha256,
   renderBacklog, renderBacklogByUrl, renderPrerequisite, recordRender, findRender, RENDERED_DIR,
   recordFetch, findFetch, assertFetchEvidenceUsable, FETCHED_DIR, parseRetained,
+  offlineStructuralReport, bearsDocument, hasCompleteCurrentReport, STRUCTURAL_REPORT_REQUIRED_FROM,
   sitemapRepresentationProblems,
   findRenderForUrl, assertRenderEvidenceUsable, assertPermitUsable, adoptRender,
   reResolveCandidateSet, staleSetBindings,
@@ -173,6 +174,30 @@ const recordedPolicyFor = (log) => (target) => {
     reason: verdict.reason,
   };
 };
+
+/**
+ * Amendment 61. The structural report a decision inherits from the evidence it rests on.
+ *
+ * `exclude` and `not-selected` copied only the digest and byte length, so a decision written after
+ * the boundary carried no report and the gate refused it - which left the `c-0976` replacement and
+ * the `c-1016` exclusion with no working command path at all. A decision carries the report of the
+ * evidence it cites, verbatim: the same bytes under a decision are the same findings.
+ *
+ * Where the evidence predates the report era it has none to inherit, and the decision carries none
+ * either; `reanalyse-structure` is the path that gives such evidence a report first.
+ */
+const inheritedReport = (source) => (
+  source && source.structuralReportVersion !== undefined
+    ? {
+      structuralReportVersion: source.structuralReportVersion,
+      structuralReportSource: source.structuralReportSource,
+      registrationAffordances: source.registrationAffordances,
+      nameFields: source.nameFields,
+      collectedNameFields: source.collectedNameFields,
+      searchKeyNameFields: source.searchKeyNameFields,
+    }
+    : {}
+);
 
 const pacer = createPacer();
 
@@ -510,6 +535,7 @@ function doNotSelected() {
     evidenceFromAttemptId: evidenceFrom,
     htmlSha256: source.htmlSha256,
     ...(source.htmlBytes !== undefined ? { htmlBytes: source.htmlBytes } : {}),
+    ...inheritedReport(source),
     notSelectedInFavourOf: inFavourOf,
     exclusionReason: require_('reason'),
     ...(flag('supersedes-attempt-id') ? { supersedesAttemptId: flag('supersedes-attempt-id') } : {}),
@@ -633,7 +659,11 @@ async function doCorrectBarriers() {
     accessBarriers: blocking.accessBarriers,
     submissionProtection: blocking.submissionProtection,
     authenticationSignals: blocking.authenticationSignals,
-    registrationAffordances: blocking.registrationAffordances,
+    // Amendment 61. The COMPLETE report, marked as what it is. This copied
+    // `registrationAffordances` alone and left the three name-field fields behind. It is a replay
+    // of retained bytes in a browser with the network aborted, so it carries the offline source
+    // marker: no stylesheets were fetched, and visibility is therefore not established.
+    ...structuralReport(blocking, { source: 'offline-reanalysis' }),
     browser: render.browser ?? null, browserMode: render.browserMode ?? null,
     settleMs: render.settleMs ?? null,
     adoptedFrom: target.id,
@@ -756,6 +786,8 @@ function doExclude() {
       evidenceFromAttemptId: evidenceFrom,
       htmlSha256: source.htmlSha256,
       ...(source.htmlBytes !== undefined ? { htmlBytes: source.htmlBytes } : {}),
+      // Amendment 61. And the structural report, which this copied nothing of.
+      ...inheritedReport(source),
     };
   }
 
@@ -1476,6 +1508,16 @@ async function doRenderDiscovery() {
     controlCount: rendered.controls.length, buttonCount: rendered.buttons,
     accessBarriers: rendered.accessBarriers, submissionProtection: rendered.submissionProtection,
     authenticationSignals: rendered.authenticationSignals, title: rendered.title,
+    // Amendment 61. The structural report, onto the REGISTRY entry. Amendment 59 made
+    // `renderDiscoveryPage` return it and this writer still dropped all five fields, so the render
+    // report remained absent from the log - the producer-versus-consumer defect, repeated one
+    // layer up, by a test that inspected the returned object instead of reopening the log.
+    structuralReportVersion: rendered.structuralReportVersion,
+    structuralReportSource: rendered.structuralReportSource,
+    registrationAffordances: rendered.registrationAffordances,
+    nameFields: rendered.nameFields,
+    collectedNameFields: rendered.collectedNameFields,
+    searchKeyNameFields: rendered.searchKeyNameFields,
     browser: rendered.browser, browserMode: rendered.browserMode, userAgent: rendered.userAgent,
     viewport: rendered.viewport, locale: rendered.locale, settleMs: rendered.settleMs,
   });
@@ -1640,6 +1682,16 @@ async function headedFallbackForRender({
     controlCount: headed.controls.length, buttonCount: headed.buttons,
     accessBarriers: headed.accessBarriers, submissionProtection: headed.submissionProtection,
     authenticationSignals: headed.authenticationSignals, title: headed.title,
+    // Amendment 61. The structural report, onto the REGISTRY entry. Amendment 59 made
+    // `renderDiscoveryPage` return it and this writer still dropped all five fields, so the render
+    // report remained absent from the log - the producer-versus-consumer defect, repeated one
+    // layer up, by a test that inspected the returned object instead of reopening the log.
+    structuralReportVersion: headed.structuralReportVersion,
+    structuralReportSource: headed.structuralReportSource,
+    registrationAffordances: headed.registrationAffordances,
+    nameFields: headed.nameFields,
+    collectedNameFields: headed.collectedNameFields,
+    searchKeyNameFields: headed.searchKeyNameFields,
     browser: headed.browser, browserMode: headed.browserMode, userAgent: headed.userAgent,
     viewport: headed.viewport, locale: headed.locale, settleMs: headed.settleMs,
     redirectChain: headed.redirectChain,
@@ -1941,6 +1993,87 @@ function doRecordPolicyReuse() {
   console.log(`recorded ${record.id}: ${category} robots policy reused from ${check.id} (${check.disposition})`);
   console.log(`that policy was fetched at ${check.fetchedAt} and is still within the 24-hour window.`);
   console.log('No request was made: the recorded check already holds the policy and its bytes.');
+}
+
+/**
+ * Gives report-less historical evidence a structural report, derived from its own retained bytes.
+ *
+ * Amendment 61. `c-0976` rested on a report that never existed, and the evidence it cites was
+ * captured before any report was taken - so the replacement needed a report, and there was none to
+ * copy. This is the only path that creates one.
+ *
+ * It accepts no report from the caller. The file is re-hashed against the record's digest and the
+ * report is computed here by `offlineStructuralReport`, a pure derivation over the markup that the
+ * sealer reproduces independently. A caller-supplied array would be an assertion wearing the
+ * provenance of a derivation, which is the shape of the defect this whole sequence began with.
+ *
+ * It is refused where the evidence already carries a complete live report, or was obtained after
+ * the report boundary and should have one: those must be copied exactly, never re-derived.
+ */
+function doReanalyseStructure() {
+  const dir = require_('out');
+  const logPath = logPathFor(dir);
+  const log = readLog(logPath);
+  const id = require_('id');
+  const target = log.attempts.find((a) => a.id === id);
+  if (!target) die(`no recorded attempt with id ${id}`);
+  if (!bearsDocument(target)) die(`${id} obtained no document, so there is nothing to re-read`);
+  if (hasCompleteCurrentReport(target)) {
+    die(`${id} already carries a complete live report; copy it rather than re-deriving it`);
+  }
+  const obtainedAt = Date.parse(target.capturedAt ?? target.navigatedAt ?? target.examinedAt ?? '');
+  if (!Number.isNaN(obtainedAt) && obtainedAt >= STRUCTURAL_REPORT_REQUIRED_FROM) {
+    die(`${id} was obtained after the report boundary and must carry its own live report`);
+  }
+  if (!target.file) die(`${id} names no retained file`);
+
+  // The bytes, re-hashed against what the record says they are.
+  const path = join(resolve(dir), 'captures', target.file);
+  if (!existsSync(path)) die(`${target.file} is not on disk; the bytes cannot be re-read`);
+  const bytes = readFileSync(path);
+  const digest = sha256(bytes);
+  if (digest !== target.htmlSha256) {
+    die(
+      `${target.file} hashes to ${digest.slice(0, 12)} but ${id} records ` +
+        `${String(target.htmlSha256).slice(0, 12)}; the evidence changed and is not re-read`
+    );
+  }
+  if (target.htmlBytes !== undefined && target.htmlBytes !== bytes.length) {
+    die(`${target.file} is ${bytes.length} bytes but ${id} records ${target.htmlBytes}`);
+  }
+
+  const report = offlineStructuralReport(bytes);
+  appendAttempt(log, {
+    recordType: 'structural-reanalysis',
+    examinedAt: now(), checkedAt: now(),
+    agency: target.agency, website: target.website, url: target.url,
+    status: 'retrieved',
+    category: target.category, candidateSetVersion: target.candidateSetVersion,
+    evidenceFromAttemptId: id,
+    htmlSha256: target.htmlSha256,
+    ...(target.htmlBytes !== undefined ? { htmlBytes: target.htmlBytes } : {}),
+    // Evidence-only. It concludes nothing about the page, so every criterion stays unestablished
+    // and it settles no candidate: a markup derivation cannot speak to visibility, and an
+    // `excluded` status here would both overclaim and demand a locked set it has no business
+    // requiring.
+    eligibility: Object.fromEntries(ELIGIBILITY_CRITERIA.map((criterion) => [criterion, null])),
+    note: require_('note'),
+    ...report,
+    // The SAME bytes under the same identity: this record adds a reading of them, not a second
+    // retrieval. `pageId` and `file` name the evidence it re-read, as a promotion does.
+    pageId: target.pageId,
+    file: target.file,
+    navigationPerformed: false,
+    approval: APPROVAL.NOT_APPLICABLE,
+  });
+  writeLog(logPath, log);
+  writeDerived({ log, dir, frameSha256: flag('frame-sha256'), drawOrderSha256: flag('draw-order-sha256'), synthetic: has('synthetic') });
+  const record = log.attempts.at(-1);
+  console.log(`recorded ${record.id}: offline structural report for ${id}`);
+  console.log(`  name fields: ${report.nameFields.length} (${report.collectedNameFields} collected, ${report.searchKeyNameFields} search keys)`);
+  console.log(`  registration affordances: ${report.registrationAffordances.length}`);
+  console.log('Derived from the retained markup, with no browser and no network. It establishes');
+  console.log('what the markup contains, NOT what was visible: criterion four needs a live report.');
 }
 
 function doConcludeInconclusive() {
@@ -2363,6 +2496,7 @@ function doInit() {
 }
 
 const commands = { init: doInit, packet: doPacket, 'conclude-inconclusive': doConcludeInconclusive,
+  'reanalyse-structure': doReanalyseStructure,
   'read-resource': doReadResource, 'record-policy-reuse': doRecordPolicyReuse, candidates: doCandidates, lock: doLock, 'approve-set': doApproveSet,
   'supersede-set': doSupersedeSet, publish: doPublish, next: doNext, capture: doCapture, exclude: doExclude, discovery: doDiscovery, budget: doBudget, approve: doApprove, status: doStatus, build: doBuild, exhaust: doExhaust, 'preflight-discovery': doPreflightDiscovery, 'reopen-set': doReopenSet, 'close-permit': doClosePermit,
   deviation: doDeviation, 'recheck-robots': doRecheckRobots, promote: doPromote,

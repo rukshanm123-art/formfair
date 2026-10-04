@@ -431,6 +431,13 @@ export function classifyNameField(facts = {}) {
  * be indistinguishable from evidence whose report was genuinely empty, and the gate could not tell
  * "no report was ever taken" from "the page had no name field".
  */
+/**
+ * The registration-affordance label pattern, at module scope. Amendment 46 defined it inside
+ * `page.evaluate`, where the offline derivation cannot reach it; this is the same pattern, exported
+ * so the markup-only reanalysis and the live detector cannot drift apart silently.
+ */
+export const REGISTER_LABEL = /\b(register|sign\s?up|signup|create (?:an? )?account|join (?:now|us|up))\b/i;
+
 export const STRUCTURAL_REPORT_VERSION = 1;
 
 /** The four fields every document-bearing capture and render must carry, from one place. */

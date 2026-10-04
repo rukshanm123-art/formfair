@@ -4952,3 +4952,98 @@ The capture suite is **764** tests and the solo suite **152**.
 The frozen method, the frozen criteria, the priority order and the robots procedure are untouched.
 Every Amendment 59 rule stands; only the copied-report rule is scoped to copies. All earlier tags
 are preserved and unmoved, including the three revoked under Amendment 47.
+
+## Amendment 61 — the report must survive the writers, and the exemption must not become a door
+
+*4 October 2026.* Amendments 59 and 60 were tagged and CI-green, and neither held at the actual log
+boundary. A pause before the record operations found four P1 gaps; repairing the fourth opened three
+more, and a fifth defect was already live in the independent mirror. Every one of them passed both
+implementations with zero problems before it was reproduced.
+
+### The four gaps Amendments 59 and 60 left open
+
+**1. The render report was still dropped.** `renderDiscoveryPage()` was changed to return the
+report, and both CLI writers construct the registry entry by hand and omitted all six fields. The
+test described as covering the render pipeline inspected only the object the function returned; it
+never recorded it in `capture-log.json` and read it back. That is the producer-versus-consumer
+defect Amendment 59 exists to describe, repeated inside the repair for it.
+
+**2. The decision writers could not carry a report.** `exclude` and `eligible-not-selected` copied
+the digest and byte length and nothing else, and the offline reclassification path copied
+`registrationAffordances` alone — not the counts, not the version, not the source marker.
+
+**3. `offline-reanalysis` bypassed a valid live report.** Amendment 60 skipped equality for every
+offline claim, so a decision could cite evidence whose live report found a collected name field,
+replace it with an empty report, declare `offline-reanalysis`, and pass both validators. Reproduced
+exactly: capture `[]`, sealer `[]`.
+
+**4. Grandfathering exempted new decisions.** The requirement read `capturedAt` before
+`examinedAt`, so a decision written today inherited the capture time of the evidence it rests on.
+`c-1016` and `c-1017` were captured at approximately 01:16Z, before the 02:00Z boundary, so a
+promotion made now would have been grandfathered out of carrying any report at all. Grandfathering
+belongs to the historical evidence record, never to a decision made today.
+
+### The rules
+
+A successful capture or render persists `structuralReportVersion`, `structuralReportSource`,
+`registrationAffordances`, `nameFields`, `collectedNameFields` and `searchKeyNameFields` through the
+**actual CLI writers**, headless and headed-fallback alike. A refused request carries none of them.
+A decision copies the report of the evidence it rests on field for field, including the source, so
+an inherited reanalysis stays visibly a reanalysis. A record's **own** recorded time —
+`examinedAt`, then `capturedAt`, then `navigatedAt` — decides whether it must carry a report.
+
+Offline reanalysis is permitted only where the cited evidence predates the boundary **and** carries
+no complete current report. It is performed by a dedicated `reanalyse-structure` command that
+re-hashes the retained file and computes the report itself, accepting no caller-supplied arrays, and
+it is **recomputed at both trust points** from the bytes on disk and compared. A derivation nobody
+re-runs is an assertion wearing a derivation's provenance.
+
+### The three gaps the repair itself opened
+
+Scoping the offline restrictions to the record that *performs* the reanalysis — necessary, because
+an inheriting decision was otherwise read as re-deriving a report for a post-boundary record, namely
+the reanalysis record itself — made the record type the key, and the label then had to be defended:
+
+- **An exclusion wearing the reanalysis label skipped copy-equality.** The label is now evidence-only:
+  a reanalysis must have status `retrieved` and approval `not-applicable`, and must carry no
+  criterion conclusion.
+- **A reanalysis citing evidence that names no retained file escaped recomputation entirely.** The
+  guard read `capturesRoot && citedFrom.file` and skipped silently when either was absent, so a
+  fabricated empty report passed for any such evidence. No file, no re-reading, so no reanalysis.
+  The writer already refused such a target; the trust points did not, and a record already in the
+  log is only ever seen by the trust points.
+- **An audit called without a captures root skipped every recomputation.** Both audits now refuse a
+  log holding offline reanalyses when no root is supplied, rather than passing them unchecked.
+
+### The fifth defect: the mirror was never repaired
+
+Finding 4's fix reached the capture package only. The independent sealer still read `capturedAt`
+before `examinedAt` and omitted `navigatedAt`, so the exact attack the gate refused returned zero
+problems from the sealer. Two implementations exist so that each can catch the other; that only
+works if a repair is applied to both. Reproduced before fixing, and now asserted in both.
+
+### Tests
+
+`capture/test/report-persistence.test.mjs` (7) runs the real commands and reopens
+`capture-log.json`, covering capture, render, headed fallback, exclusion, promotion,
+eligible-not-selected and offline reanalysis — never the lower-level return object.
+`capture/test/structural-report.test.mjs` (35) adds the seven Amendment 61 cases over **real
+retained bytes**, so the clean case exercises the recomputation the rule depends on rather than
+agreeing with an asserted digest.
+
+Two incidental findings are recorded because both were silent. A local `const after` shadowed the
+imported `after` hook, and the two affected suites failed at collection while the summary still read
+`fail 0`; the runner's non-zero exit was the only signal. And a fixture whose submit control read
+"Go" produced a search-key classification: Amendment 51 reads `go` as a query-submit label, so the
+derivation was right and the fixture was wrong.
+
+The capture suite is **778** tests, the solo suite **152**, and the evaluation suite **244**.
+
+### What this does not change
+
+The frozen method, the frozen criteria, the priority order and the robots procedure are untouched.
+`g-0163`'s hand-populated `registrationAffordances` remains valid and marked pre-amendment by having
+no version. The live log audits clean at both trust points under every rule above. All earlier tags
+are preserved and unmoved.
+
+*Frozen as `selection-v1.0.58`, `capture-v1.0.33` and `solo-protocol-v1.0.38`, 4 October 2026.*

@@ -168,7 +168,7 @@ const FRAME_FILES = [
  * exhaustion records at all. A manifest that misnames its own protocol is worse than one that
  * omits it: a reader checking which rules a corpus was sealed under would be told the wrong ones.
  */
-export const SOLO_PROTOCOL_TAG = 'solo-protocol-v1.0.37';
+export const SOLO_PROTOCOL_TAG = 'solo-protocol-v1.0.38';
 
 /**
  * Two resolutions, mirrored from the capture package and checked equal by a test.
@@ -690,7 +690,91 @@ export const STRUCTURAL_REPORT_REQUIRED_FROM = Date.parse('2026-10-04T02:00:00Z'
  * independently of the capture package, which this file may not import, and grandfathered by an
  * explicit boundary rather than by the marker's absence, which would be circular.
  */
-export function structuralReportProblems(log) {
+/**
+ * Amendment 61. The sealer's own offline derivation, so a reanalysis can be reproduced and
+ * compared rather than trusted.
+ *
+ * Defined over the markup alone because this package is dependency-free and cannot launch a
+ * browser - which is also what makes the derivation deterministic and comparable across the two
+ * implementations. Its limits are the point: with no stylesheets it cannot know what was VISIBLE,
+ * so it establishes that a name-collecting control exists in the retained markup and never that it
+ * met criterion four.
+ */
+export function offlineStructuralReport(html) {
+  const text = Buffer.isBuffer(html) ? html.toString('utf8') : String(html ?? '');
+  const NAME = /(^|[^a-z])(name|first[_\s-]?names?|given[_\s-]?names?|sur[_\s-]?name|last[_\s-]?name|family[_\s-]?name|fore[_\s-]?names?|full[_\s-]?name|middle[_\s-]?names?|preferred[_\s-]?name|maiden[_\s-]?name)([^a-z]|$)/i;
+  const QUERY_SUBMIT = /^\s*(search|find|look\s?up|browse|filter|refine|go)\b/i;
+  const QUERY_FORM = /(^|[^a-z])(search|find|results?|query|keywords?|browse|look-?up|catalogue?|archway|finding-?aid|recordsearch)([^a-z]|$)/i;
+  const REGISTER = /\b(register|sign\s?up|signup|create (?:an? )?account|join (?:now|us|up))\b/i;
+  const attr = (tag, name) => {
+    const m = new RegExp(`\\b${name}=("([^"]*)"|'([^']*)')`, 'i').exec(tag);
+    return m ? (m[2] ?? m[3] ?? '') : '';
+  };
+  const labelFor = (id) => {
+    if (!id) return '';
+    const m = new RegExp(`<label[^>]*\\bfor=("${id}"|'${id}')[^>]*>([\\s\\S]*?)</label>`, 'i').exec(text);
+    return (m?.[2] ?? '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+  };
+  const nameFields = [];
+  for (const [, formAttrs, body] of text.matchAll(/<form\b([^>]*)>([\s\S]*?)<\/form>/gi)) {
+    const formAction = attr(formAttrs, 'action');
+    const formRole = attr(formAttrs, 'role');
+    const formIdent = `${attr(formAttrs, 'id')} ${attr(formAttrs, 'class')}`;
+    const submits = [...body.matchAll(/<input\b[^>]*>|<button\b[^>]*>([\s\S]*?)<\/button>/gi)]
+      .map((x) => {
+        if (x[0].startsWith('<button')) return (x[1] ?? '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+        const type = attr(x[0], 'type').toLowerCase();
+        return ['submit', 'button'].includes(type) ? attr(x[0], 'value') : '';
+      })
+      .filter((v) => v !== '');
+    for (const input of body.matchAll(/<input\b[^>]*>/gi)) {
+      const tag = input[0];
+      const type = (attr(tag, 'type') || 'text').toLowerCase();
+      if (!['text', 'email', 'tel', 'url', 'number', 'search'].includes(type)) continue;
+      const name = attr(tag, 'name');
+      const id = attr(tag, 'id');
+      const aria = attr(tag, 'aria-label');
+      const label = labelFor(id);
+      if (!NAME.test(`${name} ${id} ${label} ${aria}`)) continue;
+      const own = `${name} ${id} ${label} ${aria}`;
+      const bases = [];
+      if (QUERY_FORM.test(own)) bases.push('field named as a search key');
+      if (QUERY_FORM.test(formAction)) bases.push('form action queries records');
+      if (formRole === 'search') bases.push('form carries role="search"');
+      if (QUERY_FORM.test(formIdent)) bases.push('form identified as a search');
+      if (submits.length > 0 && submits.every((l) => QUERY_SUBMIT.test(l))) {
+        bases.push(`submit control(s) labelled ${submits.map((l) => JSON.stringify(l)).join(', ')}`);
+      }
+      nameFields.push({
+        name: name || null, label: label || null,
+        role: bases.length > 0 ? 'query' : 'collection', basis: bases,
+      });
+    }
+  }
+  const affordances = [];
+  for (const el of text.matchAll(/<a\b[^>]*>[\s\S]*?<\/a>|<button\b[^>]*>[\s\S]*?<\/button>/gi)) {
+    const tag = el[0];
+    const inner = tag.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+    const aria = attr(tag, 'aria-label');
+    const matched = REGISTER.test(inner) ? inner : (REGISTER.test(aria) ? aria : null);
+    if (!matched) continue;
+    affordances.push({
+      label: matched.slice(0, 80),
+      element: tag.startsWith('<a') ? 'a' : 'button',
+      target: tag.startsWith('<a') ? (attr(tag, 'href') || null) : null,
+    });
+  }
+  return {
+    structuralReportVersion: STRUCTURAL_REPORT_VERSION,
+    structuralReportSource: 'offline-reanalysis',
+    registrationAffordances: affordances.slice(0, 10),
+    nameFields,
+    collectedNameFields: nameFields.filter((f) => f.role === 'collection').length,
+    searchKeyNameFields: nameFields.filter((f) => f.role === 'query').length,
+  };
+}
+
+export function structuralReportProblems(log, { capturesRoot = null } = {}) {
   const problems = [];
   const attempts = Array.isArray(log?.attempts) ? log.attempts : [];
   const renders = Array.isArray(log?.renders) ? log.renders : [];
@@ -701,12 +785,23 @@ export function structuralReportProblems(log) {
   const canon = (u) => { try { const x = new URL(u); x.hash = ''; return x.href; } catch { return String(u); } };
   const FIELDS = ['registrationAffordances', 'nameFields', 'collectedNameFields', 'searchKeyNameFields'];
   const digest = /^[0-9a-f]{64}$/;
-  const bears = (r) => r?.refused !== true &&
+  // One report per document, on the record that OWNS the bytes: a discovery observation defers to
+  // the render it registered, so it is not asked for a second copy of the same finding.
+  const bears = (r) => r?.refused !== true && !(r?.renderId && r?.status === 'discovery') &&
     (digest.test(r?.htmlSha256 ?? '') || digest.test(r?.renderedSha256 ?? ''));
   const byId = new Map(attempts.map((a) => [a.id, a]));
+  // An offline report is recomputed, never asserted, so this cannot pass one without the bytes.
+  if (!capturesRoot && attempts.some((a) =>
+    a.structuralReportSource === 'offline-reanalysis' && !superseded.has(a.id))) {
+    problems.push('the log holds offline structural reanalyses, but no captures root was supplied to re-read their bytes');
+  }
 
   const check = (r, label, citedFrom) => {
-    const at = Date.parse(r.capturedAt ?? r.examinedAt ?? '');
+    // Amendment 61, Finding 4. The record's OWN time decides whether it must carry a report. This
+    // read `capturedAt` first, so a decision written today inherited the capture time of the
+    // evidence it rests on and appeared grandfathered - the capture package was repaired and this
+    // independent mirror was not, so the attack passed the sealer while the gate refused it.
+    const at = Date.parse(r.examinedAt ?? r.capturedAt ?? r.navigatedAt ?? '');
     const current = bears(r) && !Number.isNaN(at) && at >= STRUCTURAL_REPORT_REQUIRED_FROM;
     const present = FIELDS.some((f) => r[f] !== undefined) || r.structuralReportVersion !== undefined;
     if (!bears(r) && present) {
@@ -764,9 +859,54 @@ export function structuralReportProblems(log) {
       if (canon(citedFrom.url) !== canon(r.url)) {
         problems.push(`${label} carries a report while citing ${citedFrom.id}, which is a different page`);
       }
-      if (src === 'offline-reanalysis') {
+      // Amendment 61. These bind the record that PERFORMS the reanalysis; a decision inheriting
+      // such a report is a copy and is held to equality like any other.
+      if (src === 'offline-reanalysis' && r.recordType === 'structural-reanalysis') {
+        // The label is evidence-only; wearing it must not exempt a decision from copy-equality.
+        if (r.status !== 'retrieved' || r.approval !== 'not-applicable') {
+          problems.push(`${label} is a reanalysis with status ${JSON.stringify(r.status)} and approval ${JSON.stringify(r.approval)}; a reanalysis is evidence-only`);
+        }
+        if (r.fails !== undefined) {
+          problems.push(`${label} is a reanalysis but carries a criterion conclusion`);
+        }
         if (!bears(citedFrom)) {
           problems.push(`${label} is an offline reanalysis citing ${citedFrom.id}, which holds no document`);
+        }
+        // Amendment 61. Permitted only where there is no live report to copy.
+        const complete = citedFrom.structuralReportVersion === STRUCTURAL_REPORT_VERSION &&
+          citedFrom.structuralReportSource === 'live' &&
+          Array.isArray(citedFrom.registrationAffordances) && Array.isArray(citedFrom.nameFields) &&
+          Number.isInteger(citedFrom.collectedNameFields) && Number.isInteger(citedFrom.searchKeyNameFields);
+        if (complete) {
+          problems.push(`${label} re-derives a report offline although ${citedFrom.id} carries a live one`);
+        }
+        const citedAt = Date.parse(citedFrom.capturedAt ?? citedFrom.navigatedAt ?? citedFrom.examinedAt ?? '');
+        if (!Number.isNaN(citedAt) && citedAt >= STRUCTURAL_REPORT_REQUIRED_FROM) {
+          problems.push(`${label} re-derives a report for ${citedFrom.id}, obtained after the boundary`);
+        }
+        // Recomputed from the retained bytes, independently of the capture package. No file, or no
+        // root to read it under, means the derivation cannot be re-run - and a derivation nobody
+        // re-runs is an assertion. Previously both cases simply skipped the check.
+        if (!citedFrom.file) {
+          problems.push(`${label} re-derives a report from ${citedFrom.id}, which names no retained file`);
+        }
+        if (capturesRoot && citedFrom.file) {
+          const path = join(resolve(capturesRoot), 'captures', citedFrom.file);
+          if (!existsSync(path)) {
+            problems.push(`${label} cites ${citedFrom.id}, whose file is not on disk to re-read`);
+          } else {
+            const bytes = readFileSync(path);
+            if (createHash('sha256').update(bytes).digest('hex') !== citedFrom.htmlSha256) {
+              problems.push(`${label} cites ${citedFrom.id}, whose bytes no longer match its digest`);
+            } else {
+              const recomputed = offlineStructuralReport(bytes);
+              for (const f of FIELDS) {
+                if (JSON.stringify(r[f]) !== JSON.stringify(recomputed[f])) {
+                  problems.push(`${label}.${f} is not what re-reading ${citedFrom.file} produces`);
+                }
+              }
+            }
+          }
         }
       } else {
         for (const f of FIELDS) {
@@ -777,6 +917,9 @@ export function structuralReportProblems(log) {
         }
         if (r.structuralReportVersion !== citedFrom.structuralReportVersion) {
           problems.push(`${label}.structuralReportVersion differs from ${citedFrom.id}`);
+        }
+        if (r.structuralReportSource !== citedFrom.structuralReportSource) {
+          problems.push(`${label}.structuralReportSource differs from ${citedFrom.id}`);
         }
       }
     } else if (src === 'offline-reanalysis') {
@@ -1976,7 +2119,7 @@ export function sealCorpus({
         }
 
         // Amendment 59. The structural report must be present and consistent.
-        for (const problem of structuralReportProblems(log)) {
+        for (const problem of structuralReportProblems(log, { capturesRoot: logRoot })) {
           problems.push(`structuralReport: ${problem}`);
         }
 
