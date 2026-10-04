@@ -59,7 +59,20 @@ const sha256 = (v) => createHash('sha256').update(v).digest('hex');
 const isoUtcish = (v) => typeof v === 'string' && !Number.isNaN(Date.parse(v)) && v.endsWith('Z');
 
 /** The most recent recorded top-level navigation, whatever produced it. */
+/**
+ * Amendment 64. A plain-resource fetch is traffic, so it constrains the next request.
+ *
+ * This read `log.attempts` alone, so a `read-resource` fetch was invisible to pacing until a
+ * discovery record was written for it. Two sitemap documents were therefore requested one second
+ * apart against a five-second floor, and the breach surfaced only when the second outcome record
+ * was refused - after both requests had been made. Traffic is counted where it happens.
+ */
+export const FETCH_PACING_REQUIRED_FROM = Date.parse('2026-10-04T09:30:00Z');
+
 export function lastNavigation(log) {
+  const fetchTimes = (log.fetches ?? [])
+    .map((f) => Date.parse(f.fetchedAt ?? ''))
+    .filter((n) => !Number.isNaN(n));
   const times = log.attempts
     // selection-v1.0.11: a record that states no request was made must not contribute a
     // navigation time. The two `NOT NAVIGATED` search records carried `navigatedAt` and were
@@ -69,7 +82,8 @@ export function lastNavigation(log) {
     .filter(Boolean)
     .map((t) => Date.parse(t))
     .filter((n) => !Number.isNaN(n));
-  return times.length ? Math.max(...times) : null;
+  const all = [...times, ...fetchTimes];
+  return all.length ? Math.max(...all) : null;
 }
 
 export function emptyLog() {
@@ -1131,7 +1145,12 @@ export function appendAttempt(log, attempt) {
   // unexecutable whenever the selected page is not the last one fetched.
   const at = Date.parse(attempt.navigatedAt ?? attempt.capturedAt ?? '');
   const previous = lastNavigation(log);
-  if (!attempt.promotedFrom && !Number.isNaN(at) && previous !== null) {
+  // Amendment 64. A record written FROM a retained fetch is exempt for the same reason a promotion
+  // is: it generates no traffic. The obligation belongs to the fetch, where it can be honoured by
+  // waiting rather than discovered afterwards, and `lastNavigation` now counts fetches so the
+  // fetch itself constrains whatever is requested next.
+  const generatesNoTraffic = attempt.promotedFrom || attempt.fetchId;
+  if (!generatesNoTraffic && !Number.isNaN(at) && previous !== null) {
     const gap = at - previous;
     if (gap < POLICY.minDelayBetweenNavigationsMs) {
       throw new Error(
@@ -4748,6 +4767,32 @@ export function checkFetchLedger(log, fetchedDir) {
   const fetches = log.fetches ?? [];
   const attempts = log.attempts ?? [];
   const seen = new Set();
+  // Amendment 64. The pacing floor, checked where the traffic is.
+  //
+  // `read-resource` requested with no pacing at all, and because `lastNavigation` ignored fetches
+  // the breach was invisible until an outcome record was written. Both are fixed; this is the
+  // backstop, and it verifies rather than trusts. Fetches recorded before the amendment are
+  // grandfathered and the one real breach is disclosed as a deviation, so the gate stays usable
+  // while the log keeps the fact.
+  const traffic = [
+    ...attempts
+      .filter((a) => a.navigationPerformed !== false && !a.promotedFrom && !a.fetchId)
+      .map((a) => Date.parse(a.navigatedAt ?? a.capturedAt ?? '')),
+    ...fetches.map((f) => Date.parse(f.fetchedAt ?? '')),
+  ].filter((n) => !Number.isNaN(n)).sort((x, y) => x - y);
+  for (const f of fetches) {
+    const at = Date.parse(f.fetchedAt ?? '');
+    if (Number.isNaN(at) || at < FETCH_PACING_REQUIRED_FROM) continue;
+    const previous = traffic.filter((t) => t < at).pop();
+    if (previous === undefined) continue;
+    const gap = at - previous;
+    if (gap < POLICY.minDelayBetweenNavigationsMs) {
+      problems.push(
+        `${f.id} (${f.url}) was fetched ${gap} ms after the previous request; the policy requires ` +
+          `at least ${POLICY.minDelayBetweenNavigationsMs} ms between requests`
+      );
+    }
+  }
   for (const f of fetches) {
     const where = `${f.id} (${f.url})`;
     if (seen.has(f.id)) problems.push(`${f.id} appears more than once in the fetch registry`);

@@ -202,6 +202,22 @@ const inheritedReport = (source) => (
 
 const pacer = createPacer();
 
+/**
+ * Amendment 64. The crawl-delay the governing policy asks for, from the RECORDED check - never a
+ * fresh request. Returns null when no policy states one.
+ */
+function crawlDelayFor(log, url) {
+  try {
+    const origin = new URL(url).origin;
+    const check = findRobotsCheck(log, origin);
+    const groups = check?.policy?.groups ?? [];
+    const delays = groups.map((g) => g?.crawlDelay).filter((d) => typeof d === 'number');
+    return delays.length ? Math.max(...delays) : null;
+  } catch {
+    return null;
+  }
+}
+
 async function doCapture() {
   const dir = require_('out');
   const agency = require_('agency');
@@ -1911,6 +1927,12 @@ async function doReadResource() {
   // policy since selection-v1.0.28 precisely so that a redirect cannot carry the harness somewhere
   // it was never permitted to go.
   const allows = recordedPolicyFor(log);
+  // Amendment 64. Paced BEFORE the request. This command requested with no pacing of any kind, so
+  // two sitemap documents went out one second apart against the five-second floor this study
+  // publishes, and the breach was discovered only when the second outcome record was refused.
+  // Pacing is an obligation on traffic, so it is honoured here by waiting, not reported afterwards.
+  pacer.seen(lastNavigation(log));
+  await pacer.beforeNavigation(crawlDelayFor(log, url));
   const at = now();
   const chain = [];
   let current = url;
@@ -1978,6 +2000,7 @@ async function doReadResource() {
   // left in the retained tree, where the ledger would read them as evidence nothing accounts for.
   let entry = null;
   try {
+    // Amendment 64. The interval this request actually observed, recorded on the fetch.
     entry = recordFetch(log, {
       url, finalUrl: current, fetchedAt: at, permitId: permit.id,
       httpStatus: res.status,

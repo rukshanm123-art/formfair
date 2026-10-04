@@ -168,7 +168,7 @@ const FRAME_FILES = [
  * exhaustion records at all. A manifest that misnames its own protocol is worse than one that
  * omits it: a reader checking which rules a corpus was sealed under would be told the wrong ones.
  */
-export const SOLO_PROTOCOL_TAG = 'solo-protocol-v1.0.40';
+export const SOLO_PROTOCOL_TAG = 'solo-protocol-v1.0.41';
 
 /**
  * Two resolutions, mirrored from the capture package and checked equal by a test.
@@ -1050,6 +1050,28 @@ export function fetchLedgerProblems(log, fetchedDir) {
   const attempts = Array.isArray(log?.attempts) ? log.attempts : [];
   if (fetches.length === 0) return problems;
   const canon = (u) => { try { const x = new URL(u); x.hash = ''; return x.href; } catch { return String(u); } };
+
+  // Amendment 64. The pacing floor, verified independently of the capture package. A plain-resource
+  // fetch is traffic to the host, so it both obeys the floor and constrains the next request;
+  // read-resource observed neither until this amendment. Pre-amendment fetches are grandfathered
+  // and the one real breach is disclosed as a deviation.
+  const FETCH_PACING_REQUIRED_FROM = Date.parse('2026-10-04T09:30:00Z');
+  const MIN_DELAY_MS = 5000;
+  const traffic = [
+    ...attempts
+      .filter((a) => a.navigationPerformed !== false && !a.promotedFrom && !a.fetchId)
+      .map((a) => Date.parse(a.navigatedAt ?? a.capturedAt ?? '')),
+    ...fetches.map((f) => Date.parse(f.fetchedAt ?? '')),
+  ].filter((n) => !Number.isNaN(n)).sort((x, y) => x - y);
+  for (const f of fetches) {
+    const at = Date.parse(f.fetchedAt ?? '');
+    if (Number.isNaN(at) || at < FETCH_PACING_REQUIRED_FROM) continue;
+    const previous = traffic.filter((t) => t < at).pop();
+    if (previous === undefined) continue;
+    if (at - previous < MIN_DELAY_MS) {
+      problems.push(`${f.id} (${f.url}) was fetched ${at - previous} ms after the previous request`);
+    }
+  }
 
   for (const f of fetches) {
     const where = `${f.id} (${f.url})`;

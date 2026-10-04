@@ -5164,3 +5164,47 @@ The frozen method, the frozen criteria, the priority order and the robots proced
 `c-1017` and `c-1022` both stand. No request was made for this correction.
 
 *Frozen as `selection-v1.0.60`, `capture-v1.0.35` and `solo-protocol-v1.0.40`, 4 October 2026.*
+
+## Amendment 64 — a plain-resource fetch is traffic
+
+*4 October 2026.* `read-resource` requested with **no pacing of any kind** — no `beforeNavigation`,
+no seed, nothing — and `lastNavigation` counted only `log.attempts`, so a fetch left no trace the
+pacer could read. Two sitemap documents were therefore requested **one second apart**, against the
+five-second floor this study publishes in `provenance.json`, and the breach surfaced only when the
+second outcome record was refused — after both requests had already been made.
+
+This is Amendment 62's lesson a second time, in a command that amendment did not touch: an
+obligation on traffic has to be honoured before the traffic, not discovered afterwards.
+
+### The rules
+
+`read-resource` seeds the pacer from the log's last request and waits out the floor, including any
+crawl-delay the **recorded** policy asks for, before it requests anything. `lastNavigation` counts
+fetches as well as navigations, so a plain-resource fetch constrains whatever is requested next,
+whichever command requests it. A record written from a retained fetch is exempt from the
+record-time floor for the same reason Amendment 43 exempted a promotion — it generates no traffic,
+and the obligation belongs to the fetch — while a record that did navigate is still held to it. The
+fetch ledger verifies the interval at both trust points, so the floor is checked where the traffic
+is rather than trusted.
+
+Fetches recorded before this amendment are grandfathered so the corpus gate stays usable, and the
+one real breach is disclosed at **v-0010** rather than hidden by the grandfathering.
+
+### Tests
+
+`capture/test/fetch-pacing.test.mjs` (9) covers a fetch being visible to `lastNavigation`, a
+no-request record still contributing nothing, one second between two fetches refused by both
+implementations over one log, five seconds permitted, a fetch too soon after a page navigation
+refused, pre-amendment fetches grandfathered, a fetch-derived record exempt from the record-time
+floor, and a navigating record still held to it. One fixture was corrected by the new rule while
+being written: it made the first record a navigation at the same instant as its own fetch, and the
+floor rightly refused it at 0 ms.
+
+The capture suite is **797** tests, the solo suite **162**, and the evaluation suite **244**.
+
+### What this does not change
+
+The frozen method, the frozen criteria, the priority order and the robots procedure are untouched.
+No page was requested again, and no robots policy was refetched.
+
+*Frozen as `selection-v1.0.61`, `capture-v1.0.36` and `solo-protocol-v1.0.41`, 4 October 2026.*
