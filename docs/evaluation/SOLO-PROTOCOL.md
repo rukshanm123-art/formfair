@@ -5322,3 +5322,67 @@ The frozen method, the frozen criteria, the priority order and the robots proced
 No page was requested again and no robots policy was refetched for any of this.
 
 *Frozen as `selection-v1.0.63`, `capture-v1.0.38` and `solo-protocol-v1.0.43`, 4 October 2026.*
+
+## Amendment 67 — a permit is consumed at the request boundary
+
+*4 October 2026.* Amendment 66 added a pacing wait before every request. `read-resource` consumed
+its permit **before** that wait, so the recorded consumption preceded the traffic it authorised by
+the interval the floor required:
+
+    p-0516 consumed 23:16:36Z, request made 23:16:42Z
+    p-0517 consumed 23:16:42Z, request made 23:16:47Z
+
+Nothing about the authorisation or the politeness was wrong — each permit covered its request, no
+request was made without a live permit, and the floor was honoured. What was wrong is what the
+timestamps said about the order of events: the ledger read a permit consumed before the traffic
+existed. Two correct steps in the wrong order.
+
+### The rules
+
+The permit is **validated** before the wait, because waiting five seconds only to discover it is
+unusable wastes the wait, and **consumed at the request boundary**, immediately before the first
+byte, with the consumption made durable before it. The consumption and the request record take the
+**same instant**: every timestamp here is written to second precision, so two clock readings
+microseconds apart can still land in different seconds and reinstate the same failure from a race
+rather than a real ordering.
+
+### The packet hid what the gate already knew
+
+`status` reported both problems while the approval packet reported `FOR ATTENTION (0)`. The one
+document an approval is read from was the one document that omitted them, which invites an approval
+the gate will then refuse. The packet now surfaces every permit-ledger problem.
+
+### Repairing records without rewriting them
+
+Two records already carried the discrepancy, and a recorded timestamp is never rewritten, so the
+correction is a record: `reconcile-permit` writes an append-only reconciliation citing the retained
+fetch whose `fetchedAt` **is** the request boundary. It is verified at write time against exactly
+that — there must be a real discrepancy to reconcile, the cited fetch must be the one the record
+rests on and must match the navigation time it records, one permit is reconciled once, and the gap
+must be **no wider than a pacing wait can explain**. A reconciliation that could explain any
+discrepancy at all would be a way to make the ledger agree with anything. It makes no request,
+carries no permit or navigation timestamp of its own, and rewrites nothing.
+
+`pr-0001` and `pr-0002` reconcile the two records, and `v-0011` discloses both the chronology
+failure and the packet that hid it.
+
+### Tests
+
+`capture/test/permit-boundary.test.mjs` (12) drives real CLI invocations with a second read in the
+same scan, so the pacing wait is actually in play, and asserts the recorded consumption is not
+earlier than the request on the **successful, redirected, failed and post-request-write-failure**
+paths, with the ledger clean in each. The reconciliation tests cover the real case clearing the
+blocker, and refusals where there is nothing to reconcile, where the gap is wider than a pacing
+wait explains, where the cited fetch is not the one the record rests on, where the fetch is not the
+boundary the record records, where a permit is reconciled twice, where the reconciliation names a
+different record, and where the note says nothing.
+
+The capture suite is **829** tests, the solo suite **162**, and the evaluation suite **244**.
+
+### What this does not change
+
+The frozen method, the frozen criteria, the priority order and the robots procedure are untouched.
+The four-member candidate set is unchanged: discovery was not repeated, and no page was requested
+again.
+
+*Frozen as `selection-v1.0.64`, `capture-v1.0.39` and `solo-protocol-v1.0.44`, 4 October 2026.*

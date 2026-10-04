@@ -2712,7 +2712,7 @@ export function assertPermitUsable(log, { agency, category, candidateSetVersion,
   return permit;
 }
 
-export function consumeDiscoveryPermit(log, { agency, category, candidateSetVersion, url, navigatedAt = null, permitId = null }) {
+export function consumeDiscoveryPermit(log, { agency, category, candidateSetVersion, url, navigatedAt = null, permitId = null, consumedAt = null }) {
   // selection-v1.0.14: the record names its permit. Taking whichever open permit matched left
   // the pairing between a request and its authorisation implicit, and when two existed it was
   // simply wrong.
@@ -2781,7 +2781,11 @@ export function consumeDiscoveryPermit(log, { agency, category, candidateSetVers
     // that drifts.
   }
 
-  permit.consumedAt = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
+  // Amendment 67. The caller may supply the instant, so consumption and the request it authorises
+  // carry the SAME timestamp. Every time in this log is written to second precision, so taking two
+  // clock readings microseconds apart can still land them in different seconds and reinstate the
+  // very chronology failure this amendment closes - from a race, not from a real ordering.
+  permit.consumedAt = consumedAt ?? new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
   return permit;
 }
 
@@ -3163,6 +3167,84 @@ export function reopenCandidateSet(log, { agency, category, reason }) {
  * called from the closure itself, from `deriveDraft` and from `publishProvenance`: a rule enforced
  * where a value is written but not where it is trusted is the defect this scan keeps rediscovering.
  */
+/**
+ * An append-only reconciliation for a permit consumed before the request it authorised.
+ *
+ * Amendment 67. `read-resource` consumed the permit, then waited out the pacing floor, then made
+ * the request, so `consumedAt` preceded the traffic by however long the floor required: `p-0516`
+ * records 23:16:36Z for a request made at 23:16:42Z. The code is fixed, but two records already
+ * carry the discrepancy and a recorded timestamp is never rewritten.
+ *
+ * So the correction is a record, not an edit. It cites the retained fetch whose `fetchedAt` IS the
+ * request boundary, and it is verified at write time against exactly that: there must be a real
+ * discrepancy to reconcile, the cited fetch must be the one the record rests on, and the gap must
+ * be consistent with a pacing wait rather than arbitrary. A reconciliation that could explain any
+ * discrepancy at all would be a way to make the ledger agree with anything.
+ */
+export function reconcilePermitConsumption(log, { permitId, recordId, fetchId, note, at = null }) {
+  const permits = log.discoveryPermits ?? [];
+  const permit = permits.find((x) => x.id === permitId);
+  if (!permit) throw new Error(`no permit ${permitId}`);
+  const record = (log.attempts ?? []).find((a) => a.id === recordId);
+  if (!record) throw new Error(`no recorded attempt ${recordId}`);
+  const fetchEntry = (log.fetches ?? []).find((f) => f.id === fetchId);
+  if (!fetchEntry) throw new Error(`no retained fetch ${fetchId}`);
+  if (typeof note !== 'string' || note.trim().length < 40) {
+    throw new Error('a reconciliation must say what it reconciles and why');
+  }
+  if (record.fetchId !== fetchId) {
+    throw new Error(`${recordId} rests on ${record.fetchId ?? 'no fetch'}, not ${fetchId}`);
+  }
+  if (permit.url !== record.url) {
+    throw new Error(`${permitId} authorises ${permit.url}, not ${record.url}`);
+  }
+  const consumed = Date.parse(permit.consumedAt ?? '');
+  const navigated = Date.parse(record.navigatedAt ?? '');
+  const fetched = Date.parse(fetchEntry.fetchedAt ?? '');
+  if (Number.isNaN(consumed) || Number.isNaN(navigated) || Number.isNaN(fetched)) {
+    throw new Error('the permit, the record and the fetch must all carry usable timestamps');
+  }
+  if (fetched !== navigated) {
+    throw new Error(
+      `${fetchId} was fetched at ${fetchEntry.fetchedAt} but ${recordId} records ` +
+        `${record.navigatedAt}; the retained fetch is the request boundary`
+    );
+  }
+  if (consumed >= navigated) {
+    throw new Error(`${permitId} was not consumed before ${recordId} navigated; there is nothing to reconcile`);
+  }
+  // Consistent with a pacing wait, and nothing wider. The floor plus a second of recording slack is
+  // the whole of the discrepancy this defect can produce.
+  const gap = navigated - consumed;
+  const explainable = POLICY.minDelayBetweenNavigationsMs + 1000;
+  if (gap > explainable) {
+    throw new Error(
+      `${permitId} was consumed ${gap} ms before the request, more than a pacing wait can explain ` +
+        `(${explainable} ms); this is not the defect Amendment 67 reconciles`
+    );
+  }
+  const list = log.permitReconciliations ?? (log.permitReconciliations = []);
+  if (list.some((x) => x.permitId === permitId)) throw new Error(`${permitId} is already reconciled`);
+  const entry = {
+    id: `pr-${String(list.length + 1).padStart(4, '0')}`,
+    permitId, recordId, fetchId,
+    recordedConsumedAt: permit.consumedAt,
+    requestedAt: fetchEntry.fetchedAt,
+    gapMs: gap,
+    note,
+    recordedAt: at ?? new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'),
+  };
+  list.push(entry);
+  return entry;
+}
+
+/** Every valid reconciliation, keyed by the permit it explains. */
+export function permitReconciliations(log) {
+  const out = new Map();
+  for (const entry of log.permitReconciliations ?? []) out.set(entry.permitId, entry);
+  return out;
+}
+
 export function checkPermitLedger(log) {
   const problems = [];
   const allPermits = log.discoveryPermits ?? [];
@@ -3404,10 +3486,15 @@ export function checkPermitLedger(log) {
         }
       }
       if (navigated !== null && consumedAt !== null && consumedAt < navigated) {
-        problems.push(
-          `${where} was consumed at ${permit.consumedAt}, before ${record.id} navigated at ` +
-            `${record.navigatedAt}`
-        );
+        // Amendment 67. An append-only reconciliation citing the retained fetch explains this and
+        // is verified at write time; without one it stays a blocker.
+        const reconciled = permitReconciliations(log).get(permit.id);
+        if (!reconciled || reconciled.recordId !== record.id) {
+          problems.push(
+            `${where} was consumed at ${permit.consumedAt}, before ${record.id} navigated at ` +
+              `${record.navigatedAt}`
+          );
+        }
       }
       if (issued !== null && consumedAt !== null && consumedAt < issued) {
         problems.push(`${where} was consumed at ${permit.consumedAt}, before it was issued`);

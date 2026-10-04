@@ -16,7 +16,7 @@ import {
   setKey, CATEGORY_ORDER, SEARCH_TERMS, MAX_CANDIDATES_PER_CATEGORY,
   TECHNICAL_ATTRITION_OUTCOMES,
 } from './selection.mjs';
-import { barrierAccounting, readContentUrls } from './run.mjs';
+import { barrierAccounting, readContentUrls, checkPermitLedger } from './run.mjs';
 
 const pad = (s, n) => String(s).padEnd(n);
 
@@ -122,6 +122,14 @@ export function buildPacket(log, { agency, category }) {
   const skipped = earlier.filter((c) => !log.candidateSets?.[setKey(agency, c)] &&
     !(log.supersededCandidateSets ?? []).some((v) => v.agency === agency && v.category === c));
   if (skipped.length) anomalies.push(`higher-priority categories with no round: ${skipped.join(', ')}`);
+
+  // Amendment 67. The permit ledger, surfaced where the approval is given.
+  //
+  // `status` reported two chronology failures while this packet said FOR ATTENTION (0), so the one
+  // document an approval is read from was the one document that hid them. A packet that omits a
+  // blocker the gate already knows about is worse than no packet: it invites an approval the gate
+  // will then refuse.
+  for (const problem of checkPermitLedger(log)) anomalies.push(`permit ledger: ${problem}`);
 
   const superseded = (log.supersededCandidateSets ?? []).filter(
     (v) => v.agency === agency && v.category === category

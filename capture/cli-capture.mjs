@@ -35,7 +35,7 @@ import {
   unresolvedDiscoveryRounds, openDiscoveryPermits, robotsCheckIsFresh, isDiscoverySuperseded,
   reopenCandidateSet, closeDiscoveryPermit, permitAudit, PERMIT_DISPOSITIONS, corpusBlockers,
   quarantineArtefact, recordDeviation, agencyResolutions, agencyResolution, reResolveExhaustion,
-  preRequestProblems, lastRequest,
+  preRequestProblems, lastRequest, reconcilePermitConsumption, checkPermitLedger,
   answerChain, sha256,
   renderBacklog, renderBacklogByUrl, renderPrerequisite, recordRender, findRender, RENDERED_DIR,
   recordFetch, findFetch, assertFetchEvidenceUsable, FETCHED_DIR, parseRetained,
@@ -1932,11 +1932,18 @@ async function doReadResource() {
   const permitId = require_('permit-id');
   validateUrl(url);
 
-  const permit = consumeDiscoveryPermit(log, {
-    agency: require_('agency'), category: require_('category'),
-    candidateSetVersion: Number(require_('set-version')), url,
-    navigatedAt: null, permitId,
-  });
+  const agency = require_('agency');
+  const category = require_('category');
+  const setVersion = Number(require_('set-version'));
+  // Amendment 67. The permit is VALIDATED here and CONSUMED at the request boundary below.
+  //
+  // It used to be consumed here, before the pacing wait, so its `consumedAt` preceded the request
+  // it authorised by however long the floor required: `p-0516` was recorded consumed at 23:16:36Z
+  // for a request made at 23:16:42Z, and the ledger read that as a permit consumed before the
+  // traffic existed. Validating early is right - waiting five seconds only to discover the permit
+  // is unusable wastes the wait - but the consumption records when the request happened, so it
+  // belongs where the request does.
+  assertPermitUsable(log, { agency, category, candidateSetVersion: setVersion, url, permitId });
 
   // Amendment 56. MANUAL redirects, with every destination decided against the recorded policy
   // BEFORE it is requested.
@@ -1952,7 +1959,14 @@ async function doReadResource() {
   // publishes, and the breach was discovered only when the second outcome record was refused.
   // Pacing is an obligation on traffic, so it is honoured here by waiting, not reported afterwards.
   await beforeRequest(log, url);
+  // Amendment 67. The request boundary: one instant, used for the consumption and for the request
+  // record alike, so the two cannot be split across a second boundary by a race.
   const at = now();
+  const permit = consumeDiscoveryPermit(log, {
+    agency, category, candidateSetVersion: setVersion, url,
+    navigatedAt: null, permitId, consumedAt: at,
+  });
+  writeLog(logPath, log);
   const chain = [];
   let current = url;
   let res = null;
@@ -2055,6 +2069,28 @@ async function doReadResource() {
  * service-application round against an explicit instruction, and is recorded as `v-0005`. This path
  * exists so the next round can say the same thing without the request.
  */
+/**
+ * Amendment 67. Reconcile a permit consumed before the request it authorised, append-only.
+ *
+ * Makes no request, carries no permit of its own and no navigation timestamp, and rewrites
+ * nothing: it records the retained fetch that IS the request boundary and is verified against it.
+ */
+function doReconcilePermit() {
+  const dir = require_('out');
+  const logPath = logPathFor(dir);
+  const log = readLog(logPath);
+  const entry = reconcilePermitConsumption(log, {
+    permitId: require_('permit-id'),
+    recordId: require_('record'),
+    fetchId: require_('fetch-id'),
+    note: require_('note'),
+  });
+  writeLog(logPath, log);
+  writeDerived({ log, dir, frameSha256: flag('frame-sha256'), drawOrderSha256: flag('draw-order-sha256'), synthetic: has('synthetic') });
+  console.log(`recorded ${entry.id}: ${entry.permitId} consumed ${entry.gapMs} ms before ${entry.recordId} requested ${entry.requestedAt}`);
+  console.log('No request was made, and no timestamp was rewritten.');
+}
+
 function doRecordPolicyReuse() {
   const dir = require_('out');
   const logPath = logPathFor(dir);
@@ -2600,7 +2636,7 @@ function doInit() {
 }
 
 const commands = { init: doInit, packet: doPacket, 'conclude-inconclusive': doConcludeInconclusive,
-  'reanalyse-structure': doReanalyseStructure,
+  'reanalyse-structure': doReanalyseStructure, 'reconcile-permit': doReconcilePermit,
   'read-resource': doReadResource, 'record-policy-reuse': doRecordPolicyReuse, candidates: doCandidates, lock: doLock, 'approve-set': doApproveSet,
   'supersede-set': doSupersedeSet, publish: doPublish, next: doNext, capture: doCapture, exclude: doExclude, discovery: doDiscovery, budget: doBudget, approve: doApprove, status: doStatus, build: doBuild, exhaust: doExhaust, 'preflight-discovery': doPreflightDiscovery, 'reopen-set': doReopenSet, 'close-permit': doClosePermit,
   deviation: doDeviation, 'recheck-robots': doRecheckRobots, promote: doPromote,
