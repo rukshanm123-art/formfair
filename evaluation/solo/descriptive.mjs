@@ -168,7 +168,7 @@ const FRAME_FILES = [
  * exhaustion records at all. A manifest that misnames its own protocol is worse than one that
  * omits it: a reader checking which rules a corpus was sealed under would be told the wrong ones.
  */
-export const SOLO_PROTOCOL_TAG = 'solo-protocol-v1.0.42';
+export const SOLO_PROTOCOL_TAG = 'solo-protocol-v1.0.43';
 
 /**
  * Two resolutions, mirrored from the capture package and checked equal by a test.
@@ -1060,11 +1060,13 @@ export function pacingProblems(log) {
   const fetches = Array.isArray(log?.fetches) ? log.fetches : [];
   const robots = Array.isArray(log?.robotsChecks) ? log.robotsChecks : [];
 
+  // Amendment 66. Every request type is audited as SUBJECT as well as predecessor. Navigation
+  // entries carried no url and were therefore never measured themselves.
   const requests = [];
   for (const a of attempts) {
     if (a.navigationPerformed === false || a.promotedFrom || a.fetchId) continue;
     const at = Date.parse(a.navigatedAt ?? a.capturedAt ?? '');
-    if (!Number.isNaN(at)) requests.push({ key: `a:${a.id}`, at });
+    if (!Number.isNaN(at)) requests.push({ key: `a:${a.id}`, at, url: a.finalUrl ?? a.url, what: a.id });
   }
   for (const f of fetches) {
     const at = Date.parse(f.fetchedAt ?? '');
@@ -1072,16 +1074,19 @@ export function pacingProblems(log) {
   }
   for (const c of robots) {
     const at = Date.parse(c.fetchedAt ?? '');
-    if (!Number.isNaN(at)) requests.push({ key: `r:${c.id}`, at, url: c.url, what: c.id });
+    if (!Number.isNaN(at)) requests.push({ key: `r:${c.id}`, at, url: c.url, what: c.id, checkId: c.id });
   }
 
-  const askedFor = (at, url) => {
+  // The delay in force BEFORE this request: a check never governs its own retrieval, or a refresh
+  // fetched inside a crawl-delay would be excused by the very file it brought back.
+  const askedFor = (at, url, selfCheckId = null) => {
     let origin = null;
     try { origin = new URL(url).origin; } catch { origin = null; }
     let governing = null;
     for (const c of robots) {
       const t = Date.parse(c.fetchedAt ?? '');
-      if (Number.isNaN(t) || c.origin !== origin || t > at) continue;
+      if (Number.isNaN(t) || c.origin !== origin) continue;
+      if (selfCheckId ? (c.id === selfCheckId || t >= at) : t > at) continue;
       if (!governing || t > Date.parse(governing.fetchedAt)) governing = c;
     }
     const delays = ((governing && governing.policy && governing.policy.groups) || [])
@@ -1091,7 +1096,11 @@ export function pacingProblems(log) {
   };
 
   for (const entry of requests) {
-    if (!entry.url || entry.at < REQUIRED_FROM) continue;
+    if (entry.at < REQUIRED_FROM) continue;
+    if (typeof entry.url !== 'string' || !/^https?:\/\//.test(entry.url)) {
+      problems.push(`${entry.what} records no usable URL, so its request cannot be audited for pacing`);
+      continue;
+    }
     let previous;
     for (const other of requests) {
       if (other.key === entry.key || other.at > entry.at) continue;
@@ -1099,7 +1108,7 @@ export function pacingProblems(log) {
     }
     if (previous === undefined) continue;
     const gap = entry.at - previous;
-    const required = Math.max(MIN_DELAY_MS, askedFor(entry.at, entry.url));
+    const required = Math.max(MIN_DELAY_MS, askedFor(entry.at, entry.url, entry.checkId ?? null));
     if (gap < required) {
       problems.push(`${entry.what} (${entry.url}) was fetched ${gap} ms after the previous request, under the ${required} ms required`);
     }

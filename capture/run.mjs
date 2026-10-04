@@ -93,10 +93,30 @@ export function lastNavigation(log) {
  */
 export function lastRequest(log) {
   const times = [
-    lastNavigation(log),
-    ...(log.robotsChecks ?? []).map((c) => Date.parse(c.fetchedAt ?? '')),
+    ...(log.attempts ?? [])
+      .filter((a) => a.navigationPerformed !== false && !a.promotedFrom && !a.fetchId)
+      .map((a) => instantUpperBound(a.navigatedAt ?? a.capturedAt)),
+    ...(log.fetches ?? []).map((f) => instantUpperBound(f.fetchedAt)),
+    ...(log.robotsChecks ?? []).map((c) => instantUpperBound(c.fetchedAt)),
   ].filter((n) => typeof n === 'number' && !Number.isNaN(n));
   return times.length ? Math.max(...times) : null;
+}
+
+/**
+ * Amendment 66. The LATEST instant a recorded timestamp can stand for.
+ *
+ * Every time in this log is written to second precision, so a request made at 09:03:24.900Z is
+ * recorded as 09:03:24Z. Seeding the pacer from the parsed value therefore believed the previous
+ * request was up to 999 ms earlier than it was, and the wait came out short: the timing tests for
+ * this amendment measured 4418 ms and 4537 ms against a five-second floor, from the server's own
+ * clock. Pacing must err towards waiting too long, so a second-granularity timestamp is read as
+ * the end of its second.
+ */
+export function instantUpperBound(iso) {
+  if (typeof iso !== 'string') return NaN;
+  const parsed = Date.parse(iso);
+  if (Number.isNaN(parsed)) return NaN;
+  return /\.\d{3}Z$/.test(iso) ? parsed : parsed + 999;
 }
 
 export function emptyLog() {
@@ -4800,21 +4820,44 @@ export function pacingProblems(log) {
   const attempts = log.attempts ?? [];
   const robots = log.robotsChecks ?? [];
 
+  // Amendment 66. Every request is both a SUBJECT of the audit and a PREDECESSOR for the next one.
+  //
+  // Navigation entries carried no `url`, and the loop below skipped any entry without one, so a
+  // page navigation was only ever a predecessor and never audited itself: a robots fetch followed
+  // one second later by a navigation passed both implementations with zero problems. Each entry now
+  // carries the URL that was requested, and nothing is exempt from being measured.
   const requests = [
     ...attempts
       .filter((a) => a.navigationPerformed !== false && !a.promotedFrom && !a.fetchId)
-      .map((a) => ({ key: `attempt:${a.id}`, at: Date.parse(a.navigatedAt ?? a.capturedAt ?? '') })),
-    ...fetches.map((f) => ({ key: `fetch:${f.id}`, at: Date.parse(f.fetchedAt ?? ''), url: f.url, what: f.id })),
-    ...robots.map((c) => ({ key: `robots:${c.id}`, at: Date.parse(c.fetchedAt ?? ''), url: c.url, what: c.id })),
+      .map((a) => ({
+        key: `attempt:${a.id}`, at: Date.parse(a.navigatedAt ?? a.capturedAt ?? ''),
+        url: a.finalUrl ?? a.url, what: a.id, kind: 'navigation',
+      })),
+    ...fetches.map((f) => ({
+      key: `fetch:${f.id}`, at: Date.parse(f.fetchedAt ?? ''), url: f.url, what: f.id, kind: 'fetch',
+    })),
+    ...robots.map((c) => ({
+      key: `robots:${c.id}`, at: Date.parse(c.fetchedAt ?? ''), url: c.url, what: c.id,
+      kind: 'robots', checkId: c.id,
+    })),
   ].filter((e) => !Number.isNaN(e.at));
 
-  /** The crawl-delay the policy governing this origin asked for, at the time of the request. */
-  const requiredGap = (at, url) => {
+  /**
+   * The crawl-delay the policy governing this origin asked for, as KNOWN BEFORE this request.
+   *
+   * Amendment 66. This used `<= at`, so a robots refresh governed itself: a refresh fetched six
+   * seconds into a ten-second crawl-delay was audited against the policy it had just brought back,
+   * and a refreshed file that dropped the delay therefore excused the request that fetched it.
+   * The delay a request must honour is the one in force when it was made, which cannot be the one
+   * it is about to learn. A check is excluded from governing its own retrieval, and so is any
+   * check recorded at the same instant.
+   */
+  const requiredGap = (at, url, selfCheckId = null) => {
     let origin = null;
     try { origin = new URL(url).origin; } catch { origin = null; }
     const governing = robots
       .filter((c) => c.origin === origin && !Number.isNaN(Date.parse(c.fetchedAt ?? '')))
-      .filter((c) => Date.parse(c.fetchedAt) <= at)
+      .filter((c) => (selfCheckId ? c.id !== selfCheckId && Date.parse(c.fetchedAt) < at : Date.parse(c.fetchedAt) <= at))
       .sort((x, y) => Date.parse(x.fetchedAt) - Date.parse(y.fetchedAt))
       .pop();
     const delays = (governing?.policy?.groups ?? [])
@@ -4825,7 +4868,11 @@ export function pacingProblems(log) {
   };
 
   for (const entry of requests) {
-    if (!entry.url || entry.at < FETCH_PACING_REQUIRED_FROM) continue;
+    if (entry.at < FETCH_PACING_REQUIRED_FROM) continue;
+    if (typeof entry.url !== 'string' || !/^https?:\/\//.test(entry.url)) {
+      problems.push(`${entry.what} records no usable URL, so its request cannot be audited for pacing`);
+      continue;
+    }
     // `<=`, and never against itself: a tie is a breach, not an absence of a predecessor.
     const previous = requests
       .filter((other) => other.key !== entry.key && other.at <= entry.at)
@@ -4834,7 +4881,7 @@ export function pacingProblems(log) {
       .pop();
     if (previous === undefined) continue;
     const gap = entry.at - previous;
-    const required = requiredGap(entry.at, entry.url);
+    const required = requiredGap(entry.at, entry.url, entry.checkId ?? null);
     if (gap < required) {
       const why = required > POLICY.minDelayBetweenNavigationsMs
         ? `the governing policy asks for at least ${required} ms between requests`

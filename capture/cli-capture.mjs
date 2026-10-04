@@ -35,7 +35,7 @@ import {
   unresolvedDiscoveryRounds, openDiscoveryPermits, robotsCheckIsFresh, isDiscoverySuperseded,
   reopenCandidateSet, closeDiscoveryPermit, permitAudit, PERMIT_DISPOSITIONS, corpusBlockers,
   quarantineArtefact, recordDeviation, agencyResolutions, agencyResolution, reResolveExhaustion,
-  preRequestProblems, lastNavigation, lastRequest,
+  preRequestProblems, lastRequest,
   answerChain, sha256,
   renderBacklog, renderBacklogByUrl, renderPrerequisite, recordRender, findRender, RENDERED_DIR,
   recordFetch, findFetch, assertFetchEvidenceUsable, FETCHED_DIR, parseRetained,
@@ -218,6 +218,22 @@ function crawlDelayFor(log, url) {
   }
 }
 
+/**
+ * Amendment 66. The ONE pre-request pacing function. Every path that generates traffic calls this
+ * and nothing else calls the pacer directly.
+ *
+ * Amendment 65 paced `read-resource` and `recheck-robots` and left the rest: capture and render
+ * seeded from `lastNavigation`, which excludes robots traffic; the robots fetches inside `capture`
+ * and `preflight-discovery` were not paced at all; and `continue-headed` starts a fresh process,
+ * so the headed fallback's `beforeNavigation` had a pacer that began at zero. Five paths, one
+ * obligation - so there is now one implementation of it, seeded from every request of every kind
+ * and honouring whatever crawl-delay the recorded policy asks for.
+ */
+async function beforeRequest(log, url) {
+  pacer.seen(lastRequest(log));
+  await pacer.beforeNavigation(crawlDelayFor(log, url));
+}
+
 async function doCapture() {
   const dir = require_('out');
   const agency = require_('agency');
@@ -271,10 +287,6 @@ async function doCapture() {
     ...base, url, agency, category, pageId,
     status: retrieveOnly ? 'retrieved' : 'captured',
   };
-  // Amendment 62. Politeness honoured BEFORE the request, not checked after it. The pacer is
-  // per-process, so a separate invocation's first navigation never waited and the floor was
-  // enforced by refusing to record a request already sent.
-  pacer.seen(lastNavigation(log));
   const blockers = preRequestProblems(log, prospective);
   if (blockers.length) {
     die(
@@ -294,6 +306,8 @@ async function doCapture() {
   const cachedCheck = findRobotsCheck(log, parsed.origin);
   let check = robotsCheckIsFresh(cachedCheck) ? cachedCheck : null;
   if (!check) {
+    // Amendment 66. A robots fetch is a request, so it waits its turn like any other.
+    await beforeRequest(log, `${parsed.origin}/robots.txt`);
     check = recordRobotsCheck(log, await fetchRobotsPolicy(parsed.origin));
     writeLog(logPath, log); // the request happened, so its record survives whatever follows
   }
@@ -321,7 +335,7 @@ async function doCapture() {
     return;
   }
 
-  await pacer.beforeNavigation(verdict.crawlDelay ?? null);
+  await beforeRequest(log, url);
 
   // capture-v1.0.6. One fixed fallback: if headless Chromium is access-barred, the same page is
   // attempted once with headed Chromium in a fresh context. This is not a bypass - it is the same
@@ -346,7 +360,7 @@ async function doCapture() {
       if (/refusing to overwrite/.test(error.message)) break;
       if (attemptNo <= POLICY.transientRetries) {
         console.error(`transient failure, retrying once: ${error.message}`);
-        await pacer.beforeNavigation(null);
+        await beforeRequest(log, url);
       }
     }
   }
@@ -384,7 +398,7 @@ async function doCapture() {
       `headless Chromium was access-barred (${record.accessBarriers.join(', ')}); ` +
         'retrying once with headed Chromium in a fresh context'
     );
-    await pacer.beforeNavigation(verdict.crawlDelay ?? null);
+    await beforeRequest(log, url);
     try {
       const headed = await capturePage({
         browserFactory: () => chromium.launch({ headless: false }),
@@ -1374,6 +1388,8 @@ async function doPreflightDiscovery() {
   let check = has('recheck-robots') || !robotsCheckIsFresh(cached) ? null : cached;
   let fetched = false;
   if (!check) {
+    // Amendment 66. Paced: this was the one unpaced request left in the preflight path.
+    await beforeRequest(log, `${parsed.origin}/robots.txt`);
     check = recordRobotsCheck(log, await fetchRobotsPolicy(parsed.origin));
     fetched = true;
   }
@@ -1436,8 +1452,7 @@ async function doRecheckRobots() {
   // paced none of them: r-0088 and r-0089 went out 3000 ms apart under a published 5000 ms floor,
   // invisible for the same reason a plain-resource fetch was invisible before Amendment 64 -
   // nothing counted it. The floor is waited out here rather than reported afterwards.
-  pacer.seen(lastRequest(log));
-  await pacer.beforeNavigation(crawlDelayFor(log, `${origin}/robots.txt`));
+  await beforeRequest(log, `${origin}/robots.txt`);
   const check = recordRobotsCheck(log, await fetchRobotsPolicy(origin));
   writeLog(logPath, log);
   console.log(`${check.id} ${origin} HTTP ${check.httpStatus ?? 'unreachable'} -> ${check.disposition}`);
@@ -1493,16 +1508,13 @@ async function doRenderDiscovery() {
   const logPath = logPathFor(dir);
   const log = readLog(logPath);
   const renderedDir = join(resolve(dir), 'rendered');
-  // Amendment 62. The same reason the permit is checked below: pacing is a precondition of
-  // traffic, not a comment on it, and the pacer starts at zero in each process.
-  pacer.seen(lastNavigation(log));
 
   // The permit is checked BEFORE the browser opens. It used to be consumed after the render, so an
   // expired, closed or mismatched permit was discovered only once the request had already been made.
   // A permit is meant to be a precondition of traffic, not a comment on it.
   assertPermitUsable(log, { agency, category, candidateSetVersion: setVersion, url, permitId });
 
-  await pacer.beforeNavigation(null);
+  await beforeRequest(log, url);
   const rendered = await renderDiscoveryPage({
     browserFactory: () => chromium.launch({ headless: true }),
     url, outDir: renderedDir, recordId: `g${Date.now()}`, settleMs,
@@ -1711,7 +1723,9 @@ async function headedFallbackForRender({
       `retrying once with headed Chromium under ${headedPermit.id}`
   );
 
-  await pacer.beforeNavigation(null);
+  // Amendment 66. Seeded from the log: `continue-headed` starts a new process, so this had a
+  // pacer beginning at zero and its first request never waited.
+  await beforeRequest(log, url);
   let headed = null;
   let launchError = null;
   try {
@@ -1937,8 +1951,7 @@ async function doReadResource() {
   // two sitemap documents went out one second apart against the five-second floor this study
   // publishes, and the breach was discovered only when the second outcome record was refused.
   // Pacing is an obligation on traffic, so it is honoured here by waiting, not reported afterwards.
-  pacer.seen(lastRequest(log));
-  await pacer.beforeNavigation(crawlDelayFor(log, url));
+  await beforeRequest(log, url);
   const at = now();
   const chain = [];
   let current = url;

@@ -5261,3 +5261,64 @@ The frozen method, the frozen criteria, the priority order and the robots proced
 No page was requested again and no robots policy was refetched for any of this.
 
 *Frozen as `selection-v1.0.62`, `capture-v1.0.37` and `solo-protocol-v1.0.42`, 4 October 2026.*
+
+## Amendment 66 — one pacing function, and an audit that measures everything
+
+*4 October 2026.* Amendment 65 was CI-green 8/8 and still could not govern new traffic. Two attacks
+passed both trust-time implementations with zero problems, and three runtime paths were still
+unpaced or wrongly seeded.
+
+### The audit measured some requests and not others
+
+**A navigation was never a subject.** Navigation entries carried no `url`, and the loop skipped any
+entry without one, so a page navigation could only ever be a *predecessor*. A robots fetch at `T`
+followed by a navigation at `T+1s` therefore passed both implementations. Every entry now carries
+the URL requested, every request type is audited as subject and as predecessor, and an entry with
+no usable URL is **reported rather than skipped** — silence was what hid every navigation.
+
+**A robots refresh governed itself.** The crawl-delay lookup used `<= at`, so a refresh fetched six
+seconds into a ten-second delay was audited against the policy it had just brought back, and a
+refreshed file that dropped the delay excused the request that fetched it. The delay a request must
+honour is the one in force when it was made, which cannot be the one it is about to learn: a check
+is excluded from governing its own retrieval, and so is any check recorded at the same instant.
+Forward, the refreshed policy governs, because it was known before the next request.
+
+### One pre-request function
+
+Capture and render seeded from `lastNavigation`, which excludes robots traffic; the robots fetches
+inside `capture` and `preflight-discovery` were not paced at all; and `continue-headed` starts a
+fresh process, so the headed fallback's pacer began at zero and its first request never waited.
+Five paths each deciding for itself, three deciding wrongly.
+
+Every path that generates traffic now calls one function, `beforeRequest(log, url)`, which seeds
+from `lastRequest` — navigations, resource fetches and robots fetches alike — and honours whatever
+crawl-delay the recorded policy asks for. Nothing else calls the pacer, and a test enforces that
+structurally, because the defect was a sixth path being easy to add the same way.
+
+### Recorded times are seconds, so seeding must round the polite way
+
+Found by this amendment's own timing tests, which read the **server's** clock rather than asserting
+that a pacing function was called: the waits came out at 4418 ms and 4537 ms against a five-second
+floor. Every timestamp in this log is written to second precision, so a request made at
+`09:03:24.900Z` is recorded as `09:03:24Z`, and seeding from the parsed value believed the previous
+request was up to 999 ms earlier than it was. A second-granularity timestamp is now read as the end
+of its second. Pacing errs towards waiting too long.
+
+### Tests
+
+`capture/test/pacing-coverage.test.mjs` (12). The timing tests drive real CLI invocations in
+separate processes and assert the interval the test server observed: a robots fetch followed by a
+navigation, `recheck-robots` followed by a retrieval, and two `read-resource` invocations — the pair
+whose breach began this. The structural tests assert that only `beforeRequest` touches the pacer,
+that nothing seeds from `lastNavigation`, and that every `fetchRobotsPolicy` call in the CLI is
+preceded by a pacing call. The audit tests drive both implementations over the two attacks and over
+the cases that must still pass.
+
+The capture suite is **817** tests, the solo suite **162**, and the evaluation suite **244**.
+
+### What this does not change
+
+The frozen method, the frozen criteria, the priority order and the robots procedure are untouched.
+No page was requested again and no robots policy was refetched for any of this.
+
+*Frozen as `selection-v1.0.63`, `capture-v1.0.38` and `solo-protocol-v1.0.43`, 4 October 2026.*
