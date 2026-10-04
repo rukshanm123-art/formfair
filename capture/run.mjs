@@ -67,7 +67,7 @@ const isoUtcish = (v) => typeof v === 'string' && !Number.isNaN(Date.parse(v)) &
  * apart against a five-second floor, and the breach surfaced only when the second outcome record
  * was refused - after both requests had been made. Traffic is counted where it happens.
  */
-export const FETCH_PACING_REQUIRED_FROM = Date.parse('2026-10-04T09:30:00Z');
+export const FETCH_PACING_REQUIRED_FROM = Date.parse('2026-10-04T09:04:00Z');
 
 export function lastNavigation(log) {
   const fetchTimes = (log.fetches ?? [])
@@ -84,6 +84,19 @@ export function lastNavigation(log) {
     .filter((n) => !Number.isNaN(n));
   const all = [...times, ...fetchTimes];
   return all.length ? Math.max(...all) : null;
+}
+
+/**
+ * Amendment 65. The last request of ANY kind, for seeding the pacer: page navigations, retained
+ * resource fetches and robots.txt fetches alike. `lastNavigation` deliberately keeps its narrower
+ * meaning, because the record-time navigation check is about navigations.
+ */
+export function lastRequest(log) {
+  const times = [
+    lastNavigation(log),
+    ...(log.robotsChecks ?? []).map((c) => Date.parse(c.fetchedAt ?? '')),
+  ].filter((n) => typeof n === 'number' && !Number.isNaN(n));
+  return times.length ? Math.max(...times) : null;
 }
 
 export function emptyLog() {
@@ -4758,6 +4771,81 @@ export function assertFetchEvidenceUsable(log, { fetchId, capturesRoot }) {
 }
 
 /**
+ * Every request in the log, audited against the floor it was made under.
+ *
+ * Amendment 65. Amendment 64 moved this check to where the traffic is and left three holes in it,
+ * each reproduced before being closed:
+ *
+ *   1. Equal timestamps passed. The search for the preceding request used `t < at`, so two
+ *      requests recorded in the SAME second had no predecessor and were never compared - and
+ *      simultaneous requests are worse than one second apart, not better. The comparison is now
+ *      `t <= at` with the request's own entry excluded by identity, so a tie is caught and a
+ *      request is never measured against itself.
+ *   2. Crawl-delay was not audited at all. A policy asking for ten seconds was satisfied by six,
+ *      because only the five-second floor was enforced. The required gap is now the greater of the
+ *      study's floor and whatever the governing recorded policy asks for.
+ *   3. The boundary stood at 09:30:00Z while the freeze commit was created at 09:09:56Z, leaving a
+ *      twenty-minute window after the freeze unverified. It now begins at 09:04:00Z - before the
+ *      freeze, and after the two sitemap fetches at 09:03 that stay grandfathered and disclosed.
+ *
+ * A robots.txt fetch is audited too. It is a request to the host like any other, and the 3000 ms
+ * between `r-0088` and `r-0089` was invisible for exactly the reason a plain-resource fetch was
+ * invisible before Amendment 64: nothing counted it. The floor is deliberately GLOBAL rather than
+ * per-origin, because that is what this study publishes in `provenance.json`; two consecutive
+ * requests to different hosts are still two requests under that commitment.
+ */
+export function pacingProblems(log) {
+  const problems = [];
+  const fetches = log.fetches ?? [];
+  const attempts = log.attempts ?? [];
+  const robots = log.robotsChecks ?? [];
+
+  const requests = [
+    ...attempts
+      .filter((a) => a.navigationPerformed !== false && !a.promotedFrom && !a.fetchId)
+      .map((a) => ({ key: `attempt:${a.id}`, at: Date.parse(a.navigatedAt ?? a.capturedAt ?? '') })),
+    ...fetches.map((f) => ({ key: `fetch:${f.id}`, at: Date.parse(f.fetchedAt ?? ''), url: f.url, what: f.id })),
+    ...robots.map((c) => ({ key: `robots:${c.id}`, at: Date.parse(c.fetchedAt ?? ''), url: c.url, what: c.id })),
+  ].filter((e) => !Number.isNaN(e.at));
+
+  /** The crawl-delay the policy governing this origin asked for, at the time of the request. */
+  const requiredGap = (at, url) => {
+    let origin = null;
+    try { origin = new URL(url).origin; } catch { origin = null; }
+    const governing = robots
+      .filter((c) => c.origin === origin && !Number.isNaN(Date.parse(c.fetchedAt ?? '')))
+      .filter((c) => Date.parse(c.fetchedAt) <= at)
+      .sort((x, y) => Date.parse(x.fetchedAt) - Date.parse(y.fetchedAt))
+      .pop();
+    const delays = (governing?.policy?.groups ?? [])
+      .map((g) => g?.crawlDelay)
+      .filter((d) => typeof d === 'number' && d > 0);
+    const asked = delays.length ? Math.max(...delays) * 1000 : 0;
+    return Math.max(POLICY.minDelayBetweenNavigationsMs, asked);
+  };
+
+  for (const entry of requests) {
+    if (!entry.url || entry.at < FETCH_PACING_REQUIRED_FROM) continue;
+    // `<=`, and never against itself: a tie is a breach, not an absence of a predecessor.
+    const previous = requests
+      .filter((other) => other.key !== entry.key && other.at <= entry.at)
+      .map((other) => other.at)
+      .sort((x, y) => x - y)
+      .pop();
+    if (previous === undefined) continue;
+    const gap = entry.at - previous;
+    const required = requiredGap(entry.at, entry.url);
+    if (gap < required) {
+      const why = required > POLICY.minDelayBetweenNavigationsMs
+        ? `the governing policy asks for at least ${required} ms between requests`
+        : `the policy requires at least ${required} ms between requests`;
+      problems.push(`${entry.what} (${entry.url}) was fetched ${gap} ms after the previous request; ${why}`);
+    }
+  }
+  return problems;
+}
+
+/**
  * Every retained fetch and every record citing one, checked together. Read by the corpus gate and
  * mirrored in the sealer.
  */
@@ -4767,32 +4855,7 @@ export function checkFetchLedger(log, fetchedDir) {
   const fetches = log.fetches ?? [];
   const attempts = log.attempts ?? [];
   const seen = new Set();
-  // Amendment 64. The pacing floor, checked where the traffic is.
-  //
-  // `read-resource` requested with no pacing at all, and because `lastNavigation` ignored fetches
-  // the breach was invisible until an outcome record was written. Both are fixed; this is the
-  // backstop, and it verifies rather than trusts. Fetches recorded before the amendment are
-  // grandfathered and the one real breach is disclosed as a deviation, so the gate stays usable
-  // while the log keeps the fact.
-  const traffic = [
-    ...attempts
-      .filter((a) => a.navigationPerformed !== false && !a.promotedFrom && !a.fetchId)
-      .map((a) => Date.parse(a.navigatedAt ?? a.capturedAt ?? '')),
-    ...fetches.map((f) => Date.parse(f.fetchedAt ?? '')),
-  ].filter((n) => !Number.isNaN(n)).sort((x, y) => x - y);
-  for (const f of fetches) {
-    const at = Date.parse(f.fetchedAt ?? '');
-    if (Number.isNaN(at) || at < FETCH_PACING_REQUIRED_FROM) continue;
-    const previous = traffic.filter((t) => t < at).pop();
-    if (previous === undefined) continue;
-    const gap = at - previous;
-    if (gap < POLICY.minDelayBetweenNavigationsMs) {
-      problems.push(
-        `${f.id} (${f.url}) was fetched ${gap} ms after the previous request; the policy requires ` +
-          `at least ${POLICY.minDelayBetweenNavigationsMs} ms between requests`
-      );
-    }
-  }
+  problems.push(...pacingProblems(log));
   for (const f of fetches) {
     const where = `${f.id} (${f.url})`;
     if (seen.has(f.id)) problems.push(`${f.id} appears more than once in the fetch registry`);

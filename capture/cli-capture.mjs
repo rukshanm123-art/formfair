@@ -35,7 +35,7 @@ import {
   unresolvedDiscoveryRounds, openDiscoveryPermits, robotsCheckIsFresh, isDiscoverySuperseded,
   reopenCandidateSet, closeDiscoveryPermit, permitAudit, PERMIT_DISPOSITIONS, corpusBlockers,
   quarantineArtefact, recordDeviation, agencyResolutions, agencyResolution, reResolveExhaustion,
-  preRequestProblems, lastNavigation,
+  preRequestProblems, lastNavigation, lastRequest,
   answerChain, sha256,
   renderBacklog, renderBacklogByUrl, renderPrerequisite, recordRender, findRender, RENDERED_DIR,
   recordFetch, findFetch, assertFetchEvidenceUsable, FETCHED_DIR, parseRetained,
@@ -1432,6 +1432,12 @@ async function doRecheckRobots() {
   const logPath = logPathFor(dir);
   const log = readLog(logPath);
   const previous = findRobotsCheck(log, origin);
+  // Amendment 65. A robots.txt fetch is a request to the host like any other, and this command
+  // paced none of them: r-0088 and r-0089 went out 3000 ms apart under a published 5000 ms floor,
+  // invisible for the same reason a plain-resource fetch was invisible before Amendment 64 -
+  // nothing counted it. The floor is waited out here rather than reported afterwards.
+  pacer.seen(lastRequest(log));
+  await pacer.beforeNavigation(crawlDelayFor(log, `${origin}/robots.txt`));
   const check = recordRobotsCheck(log, await fetchRobotsPolicy(origin));
   writeLog(logPath, log);
   console.log(`${check.id} ${origin} HTTP ${check.httpStatus ?? 'unreachable'} -> ${check.disposition}`);
@@ -1931,7 +1937,7 @@ async function doReadResource() {
   // two sitemap documents went out one second apart against the five-second floor this study
   // publishes, and the breach was discovered only when the second outcome record was refused.
   // Pacing is an obligation on traffic, so it is honoured here by waiting, not reported afterwards.
-  pacer.seen(lastNavigation(log));
+  pacer.seen(lastRequest(log));
   await pacer.beforeNavigation(crawlDelayFor(log, url));
   const at = now();
   const chain = [];

@@ -168,7 +168,7 @@ const FRAME_FILES = [
  * exhaustion records at all. A manifest that misnames its own protocol is worse than one that
  * omits it: a reader checking which rules a corpus was sealed under would be told the wrong ones.
  */
-export const SOLO_PROTOCOL_TAG = 'solo-protocol-v1.0.41';
+export const SOLO_PROTOCOL_TAG = 'solo-protocol-v1.0.42';
 
 /**
  * Two resolutions, mirrored from the capture package and checked equal by a test.
@@ -1044,6 +1044,69 @@ export function policyAgreementProblems(log) {
   return problems;
 }
 
+/**
+ * Every request in the log against the floor it was made under, derived independently.
+ *
+ * Amendment 65. Equal timestamps are a breach, not an absence of a predecessor; a request is never
+ * measured against itself; the required gap is the greater of the study's floor and the governing
+ * recorded policy's crawl-delay; and the boundary precedes the freeze it was introduced by. The two
+ * sitemap fetches at 09:03 remain grandfathered and are disclosed as a deviation.
+ */
+export function pacingProblems(log) {
+  const problems = [];
+  const MIN_DELAY_MS = 5000;
+  const REQUIRED_FROM = Date.parse('2026-10-04T09:04:00Z');
+  const attempts = Array.isArray(log?.attempts) ? log.attempts : [];
+  const fetches = Array.isArray(log?.fetches) ? log.fetches : [];
+  const robots = Array.isArray(log?.robotsChecks) ? log.robotsChecks : [];
+
+  const requests = [];
+  for (const a of attempts) {
+    if (a.navigationPerformed === false || a.promotedFrom || a.fetchId) continue;
+    const at = Date.parse(a.navigatedAt ?? a.capturedAt ?? '');
+    if (!Number.isNaN(at)) requests.push({ key: `a:${a.id}`, at });
+  }
+  for (const f of fetches) {
+    const at = Date.parse(f.fetchedAt ?? '');
+    if (!Number.isNaN(at)) requests.push({ key: `f:${f.id}`, at, url: f.url, what: f.id });
+  }
+  for (const c of robots) {
+    const at = Date.parse(c.fetchedAt ?? '');
+    if (!Number.isNaN(at)) requests.push({ key: `r:${c.id}`, at, url: c.url, what: c.id });
+  }
+
+  const askedFor = (at, url) => {
+    let origin = null;
+    try { origin = new URL(url).origin; } catch { origin = null; }
+    let governing = null;
+    for (const c of robots) {
+      const t = Date.parse(c.fetchedAt ?? '');
+      if (Number.isNaN(t) || c.origin !== origin || t > at) continue;
+      if (!governing || t > Date.parse(governing.fetchedAt)) governing = c;
+    }
+    const delays = ((governing && governing.policy && governing.policy.groups) || [])
+      .map((g) => g && g.crawlDelay)
+      .filter((d) => typeof d === 'number' && d > 0);
+    return delays.length ? Math.max(...delays) * 1000 : 0;
+  };
+
+  for (const entry of requests) {
+    if (!entry.url || entry.at < REQUIRED_FROM) continue;
+    let previous;
+    for (const other of requests) {
+      if (other.key === entry.key || other.at > entry.at) continue;
+      if (previous === undefined || other.at > previous) previous = other.at;
+    }
+    if (previous === undefined) continue;
+    const gap = entry.at - previous;
+    const required = Math.max(MIN_DELAY_MS, askedFor(entry.at, entry.url));
+    if (gap < required) {
+      problems.push(`${entry.what} (${entry.url}) was fetched ${gap} ms after the previous request, under the ${required} ms required`);
+    }
+  }
+  return problems;
+}
+
 export function fetchLedgerProblems(log, fetchedDir) {
   const problems = [];
   const fetches = Array.isArray(log?.fetches) ? log.fetches : [];
@@ -1051,27 +1114,15 @@ export function fetchLedgerProblems(log, fetchedDir) {
   if (fetches.length === 0) return problems;
   const canon = (u) => { try { const x = new URL(u); x.hash = ''; return x.href; } catch { return String(u); } };
 
-  // Amendment 64. The pacing floor, verified independently of the capture package. A plain-resource
-  // fetch is traffic to the host, so it both obeys the floor and constrains the next request;
-  // read-resource observed neither until this amendment. Pre-amendment fetches are grandfathered
-  // and the one real breach is disclosed as a deviation.
-  const FETCH_PACING_REQUIRED_FROM = Date.parse('2026-10-04T09:30:00Z');
-  const MIN_DELAY_MS = 5000;
-  const traffic = [
-    ...attempts
-      .filter((a) => a.navigationPerformed !== false && !a.promotedFrom && !a.fetchId)
-      .map((a) => Date.parse(a.navigatedAt ?? a.capturedAt ?? '')),
-    ...fetches.map((f) => Date.parse(f.fetchedAt ?? '')),
-  ].filter((n) => !Number.isNaN(n)).sort((x, y) => x - y);
-  for (const f of fetches) {
-    const at = Date.parse(f.fetchedAt ?? '');
-    if (Number.isNaN(at) || at < FETCH_PACING_REQUIRED_FROM) continue;
-    const previous = traffic.filter((t) => t < at).pop();
-    if (previous === undefined) continue;
-    if (at - previous < MIN_DELAY_MS) {
-      problems.push(`${f.id} (${f.url}) was fetched ${at - previous} ms after the previous request`);
-    }
-  }
+  // Amendment 65. The pacing floor, verified independently of the capture package.
+  //
+  // Amendment 64's version had three holes, all of which this mirror shared: it searched for a
+  // preceding request with `t < at`, so two requests in the same second were never compared; it
+  // enforced only the five-second floor and never the crawl-delay a policy asked for; and its
+  // boundary sat twenty minutes AFTER the freeze commit, leaving that window unverified. A
+  // robots.txt fetch is audited here too - it is a request to the host like any other. The floor
+  // is global, not per-origin, because that is what this study publishes.
+  problems.push(...pacingProblems(log));
 
   for (const f of fetches) {
     const where = `${f.id} (${f.url})`;

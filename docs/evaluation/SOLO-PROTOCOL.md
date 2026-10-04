@@ -5208,3 +5208,56 @@ The frozen method, the frozen criteria, the priority order and the robots proced
 No page was requested again, and no robots policy was refetched.
 
 *Frozen as `selection-v1.0.61`, `capture-v1.0.36` and `solo-protocol-v1.0.41`, 4 October 2026.*
+
+## Amendment 65 — the pacing audit, actually auditing
+
+*4 October 2026.* Amendment 64 moved the pacing check to where the traffic is, and left three holes
+in it. All three were reproduced against the frozen, CI-green code and returned **zero problems
+from both implementations**. A green CI run closed none of them, which is why an adversarial table
+driving both implementations is the test that counts.
+
+**1. Equal timestamps passed.** The search for the preceding request used `t < at`, so two requests
+recorded in the same second had no predecessor and were never compared — and simultaneous requests
+are worse than one second apart, not better. The comparison is now `t <= at` with the entry's own
+identity excluded, so a tie is caught and a request is never measured against itself.
+
+**2. Crawl-delay was not audited at all.** A policy asking ten seconds was satisfied by six,
+because only the five-second floor was enforced. The required gap is now the greater of the study's
+floor and whatever the **governing recorded policy for that origin** asks for, read from the latest
+check for that origin at or before the request. A ten-second policy on one host does not impose
+itself on requests to another.
+
+**3. The boundary sat after the freeze that introduced it.** It stood at `09:30:00Z` while the
+Amendment 64 commit was created at `09:09:56Z`, leaving twenty minutes of post-freeze traffic
+unverified. It now begins at `09:04:00Z` — before the freeze, and after the two sitemap fetches at
+`09:03` that remain grandfathered and disclosed rather than hidden.
+
+### A robots.txt fetch is a request
+
+Found while closing the three: `r-0088` and `r-0089` were fetched **3000 ms apart** under a
+published 5000 ms floor, and nothing counted them — `recheck-robots` paced nothing and the ledger
+iterated only `log.fetches`. A robots fetch is a request to the host like any other. It is now
+paced before it is made and audited afterwards, and `lastRequest` gives the pacer a clock covering
+navigations, resource fetches and robots fetches alike, while `lastNavigation` keeps its narrower
+meaning for the record-time navigation check.
+
+The floor remains **global rather than per-origin**, because that is what this study publishes in
+`provenance.json`. `f-0009` and `f-0010` were requests to two different hosts one second apart;
+different hosts do not excuse it under that commitment.
+
+### Tests
+
+`capture/test/fetch-pacing.test.mjs` (17) drives both implementations over one table and requires
+identical verdicts: identical timestamps refused, a lone request not self-reporting, a crawl-delay
+longer than the floor enforced and satisfied when observed, a crawl-delay confined to its own
+origin, the boundary asserted to precede the freeze commit while still grandfathering the 09:03
+fetches, a robots fetch audited, and the global floor applied across two hosts.
+
+The capture suite is **805** tests, the solo suite **162**, and the evaluation suite **244**.
+
+### What this does not change
+
+The frozen method, the frozen criteria, the priority order and the robots procedure are untouched.
+No page was requested again and no robots policy was refetched for any of this.
+
+*Frozen as `selection-v1.0.62`, `capture-v1.0.37` and `solo-protocol-v1.0.42`, 4 October 2026.*
