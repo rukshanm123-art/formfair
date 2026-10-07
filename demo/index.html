@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en-NZ">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FormFair — demonstration interface</title>
+<style>
+  :root {
+    --bg: #ffffff; --fg: #1a1a1a; --muted: #5d5d66; --line: #e2e2e8;
+    --panel: #f7f7fa; --accent: #3b3b8f;
+    --critical: #a4262c; --high: #b85c00; --medium: #6b5d00; --good: #1b6b3a;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #15151a; --fg: #ececf1; --muted: #a0a0ad; --line: #2e2e38;
+      --panel: #1d1d24; --accent: #a9a9ef;
+      --critical: #ff8a90; --high: #ffb066; --medium: #ddd07a; --good: #7fd8a0;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #15151a; --fg: #ececf1; --muted: #a0a0ad; --line: #2e2e38;
+    --panel: #1d1d24; --accent: #a9a9ef;
+    --critical: #ff8a90; --high: #ffb066; --medium: #ddd07a; --good: #7fd8a0;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 24px 16px 64px; }
+  header.top { border-bottom: 1px solid var(--line); padding-bottom: 14px; margin-bottom: 20px; }
+  h1 { font-size: 20px; margin: 0 0 4px; letter-spacing: -0.01em; }
+  .banner {
+    background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--accent);
+    padding: 10px 12px; border-radius: 6px; margin: 12px 0 0; font-size: 13.5px; color: var(--muted);
+  }
+  .banner b { color: var(--fg); }
+  .cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); gap: 20px; }
+  @media (max-width: 860px) { .cols { grid-template-columns: minmax(0, 1fr); } }
+  label.lbl { display: block; font-size: 13px; color: var(--muted); margin: 0 0 6px; }
+  select, textarea, button {
+    font: inherit; color: var(--fg); background: var(--bg);
+    border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px;
+  }
+  select { width: 100%; }
+  textarea {
+    width: 100%; min-height: 300px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 13px; resize: vertical; background: var(--panel);
+  }
+  .note { font-size: 13px; color: var(--muted); margin: 8px 0 0; min-height: 2.4em; }
+  .actions { display: flex; gap: 8px; margin: 12px 0 0; flex-wrap: wrap; }
+  button { cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  @media (prefers-color-scheme: dark) { button.primary { color: #15151a; } }
+  button:disabled { opacity: 0.5; cursor: default; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 14px; }
+  .chip {
+    font-size: 12.5px; padding: 3px 9px; border-radius: 999px;
+    border: 1px solid var(--line); background: var(--panel); color: var(--muted);
+  }
+  .chip b { color: var(--fg); }
+  .chip.bad b, .chip.critical b { color: var(--critical); }
+  .chip.high b { color: var(--high); }
+  .chip.medium b { color: var(--medium); }
+  .chip.good b { color: var(--good); }
+  .rule { border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; margin: 0 0 14px; }
+  .rule h3 { font-size: 15px; margin: 0 0 6px; display: flex; align-items: center; gap: 8px; }
+  .rid {
+    font-family: ui-monospace, Menlo, monospace; font-size: 12.5px; background: var(--panel);
+    border: 1px solid var(--line); border-radius: 4px; padding: 1px 6px;
+  }
+  .basis { font-size: 12.5px; color: var(--muted); margin: 0 0 10px; }
+  .k { font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted);
+       margin: 10px 0 3px; font-weight: 600; }
+  .finding { border-top: 1px solid var(--line); padding: 10px 0 2px; }
+  .finding header { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+  .sev { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
+  .sev-critical .sev { color: var(--critical); }
+  .sev-high .sev { color: var(--high); }
+  .sev-medium .sev { color: var(--medium); }
+  .field { font-family: ui-monospace, Menlo, monospace; font-size: 12.5px; }
+  .loc { font-size: 12px; color: var(--muted); margin-left: auto; }
+  .msg { margin: 6px 0 0; }
+  pre {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 5px;
+    padding: 8px 10px; overflow-x: auto; font-size: 12.5px; margin: 0;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  .remediation { margin: 0; }
+  .aside { border: 1px dashed var(--line); border-radius: 8px; padding: 12px 14px; margin: 0 0 14px; }
+  .aside h3 { font-size: 14px; margin: 0 0 6px; }
+  .advisory { border-top: 1px solid var(--line); padding: 8px 0 0; margin-top: 8px; }
+  .advisory header { display: flex; gap: 10px; align-items: baseline; }
+  .muted { color: var(--muted); font-weight: 400; font-size: 12.5px; }
+  .empty { color: var(--muted); padding: 10px 0; }
+  .good-text { color: var(--good); }
+  .bad-text { color: var(--critical); }
+  footer { margin-top: 28px; padding-top: 14px; border-top: 1px solid var(--line);
+           font-size: 12.5px; color: var(--muted); }
+  code { font-family: ui-monospace, Menlo, monospace; font-size: 12.5px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <h1>FormFair — demonstration interface</h1>
+    <div class="banner">
+      <b>This is a demonstration, not the study.</b> It runs the FormFair library on markup you
+      supply so the rules can be seen working. It is not part of the evaluation instrument, it
+      contributes to no accuracy figure, and the examples are synthetic — none is drawn from the
+      held-out evaluation corpus. Everything runs in this page: nothing is uploaded, nothing is
+      stored, and it works with no network connection.
+    </div>
+  </header>
+
+  <div class="cols">
+    <div>
+      <label class="lbl" for="examples">Synthetic example</label>
+      <select id="examples"></select>
+      <p class="note" id="note"></p>
+
+      <label class="lbl" for="input">Form markup — paste your own, or edit an example</label>
+      <textarea id="input" spellcheck="false" aria-describedby="note"></textarea>
+
+      <div class="actions">
+        <button class="primary" id="run">Analyse</button>
+        <button id="export" disabled>Export JSON</button>
+        <button id="clear">Clear</button>
+      </div>
+      <p class="note" id="timing"></p>
+    </div>
+
+    <div>
+      <div id="summary"></div>
+      <div id="findings"></div>
+      <div id="aside"></div>
+    </div>
+  </div>
+
+  <footer>
+    <span id="catalogue"></span><br>
+    FormFair reports only what declared markup can support. A finding is a constraint observed in
+    the markup, not a judgement about an organisation, and the absence of a finding is not a
+    guarantee that a form accepts every name.
+  </footer>
+</div>
+<script src="./demo.js"></script>
+</body>
+</html>

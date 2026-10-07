@@ -1,0 +1,10 @@
+{
+  "name": "formfair-demo",
+  "private": true,
+  "type": "module",
+  "description": "Demonstration interface for FormFair. Not part of the evaluation instrument.",
+  "scripts": {
+    "build": "vite build && node inline.mjs",
+    "typecheck": "tsc -p tsconfig.json"
+  }
+}

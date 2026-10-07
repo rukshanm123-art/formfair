@@ -6,3 +6,6 @@ coverage/
 
 # Separate checkout of the frozen instrument, created by evaluation/scripts/setup-instrument.sh
 .instrument/
+
+# Demonstration interface: intermediate bundle. The single-file page is tracked.
+demo/build/
